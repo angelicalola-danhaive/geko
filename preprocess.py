@@ -55,9 +55,9 @@ def read_config_file(input, output):
 	elif broad_filter == 'F356W':
 		med_filter = 'F335M'
 		
-	med_band_path = 'fitting_results/' + output + str(ID) + '_' + med_filter + '.fits'
-	broad_band_path = 'fitting_results/' + output + str(ID) + '_' + broad_filter + '.fits'
-	grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
+	med_band_path = '../fitting_results/' + output + str(ID) + '_' + med_filter + '.fits'
+	broad_band_path = '../fitting_results/' + output + str(ID) + '_' + broad_filter + '.fits'
+	grism_spectrum_path = '../fitting_results/' + output+ 'spec_2d_GDN_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
 
 	field = data['Data']['field']
 

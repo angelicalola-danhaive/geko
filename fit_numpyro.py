@@ -1963,7 +1963,7 @@ def plot_image(image, x0, y0, direct_size, limits = None, save_to_folder = None,
 	
 
 	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -1987,7 +1987,7 @@ def plot_grism(map, y0, direct_size, wave_space, limits = None, save_to_folder =
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 	
 	plt.show()
 	plt.close()
@@ -2008,7 +2008,7 @@ def plot_image_residual(image, model, errors, x0, y0, direct_size,save_to_folder
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 	
 	plt.show()
 	plt.close()
@@ -2029,7 +2029,7 @@ def plot_grism_residual(map, model, errors, y0, direct_size, wave_space,save_to_
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -2052,7 +2052,7 @@ def plot_velocity_profile(image, x0, y0, direct_size, velocities, save_to_folder
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -2138,7 +2138,7 @@ def plot_summary(image, image_model, image_error, map, map_model, map_error, x0,
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -2589,7 +2589,7 @@ if __name__ == "__main__":
 
 	if choice == 'real':
 		print('Running the real data')
-		with open('fitting_results/' + output+'config_real.yaml', 'r') as file:
+		with open('../fitting_results/' + output+'config_real.yaml', 'r') as file:
 			input = yaml.load(file, Loader=yaml.FullLoader)
 			print('Read inputs successfully')
 		
@@ -2917,4 +2917,4 @@ if __name__ == "__main__":
 
 		inf_data = az.from_numpyro(run_fit.mcmc, prior=prior_predictive(rng_key))
 
-		inf_data.to_netcdf('fitting_results/'+ output + 'output')
+		inf_data.to_netcdf('../fitting_results/'+ output + 'output')
