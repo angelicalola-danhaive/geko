@@ -33,6 +33,9 @@ from jax.scipy.special import logsumexp
 from reproject import reproject_interp, reproject_adaptive
 from photutils.centroids import centroid_com, centroid_quadratic,centroid_1dg
 
+#for the masking
+from skimage.morphology import binary_dilation, dilation, disk
+
 
 
 def read_config_file(input, output):
@@ -54,10 +57,11 @@ def read_config_file(input, output):
 		med_filter = 'F410M'
 	elif broad_filter == 'F356W':
 		med_filter = 'F335M'
-		
-	med_band_path = '../fitting_results/' + output + str(ID) + '_' + med_filter + '.fits'
-	broad_band_path = '../fitting_results/' + output + str(ID) + '_' + broad_filter + '.fits'
-	grism_spectrum_path = '../fitting_results/' + output+ 'spec_2d_GDN_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
+	
+	#no ../ because the open() function reads from terminal directory (not module directory)
+	med_band_path = 'fitting_results/' + output + str(ID) + '_' + med_filter + '.fits'
+	broad_band_path = 'fitting_results/' + output + str(ID) + '_' + broad_filter + '.fits'
+	grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
 
 	field = data['Data']['field']
 
@@ -117,3 +121,27 @@ def read_config_file(input, output):
 	
 	#return all of the parameters
 	return data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_normal, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
+
+
+def renormalize_image(direct, obs_map, flux_threshold, y_factor):
+	"""
+		Normalize the image to match the total flux in the EL map
+	"""
+
+	threshold = flux_threshold*direct.max()
+	mask = jnp.zeros_like(direct)
+	mask = mask.at[jnp.where(direct>threshold)].set(1)
+	mask = dilation(mask, disk(6*y_factor))
+
+	#create a mask for the grism map
+	threshold_grism = flux_threshold*obs_map.max()
+	mask_grism = jnp.zeros_like(obs_map)
+	mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
+	mask_grism = dilation(mask_grism, disk(6))
+
+	#compute the normalization factor
+	normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask == 1)].sum()
+	#normalize the direct image to the grism image
+	direct = direct*normalization_factor
+
+	return direct, normalization_factor, mask, mask_grism

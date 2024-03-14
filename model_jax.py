@@ -238,23 +238,24 @@ class Grism:
 		### Spectral tracing parameters:
 		if tmp_filter in ['F277W', 'F356W']: disp_filter = 'F322W2'
 		else: disp_filter = tmp_filter
-		tb_order23_fit_AR = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'R'))
+		#no ../ because the open() function reads from terminal directory (not module directory)
+		tb_order23_fit_AR = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'R'))
 		fit_opt_fit_AR, fit_err_fit_AR = tb_order23_fit_AR['col0'].data, tb_order23_fit_AR['col1'].data
-		tb_order23_fit_BR = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'R'))
+		tb_order23_fit_BR = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'R'))
 		fit_opt_fit_BR, fit_err_fit_BR = tb_order23_fit_BR['col0'].data, tb_order23_fit_BR['col1'].data
-		tb_order23_fit_AC = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'C'))
+		tb_order23_fit_AC = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'C'))
 		fit_opt_fit_AC, fit_err_fit_AC = tb_order23_fit_AC['col0'].data, tb_order23_fit_AC['col1'].data
-		tb_order23_fit_BC = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'C'))
+		tb_order23_fit_BC = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'C'))
 		fit_opt_fit_BC, fit_err_fit_BC = tb_order23_fit_BC['col0'].data, tb_order23_fit_BC['col1'].data
 
 		### grism dispersion parameters:
-		tb_fit_displ_AR = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "R"))
+		tb_fit_displ_AR = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "R"))
 		w_opt_AR, w_err_AR = tb_fit_displ_AR['col0'].data, tb_fit_displ_AR['col1'].data
-		tb_fit_displ_BR = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "R"))
+		tb_fit_displ_BR = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "R"))
 		w_opt_BR, w_err_BR = tb_fit_displ_BR['col0'].data, tb_fit_displ_BR['col1'].data
-		tb_fit_displ_AC = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "C"))
+		tb_fit_displ_AC = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "C"))
 		w_opt_AC, w_err_AC = tb_fit_displ_AC['col0'].data, tb_fit_displ_AC['col1'].data
-		tb_fit_displ_BC = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "C"))
+		tb_fit_displ_BC = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "C"))
 		w_opt_BC, w_err_BC = tb_fit_displ_BC['col0'].data, tb_fit_displ_BC['col1'].data
 
 		### list of module/pupil and corresponding tracing/dispersion function:
@@ -263,7 +264,7 @@ class Grism:
 		list_w_opt       = np.array([w_opt_AR, w_opt_BR, w_opt_AC, w_opt_BC])
 
 		### Sensitivity curve:
-		dir_fluxcal = '../nircam_grism/all_wfss_sensitivity/'
+		dir_fluxcal = 'nircam_grism/all_wfss_sensitivity/'
 		tb_sens_AR = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat' % (disp_filter, 'A', 'R'))
 		tb_sens_BR = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat'% (disp_filter, 'B', 'R'))
 		tb_sens_AC = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat' % (disp_filter, 'A', 'C'))

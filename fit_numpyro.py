@@ -226,11 +226,19 @@ class Fit_Numpyro():
 				self.low =(jnp.zeros(self.flux_prior.shape)-self.mu)/self.sigma
 				# correct for the mask = 0 pixels
 				if self.mask is not None:
-					self.mask = jnp.array(self.mask)
-					self.mu = jnp.where(self.mask == 0, 0.0, self.mu)
-					self.sigma = jnp.where(self.mask == 0, 0.000001, self.sigma)
-					self.high = jnp.where(self.mask == 0, 0.000002, self.high)
-					self.low = jnp.where(self.mask == 0, -0.000002, self.low)
+					# self.mask = jnp.array(self.mask)
+					# self.mu = jnp.where(self.mask == 0, 0.0, self.mu)
+					# self.sigma = jnp.where(self.mask == 0, 0.000001, self.sigma)
+					# self.high = jnp.where(self.mask == 0, 0.000002, self.high)
+					# self.low = jnp.where(self.mask == 0, -0.000002, self.low)
+
+					#only fitting for pixels in the mask
+					self.mask_shape = len(jnp.where(self.mask == 1)[0])
+					self.masked_indices = jnp.where(self.mask == 1)
+					self.mu = self.mu[jnp.where(self.mask == 1)]
+					self.sigma = self.sigma[jnp.where(self.mask == 1)]
+					self.high = self.high[jnp.where(self.mask == 1)]
+					self.low = self.low[jnp.where(self.mask == 1)]
 			elif flux_type == 'log':
 				self.mu = jnp.log10(jnp.array(self.flux_prior))
 				self.sigma = self.flux_bounds[1]
@@ -285,9 +293,19 @@ class Fit_Numpyro():
 				The variables are renormalized after the sampling to get a better posterior geometry!
 
 		"""
-		fluxes = numpyro.sample('fluxes', dist.Uniform(), sample_shape=self.flux_prior.shape)
+		# fluxes = numpyro.sample('fluxes', dist.Uniform(), sample_shape=self.flux_prior.shape)
+		# # manually computing the ppf for a truncated normal distribution
+		# fluxes = norm.ppf(norm.cdf(self.low) + fluxes*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+
+		#only fit for fluxes in the region of the mask
+		#with this method to whole changing the mus for pixels outside the mask is not necessary (in the initializing section)
+		fluxes_sample = numpyro.sample('fluxes', dist.Uniform(), sample_shape=(int(self.mask_shape),))
+
 		# manually computing the ppf for a truncated normal distribution
-		fluxes = norm.ppf(norm.cdf(self.low) + fluxes*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+		fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+		
+		fluxes = jnp.zeros_like(self.flux_prior)
+		fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
 
 		# fluxes = self.flux_prior
 
@@ -332,16 +350,17 @@ class Fit_Numpyro():
 		# sigma0 = 100
 
 		#sampling the velocity centroids
-		x0 = numpyro.sample('x0', dist.Uniform())
-		x0 = norm.ppf(x0)*(2) + self.x0
-		y0 = numpyro.sample('y0', dist.Uniform())
-		y0 = norm.ppf(y0)*(2) + self.y0
+		# x0 = numpyro.sample('x0', dist.Uniform())
+		# x0 = norm.ppf(x0)*(2) + self.x0
+		# y0 = numpyro.sample('y0', dist.Uniform())
+		# y0 = norm.ppf(y0)*(2) + self.y0
 
-		x = jnp.linspace(0 - x0,self.grism_object.direct.shape[1]-1 - x0, self.grism_object.direct.shape[1]*self.factor*10)
-		y = jnp.linspace(0 - y0,self.grism_object.direct.shape[0]-1 - y0, self.grism_object.direct.shape[0]*self.factor*10)
-		X,Y = jnp.meshgrid(x, y)
+		# x = jnp.linspace(0 - x0,self.grism_object.direct.shape[1]-1 - x0, self.grism_object.direct.shape[1]*self.factor*10)
+		# y = jnp.linspace(0 - y0,self.grism_object.direct.shape[0]-1 - y0, self.grism_object.direct.shape[0]*self.factor*10)
+		# X,Y = jnp.meshgrid(x, y)
 
-		velocities = jnp.array(v(X,Y, jnp.radians(Pa),jnp.radians(i), Va, r_t))
+		# velocities = jnp.array(v(X,Y, jnp.radians(Pa),jnp.radians(i), Va, r_t))
+		velocities = jnp.array(v(self.x, self.y, jnp.radians(Pa),jnp.radians(i), Va, r_t))
 		# print(velocities[15])
 
 		# velocities = Va*jnp.ones_like(self.x)
@@ -1120,9 +1139,18 @@ class Fit_Numpyro():
 			# plt.imshow(self.mu, origin='lower', vmin = self.flux_prior.min(), vmax = self.flux_prior.max())
 			# plt.show()
 			# print(self.x)
+			# self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+			# self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+			# self.fluxes_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+
+			#only fit for fluxes in the region of the mask
 			self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 			self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			self.fluxes_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+			self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+
+			self.fluxes_mean = jnp.zeros_like(self.flux_prior)
+			self.fluxes_mean = self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
+
 			# self.fluxes_mean = self.flux_prior
 			# self.data.posterior['PA'].data = norm.ppf(  norm.cdf(self.low_PA) + self.data.posterior['PA'].data*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
 			# self.data.prior['PA'].data = norm.ppf(  norm.cdf(self.low_PA) + self.data.prior['PA'].data*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
@@ -1183,10 +1211,10 @@ class Fit_Numpyro():
 			self.data.posterior['y0'].data = norm.ppf(self.data.posterior['y0'].data)*(2) + self.y0
 			self.data.prior['y0'].data = norm.ppf(self.data.prior['y0'].data)*(2) + self.y0
 
-			self.x0_mean = jnp.array(self.data.posterior['x0'].median())
-			self.y0_mean = jnp.array(self.data.posterior['y0'].median())
-			# self.x0_mean = self.x0
-			# self.y0_mean = self.y0
+			# self.x0_mean = jnp.array(self.data.posterior['x0'].median())
+			# self.y0_mean = jnp.array(self.data.posterior['y0'].median())
+			self.x0_mean = self.x0
+			self.y0_mean = self.y0
 
 			x = jnp.linspace(0 - self.x0_mean, self.grism_object.direct.shape[1] - 1 - self.x0_mean, self.grism_object.direct.shape[1]*self.factor*10)
 			y = jnp.linspace(0 - self.y0_mean, self.grism_object.direct.shape[0] - 1 - self.y0_mean, self.grism_object.direct.shape[0]*self.factor*10)
@@ -1859,7 +1887,7 @@ class Fit_Numpyro():
 									color='lightgray', **CORNER_KWARGS)
 			
 		if save_to_folder != None:
-				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+				plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 		plt.show()
 
 
@@ -2589,7 +2617,8 @@ if __name__ == "__main__":
 
 	if choice == 'real':
 		print('Running the real data')
-		with open('../fitting_results/' + output+'config_real.yaml', 'r') as file:
+		#no ../ because the open() function reads from terminal directory (not module directory)
+		with open('fitting_results/' + output+'config_real.yaml', 'r') as file:
 			input = yaml.load(file, Loader=yaml.FullLoader)
 			print('Read inputs successfully')
 		
@@ -2605,20 +2634,7 @@ if __name__ == "__main__":
 		wave_space, delta_wave, index_min, index_max , factor = \
 		model.preprocess_test(med_band_path, broad_band_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
 
-			
-		# LW_grism_fits = fits.open('fitting_results/' +output + '200_F410M_.fits')
-		# LW_grism = LW_grism_fits[0].data		
-		# factor = 2
-		# # blocks = LW_grism[69:131, 79:121].reshape((int(LW_grism[69:131, 79:121].shape[0]/(factor)), factor, int(LW_grism[69:131, 79:121].shape[1]/factor), factor))
-		# blocks = LW_grism[69:131, 69:131].reshape((int(LW_grism[69:131, 69:131].shape[0]/(factor)), factor, int(LW_grism[69:131, 69:131].shape[1]/factor), factor))
-		# LW_grism_rescaled = np.sum(blocks, axis=(1,3))
-		# direct = LW_grism_rescaled
-		# print(direct.shape)
-		# plt.imshow(direct, origin='lower')
-		# plt.show()
-		# obs_map = obs_map.at[21,16].set(0.0016)
-		# obs_map = jnp.array(obs_map)
-		# obs_error = jnp.array(obs_error)
+
 		#  ==============================================ALT ==============================================
 		# data_path = 'fitting_results/' + output + data['Data']['data_path']
 		# catalog_path = 'fitting_results/' + output+ data['Data']['catalog_path']
@@ -2673,26 +2689,7 @@ if __name__ == "__main__":
 		# plt.show()
 
 		#renormalizing flux prior to EL map
-		# CREATE a mask for the flux prior
-		threshold = flux_threshold*direct.max()
-		mask = jnp.zeros_like(direct)
-		mask = mask.at[jnp.where(direct>threshold)].set(1)
-		mask = dilation(mask, disk(6*y_factor))
-
-		#create a mask for the grism map
-		threshold_grism = flux_threshold*obs_map.max()
-		mask_grism = jnp.zeros_like(obs_map)
-		mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
-		mask_grism = dilation(mask_grism, disk(6))
-
-		normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask == 1)].sum()
-
-		# normalization_factor = obs_map[bounds[0]:bounds[1], bounds[2]:bounds[3]].sum()/direct[jnp.where(mask == 1)].sum()
-		# plt.imshow(mask, origin = 'lower')
-		# plt.show()
-		direct = direct*normalization_factor
-		# print(direct.max())
-		# mask = dilation(mask, disk(6))
+		direct, normalization_factor, mask, mask_grism = pre.renormalize_image(direct, obs_map, flux_threshold, y_factor)
 
 		# rescale the wave_space array and the direct image according to factor and wave_factor
 		len_wave = int(
@@ -2706,7 +2703,6 @@ if __name__ == "__main__":
 		if y0 == None:
 			y0 = icenter
 
-
 		# if model_name == 'two_disc_model' or model_name == 'unified_two_discs_model':
 		# 	x0_grism = x0[0]
 		# 	y0_grism = y0[0]
@@ -2717,7 +2713,7 @@ if __name__ == "__main__":
 		x0_grism = x0
 		y0_grism = y0
 
-
+		#initialize grism object
 		grism_object = model.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor,
 								   xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
 								   wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
@@ -2849,7 +2845,9 @@ if __name__ == "__main__":
 		y = jnp.linspace(0 - y0_grism, direct.shape[0]-1 -y0_grism, direct.shape[0])
 		X, Y = jnp.meshgrid(x, y)
 		fig, ax = plt.subplots(figsize = (8,6))
-		cp = ax.pcolormesh(X,Y,run_fit.mu,shading= 'nearest') #RdBu
+		full_mu = jnp.zeros_like(direct)
+		full_mu = full_mu.at[jnp.where(run_fit.mask ==1)].set(run_fit.mu)
+		cp = ax.pcolormesh(X,Y,full_mu, shading= 'nearest') #RdBu
 		cbar = fig.colorbar(cp)
 		plt.title('Masked direct image = flux prior mu')
 		plt.show()
@@ -2917,4 +2915,5 @@ if __name__ == "__main__":
 
 		inf_data = az.from_numpyro(run_fit.mcmc, prior=prior_predictive(rng_key))
 
-		inf_data.to_netcdf('../fitting_results/'+ output + 'output')
+		#no ../ because the open() function reads from terminal directory (not module directory)
+		inf_data.to_netcdf('fitting_results/'+ output + 'output')
