@@ -58,8 +58,9 @@ import argparse
 import yaml
 
 
-numpyro.set_host_device_count(2)
+
 jax.config.update('jax_enable_x64', True)
+numpyro.set_host_device_count(2)
 # numpyro.set_platform('gpu')
 
 # np.set_printoptions(precision=15, floatmode='maxprec')
@@ -135,12 +136,31 @@ class Fit_Numpyro():
 		# 				 self.grism_object.direct.shape[0]/self.factor-1 - grism_object.icenter/self.factor, self.grism_object.direct.shape[0])
 		# self.x, self.y = jnp.meshgrid(x, y)
 
-		x = jnp.linspace(0 - grism_object.jcenter,
-						 self.grism_object.direct.shape[1]-1 - grism_object.jcenter, self.grism_object.direct.shape[1]*self.factor*10)
-		y = jnp.linspace(0 - grism_object.icenter,
-						 self.grism_object.direct.shape[0]-1 - grism_object.icenter, self.grism_object.direct.shape[0]*self.factor*10)
-		self.x, self.y = jnp.meshgrid(x, y)
+		if self.x0_vel is not None and self.x0_vel is not isinstance(x0,np.ndarray):
+			print('Setting the velocity centroid as defined in the config file')
+			x = jnp.linspace(0 - grism_object.jcenter,
+							self.grism_object.direct.shape[1]-1 - self.x0_vel, self.grism_object.direct.shape[1]*self.factor)
+			y = jnp.linspace(0 - grism_object.icenter,
+							self.grism_object.direct.shape[0]-1 - self.y0_vel, self.grism_object.direct.shape[0]*self.factor)
+			self.x, self.y = jnp.meshgrid(x, y)
 
+			x = jnp.linspace(0 - grism_object.jcenter,
+							self.grism_object.direct.shape[1]-1 - self.x0_vel, self.grism_object.direct.shape[1]*self.factor*10)
+			y = jnp.linspace(0 - grism_object.icenter,
+							self.grism_object.direct.shape[0]-1 - self.y0_vel, self.grism_object.direct.shape[0]*self.factor*10)
+			self.x_high, self.y_high = jnp.meshgrid(x, y)
+		else:
+			x = jnp.linspace(0 - grism_object.jcenter,
+							self.grism_object.direct.shape[1]-1 - grism_object.jcenter, self.grism_object.direct.shape[1]*self.factor)
+			y = jnp.linspace(0 - grism_object.icenter,
+							self.grism_object.direct.shape[0]-1 - grism_object.icenter, self.grism_object.direct.shape[0]*self.factor)
+			self.x, self.y = jnp.meshgrid(x, y)
+
+			x = jnp.linspace(0 - grism_object.jcenter,
+							self.grism_object.direct.shape[1]-1 - grism_object.jcenter, self.grism_object.direct.shape[1]*self.factor*10)
+			y = jnp.linspace(0 - grism_object.icenter,
+							self.grism_object.direct.shape[0]-1 - grism_object.icenter, self.grism_object.direct.shape[0]*self.factor*10)
+			self.x_high, self.y_high = jnp.meshgrid(x, y)
 		#have to fix this (I can probably delete it?)
 		if x0 is not None and isinstance(x0,np.ndarray) and x0.shape == (2,):
 			self.x_2 = jnp.linspace(0 - x0[1],self.grism_object.direct.shape[1]-1 - x0[1], self.grism_object.direct.shape[1]*self.factor)
@@ -226,19 +246,19 @@ class Fit_Numpyro():
 				self.low =(jnp.zeros(self.flux_prior.shape)-self.mu)/self.sigma
 				# correct for the mask = 0 pixels
 				if self.mask is not None:
-					# self.mask = jnp.array(self.mask)
-					# self.mu = jnp.where(self.mask == 0, 0.0, self.mu)
-					# self.sigma = jnp.where(self.mask == 0, 0.000001, self.sigma)
-					# self.high = jnp.where(self.mask == 0, 0.000002, self.high)
-					# self.low = jnp.where(self.mask == 0, -0.000002, self.low)
+					self.mask = jnp.array(self.mask)
+					self.mu = jnp.where(self.mask == 0, 0.0, self.mu)
+					self.sigma = jnp.where(self.mask == 0, 0.000001, self.sigma)
+					self.high = jnp.where(self.mask == 0, 0.000002, self.high)
+					self.low = jnp.where(self.mask == 0, -0.000002, self.low)
 
 					#only fitting for pixels in the mask
-					self.mask_shape = len(jnp.where(self.mask == 1)[0])
-					self.masked_indices = jnp.where(self.mask == 1)
-					self.mu = self.mu[jnp.where(self.mask == 1)]
-					self.sigma = self.sigma[jnp.where(self.mask == 1)]
-					self.high = self.high[jnp.where(self.mask == 1)]
-					self.low = self.low[jnp.where(self.mask == 1)]
+					# self.mask_shape = len(jnp.where(self.mask == 1)[0])
+					# self.masked_indices = jnp.where(self.mask == 1)
+					# self.mu = self.mu[jnp.where(self.mask == 1)]
+					# self.sigma = self.sigma[jnp.where(self.mask == 1)]
+					# self.high = self.high[jnp.where(self.mask == 1)]
+					# self.low = self.low[jnp.where(self.mask == 1)]
 			elif flux_type == 'log':
 				self.mu = jnp.log10(jnp.array(self.flux_prior))
 				self.sigma = self.flux_bounds[1]
@@ -293,19 +313,19 @@ class Fit_Numpyro():
 				The variables are renormalized after the sampling to get a better posterior geometry!
 
 		"""
-		# fluxes = numpyro.sample('fluxes', dist.Uniform(), sample_shape=self.flux_prior.shape)
-		# # manually computing the ppf for a truncated normal distribution
-		# fluxes = norm.ppf(norm.cdf(self.low) + fluxes*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+		fluxes = numpyro.sample('fluxes', dist.Uniform(), sample_shape=self.flux_prior.shape)
+		# manually computing the ppf for a truncated normal distribution
+		fluxes = norm.ppf(norm.cdf(self.low) + fluxes*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 
 		#only fit for fluxes in the region of the mask
 		#with this method to whole changing the mus for pixels outside the mask is not necessary (in the initializing section)
-		fluxes_sample = numpyro.sample('fluxes', dist.Uniform(), sample_shape=(int(self.mask_shape),))
+		# fluxes_sample = numpyro.sample('fluxes', dist.Uniform(), sample_shape=(int(self.mask_shape),))
 
-		# manually computing the ppf for a truncated normal distribution
-		fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+		# # manually computing the ppf for a truncated normal distribution
+		# fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 		
-		fluxes = jnp.zeros_like(self.flux_prior)
-		fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
+		# fluxes = jnp.zeros_like(self.flux_prior)
+		# fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
 
 		# fluxes = self.flux_prior
 
@@ -364,7 +384,7 @@ class Fit_Numpyro():
 		# print(velocities[15])
 
 		# velocities = Va*jnp.ones_like(self.x)
-		velocities = image.resize(velocities, (int(velocities.shape[0]/10), int(velocities.shape[1]/10)), method='nearest')
+		# velocities = image.resize(velocities, (int(velocities.shape[0]/10), int(velocities.shape[1]/10)), method='nearest')
 		
 		dispersions = sigma0*jnp.ones_like(velocities)
 
@@ -373,11 +393,12 @@ class Fit_Numpyro():
 		self.model_map = resample(self.model_map, self.y_factor*self.factor, self.wave_factor)
 		# self.model_map = resample(self.model_map, self.factor, self.wave_factor)
 
-		self.error_scaling = numpyro.sample('error_scaling', dist.Uniform(0,1))*9 + 1
-
-		numpyro.sample('obs', dist.Normal(self.model_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:],
-				     self.error_scaling*self.obs_error[self.obs_map_bounds[0]:self.obs_map_bounds[1],:]), 
-					 obs=self.obs_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:])
+		# self.error_scaling = numpyro.sample('error_scaling', dist.Uniform(0,1))*9 + 1
+		self.error_scaling = 1
+		numpyro.sample('obs', dist.Normal(self.model_map,self.error_scaling*self.obs_error), obs=self.obs_map)
+		# numpyro.sample('obs', dist.Normal(self.model_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:],
+		# 		     self.error_scaling*self.obs_error[self.obs_map_bounds[0]:self.obs_map_bounds[1],:]), 
+		# 			 obs=self.obs_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:])
 		
 		# compare the model fluxes with the flux prior as well
 		# numpyro.sample('fluxes_prior', dist.Normal(fluxes, 0.1*fluxes), obs=oversample(self.flux_prior, self.factor))
@@ -1138,18 +1159,18 @@ class Fit_Numpyro():
 			# print(self.mu[15], self.sigma[15], self.low[15], self.high[15])
 			# plt.imshow(self.mu, origin='lower', vmin = self.flux_prior.min(), vmax = self.flux_prior.max())
 			# plt.show()
-			# print(self.x)
-			# self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			# self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			# self.fluxes_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
-
-			#only fit for fluxes in the region of the mask
+			# # print(self.x)
 			self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 			self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+			self.fluxes_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
 
-			self.fluxes_mean = jnp.zeros_like(self.flux_prior)
-			self.fluxes_mean = self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
+			# only fit for fluxes in the region of the mask
+			# self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+			# self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+			# self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+
+			# self.fluxes_mean = jnp.zeros_like(self.flux_prior)
+			# self.fluxes_mean = self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
 
 			# self.fluxes_mean = self.flux_prior
 			# self.data.posterior['PA'].data = norm.ppf(  norm.cdf(self.low_PA) + self.data.posterior['PA'].data*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
@@ -1206,23 +1227,23 @@ class Fit_Numpyro():
 			# delta_wave = self.grism_object.wave_scale
 			# wave_space = self.grism_object.wave_space
 
-			self.data.posterior['x0'].data = norm.ppf(self.data.posterior['x0'].data)*(2) + self.x0
-			self.data.prior['x0'].data = norm.ppf(self.data.prior['x0'].data)*(2) + self.x0
-			self.data.posterior['y0'].data = norm.ppf(self.data.posterior['y0'].data)*(2) + self.y0
-			self.data.prior['y0'].data = norm.ppf(self.data.prior['y0'].data)*(2) + self.y0
+			# self.data.posterior['x0'].data = norm.ppf(self.data.posterior['x0'].data)*(2) + self.x0
+			# self.data.prior['x0'].data = norm.ppf(self.data.prior['x0'].data)*(2) + self.x0
+			# self.data.posterior['y0'].data = norm.ppf(self.data.posterior['y0'].data)*(2) + self.y0
+			# self.data.prior['y0'].data = norm.ppf(self.data.prior['y0'].data)*(2) + self.y0
 
 			# self.x0_mean = jnp.array(self.data.posterior['x0'].median())
 			# self.y0_mean = jnp.array(self.data.posterior['y0'].median())
 			self.x0_mean = self.x0
 			self.y0_mean = self.y0
 
-			x = jnp.linspace(0 - self.x0_mean, self.grism_object.direct.shape[1] - 1 - self.x0_mean, self.grism_object.direct.shape[1]*self.factor*10)
-			y = jnp.linspace(0 - self.y0_mean, self.grism_object.direct.shape[0] - 1 - self.y0_mean, self.grism_object.direct.shape[0]*self.factor*10)
-			X,Y = jnp.meshgrid(x,y)
+			# x = jnp.linspace(0 - self.x0_mean, self.grism_object.direct.shape[1] - 1 - self.x0_mean, self.grism_object.direct.shape[1]*self.factor*10)
+			# y = jnp.linspace(0 - self.y0_mean, self.grism_object.direct.shape[0] - 1 - self.y0_mean, self.grism_object.direct.shape[0]*self.factor*10)
+			# X,Y = jnp.meshgrid(x,y)
 
-			self.model_velocities = jnp.array(v(X,Y, jnp.radians(self.PA_mean), jnp.radians(self.i_mean), self.Va_mean, self.r_t_mean))
+			self.model_velocities = jnp.array(v(self.x,self.y, jnp.radians(self.PA_mean), jnp.radians(self.i_mean), self.Va_mean, self.r_t_mean))
 			# print(self.model_velocities[15*factor])
-			self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
+			# self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
 
 			# self.model_dispersions = jnp.array(sigma(self.x, self.y, self.sigma0_mean_model))
 			self.model_dispersions = self.sigma0_mean_model*jnp.ones_like(self.model_velocities)
@@ -1887,7 +1908,7 @@ class Fit_Numpyro():
 									color='lightgray', **CORNER_KWARGS)
 			
 		if save_to_folder != None:
-				plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 		plt.show()
 
 
@@ -1941,7 +1962,7 @@ def sigma(x, y, sigma0, r_eff=None, I0=None, PA=None, i=None):
 # maybe in a separate module?? could be with the plotting too so that this one is not so busy?
 
 
-def oversample(image_low_res, factor, wave_factor, method='bicubic'):
+def oversample(image_low_res, factor, wave_factor, method='nearest'):
 	image_high_res = image.resize(image_low_res, (int(image_low_res.shape[0]*factor), int(image_low_res.shape[1]*wave_factor)), method=method)
 	image_high_res /= factor*wave_factor
 
@@ -1991,7 +2012,7 @@ def plot_image(image, x0, y0, direct_size, limits = None, save_to_folder = None,
 	
 
 	if save_to_folder != None:
-		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -2015,7 +2036,7 @@ def plot_grism(map, y0, direct_size, wave_space, limits = None, save_to_folder =
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 	
 	plt.show()
 	plt.close()
@@ -2026,17 +2047,17 @@ def plot_image_residual(image, model, errors, x0, y0, direct_size,save_to_folder
 	X, Y = jnp.meshgrid(x, y)
 
 	fig, ax = plt.subplots(figsize = (8,6))
-	cp = ax.pcolormesh(X,Y,(model-image)/errors,shading= 'nearest') #RdBu
+	cp = ax.pcolormesh(X,Y,(model-image)/image,shading= 'nearest') #RdBu
 	ax.set_xlabel(r'$\Delta$ RA [px]',fontsize = 20)
 	ax.set_ylabel(r'$\Delta$ DEC [px]',fontsize = 20)
 	ax.tick_params(axis='both', which='major', labelsize=20)
 	ax.tick_params(axis='both', which='minor')
 	cbar = fig.colorbar(cp)
-	cbar.ax.set_ylabel(r"Residuals")
+	cbar.ax.set_ylabel(r"Model-image residuals")
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 	
 	plt.show()
 	plt.close()
@@ -2057,7 +2078,7 @@ def plot_grism_residual(map, model, errors, y0, direct_size, wave_space,save_to_
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -2080,7 +2101,7 @@ def plot_velocity_profile(image, x0, y0, direct_size, velocities, save_to_folder
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -2166,7 +2187,7 @@ def plot_summary(image, image_model, image_error, map, map_model, map_error, x0,
 	plt.tight_layout()
 
 	if save_to_folder != None:
-		plt.savefig('../fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 
 	plt.show()
 	plt.close()
@@ -2840,17 +2861,17 @@ if __name__ == "__main__":
 			run_fit.set_bounds(model= model_name, flux_prior=direct, mask = mask, y_factor = y_factor, flux_bounds=flux_bounds, flux_type = flux_type, PA_bounds=PA_bounds, i_bounds=i_bounds, Va_bounds=Va_bounds, r_t_bounds=r_t_bounds, sigma0_bounds=sigma0_bounds, obs_map_bounds = obs_map_bounds, clump =clump, sigma0_disp=sigma0_disp, sigma0_mean=sigma0_mean, PA_normal=PA_normal, clump_v_prior=clump_v_prior, clump_sigma_prior=clump_sigma_prior, clump_flux_prior=clump_flux_prior)
 
 		# plot the masked direct image 
-		direct_image_size = direct.shape[1]
-		x = jnp.linspace(0 - x0_grism, direct.shape[1]-1 -x0_grism, direct.shape[1])
-		y = jnp.linspace(0 - y0_grism, direct.shape[0]-1 -y0_grism, direct.shape[0])
-		X, Y = jnp.meshgrid(x, y)
-		fig, ax = plt.subplots(figsize = (8,6))
-		full_mu = jnp.zeros_like(direct)
-		full_mu = full_mu.at[jnp.where(run_fit.mask ==1)].set(run_fit.mu)
-		cp = ax.pcolormesh(X,Y,full_mu, shading= 'nearest') #RdBu
-		cbar = fig.colorbar(cp)
-		plt.title('Masked direct image = flux prior mu')
-		plt.show()
+		# direct_image_size = direct.shape[1]
+		# x = jnp.linspace(0 - x0_grism, direct.shape[1]-1 -x0_grism, direct.shape[1])
+		# y = jnp.linspace(0 - y0_grism, direct.shape[0]-1 -y0_grism, direct.shape[0])
+		# X, Y = jnp.meshgrid(x, y)
+		# fig, ax = plt.subplots(figsize = (8,6))
+		# full_mu = jnp.zeros_like(direct)
+		# full_mu = full_mu.at[jnp.where(run_fit.mask ==1)].set(run_fit.mu)
+		# cp = ax.pcolormesh(X,Y,full_mu, shading= 'nearest') #RdBu
+		# cbar = fig.colorbar(cp)
+		# plt.title('Masked direct image = flux prior mu')
+		# plt.show()
 
 
 		rng_key = random.PRNGKey(0)

@@ -131,7 +131,7 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 	threshold = flux_threshold*direct.max()
 	mask = jnp.zeros_like(direct)
 	mask = mask.at[jnp.where(direct>threshold)].set(1)
-	mask = dilation(mask, disk(6*y_factor))
+	mask = dilation(mask, disk(2))
 
 	#create a mask for the grism map
 	threshold_grism = flux_threshold*obs_map.max()
@@ -143,5 +143,11 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 	normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask == 1)].sum()
 	#normalize the direct image to the grism image
 	direct = direct*normalization_factor
+
+	#now recompute the broader mask for the image
+	threshold = flux_threshold*direct.max()
+	mask = jnp.zeros_like(direct)
+	mask = mask.at[jnp.where(direct>threshold)].set(1)
+	mask = dilation(mask, disk(6*int(y_factor)))
 
 	return direct, normalization_factor, mask, mask_grism
