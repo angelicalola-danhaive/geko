@@ -3,6 +3,7 @@
 #importing my own modules
 import model_jax as model
 import preprocess as pre
+import plotting
 
 import os
 
@@ -240,7 +241,8 @@ class Fit_Numpyro():
 				self.sigma_PA_2 = self.PA_bounds[1][1]*90
 		else:
 			if flux_type == 'lin':
-				self.mu = jnp.array(self.flux_prior)
+				#if the fluxes are negative, set their prior to zero
+				self.mu = jnp.maximum(jnp.zeros(self.flux_prior.shape), jnp.array(self.flux_prior))
 				self.sigma = self.flux_bounds[0]*jnp.array(self.flux_prior)
 				self.high =(self.flux_bounds[1]* jnp.array(self.flux_prior)+ self.mu - self.mu)/self.sigma
 				self.low =(jnp.zeros(self.flux_prior.shape)-self.mu)/self.sigma
@@ -387,6 +389,9 @@ class Fit_Numpyro():
 		# velocities = image.resize(velocities, (int(velocities.shape[0]/10), int(velocities.shape[1]/10)), method='nearest')
 		
 		dispersions = sigma0*jnp.ones_like(velocities)
+
+		#sample a shift in the dispersion wavelength
+
 
 		self.model_map = self.grism_object.disperse(fluxes, velocities, dispersions)
 
@@ -1160,17 +1165,18 @@ class Fit_Numpyro():
 			# plt.imshow(self.mu, origin='lower', vmin = self.flux_prior.min(), vmax = self.flux_prior.max())
 			# plt.show()
 			# # print(self.x)
-			self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			self.fluxes_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
 
-			# only fit for fluxes in the region of the mask
 			# self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 			# self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			# self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+			# self.fluxes_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
 
-			# self.fluxes_mean = jnp.zeros_like(self.flux_prior)
-			# self.fluxes_mean = self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
+			# only fit for fluxes in the region of the mask
+			self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+			self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+			self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+
+			self.fluxes_mean = jnp.zeros_like(self.flux_prior)
+			self.fluxes_mean = self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
 
 			# self.fluxes_mean = self.flux_prior
 			# self.data.posterior['PA'].data = norm.ppf(  norm.cdf(self.low_PA) + self.data.posterior['PA'].data*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
@@ -1248,7 +1254,7 @@ class Fit_Numpyro():
 			# self.model_dispersions = jnp.array(sigma(self.x, self.y, self.sigma0_mean_model))
 			self.model_dispersions = self.sigma0_mean_model*jnp.ones_like(self.model_velocities)
 			# plt.imshow(self.model_dispersions)
-			
+			# self.grism_object.wavelength = 3.5612
 			self.model_map_high = self.grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
 			self.model_map = resample(self.model_map_high, self.y_factor*self.factor, self.wave_factor)
 			# self.model_map = resample(self.model_map_high, self.factor, self.wave_factor
@@ -1488,7 +1494,7 @@ class Fit_Numpyro():
 			blocks = self.fluxes.reshape((int(self.fluxes.shape[0]/(self.factor)), self.factor, int(self.fluxes.shape[1]/self.factor), self.factor))
 			self.model_flux_low = jnp.sum(blocks, axis=(1,3))
 			# print(self.fluxes.shape, self.model_flux_low.shape)
-			plot_image(self.model_flux_low, self.grism_object.jcenter, self.grism_object.jcenter, self.grism_object.direct.shape[0])
+			plotting.plot_image(self.model_flux_low, self.grism_object.jcenter, self.grism_object.jcenter, self.grism_object.direct.shape[0])
 			return self.model_map,self.fluxes,self.model_flux_low , velocities, dispersions, self.y
 
 		elif model_name == 'two_component_model':
@@ -1990,207 +1996,6 @@ def resample(grism_spectrum, factor, wave_factor):
 	grism_obs_res = jnp.sum(blocks, axis=(1,3))
 	return grism_obs_res
 
-# -----------------------------------------------------------making different kinds of classic plots for the results-----------------------------------------------------------------------------------
-
-def plot_image(image, x0, y0, direct_size, limits = None, save_to_folder = None, name = None):
-	x = jnp.linspace(0 - x0, direct_size- 1 - x0, image.shape[1])
-	y = jnp.linspace(0 - y0, direct_size- 1 - y0, image.shape[0])
-	X, Y = jnp.meshgrid(x, y)
-
-	if limits == None:
-		limits = image
-
-	fig, ax = plt.subplots(figsize = (8,6))
-	cp = ax.pcolormesh(X,Y,image,shading= 'nearest', vmax=limits.max(), vmin=limits.min()) #RdBu
-	ax.set_xlabel(r'$\Delta$ RA [px]',fontsize = 20)
-	ax.set_ylabel(r'$\Delta$ DEC [px]',fontsize = 20)
-	ax.tick_params(axis='both', which='major', labelsize=20)
-	ax.tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp)
-	cbar.ax.set_ylabel(r"Flux [a.u.]")
-	plt.tight_layout()
-	
-
-	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
-
-	plt.show()
-	plt.close()
-	
-def plot_grism(map, y0, direct_size, wave_space, limits = None, save_to_folder = None, name = None):
-	x = wave_space
-	y = jnp.linspace(0 - y0, direct_size- 1 - y0, map.shape[0])
-	X, Y = jnp.meshgrid(x, y)
-
-	if limits == None:
-		limits = map
-
-	fig, ax = plt.subplots(figsize = (8,6))
-	cp = ax.pcolormesh(X,Y,map,shading= 'nearest', vmax=limits.max(), vmin=limits.min()) #RdBu
-	ax.set_xlabel(r'wavelength $[\mu m]$',fontsize = 20)
-	ax.set_ylabel(r'$\Delta$ DEC [px]',fontsize = 20)
-	ax.tick_params(axis='both', which='major', labelsize=20)
-	ax.tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp)
-	cbar.ax.set_ylabel(r"Flux [a.u.]")
-	plt.tight_layout()
-
-	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
-	
-	plt.show()
-	plt.close()
-
-def plot_image_residual(image, model, errors, x0, y0, direct_size,save_to_folder = None, name = None):
-	x = jnp.linspace(0 - x0, direct_size- 1 - x0, image.shape[1])
-	y = jnp.linspace(0 - y0, direct_size- 1 - y0, image.shape[0])
-	X, Y = jnp.meshgrid(x, y)
-
-	fig, ax = plt.subplots(figsize = (8,6))
-	cp = ax.pcolormesh(X,Y,(model-image)/image,shading= 'nearest') #RdBu
-	ax.set_xlabel(r'$\Delta$ RA [px]',fontsize = 20)
-	ax.set_ylabel(r'$\Delta$ DEC [px]',fontsize = 20)
-	ax.tick_params(axis='both', which='major', labelsize=20)
-	ax.tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp)
-	cbar.ax.set_ylabel(r"Model-image residuals")
-	plt.tight_layout()
-
-	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
-	
-	plt.show()
-	plt.close()
-
-def plot_grism_residual(map, model, errors, y0, direct_size, wave_space,save_to_folder = None, name = None):
-	x = wave_space
-	y = jnp.linspace(0 - y0, direct_size- 1 - y0, map.shape[0])
-	X, Y = jnp.meshgrid(x, y)
-
-	fig, ax = plt.subplots(figsize = (8,6))
-	cp = ax.pcolormesh(X,Y,(model-map)/errors,shading= 'nearest') #RdBu
-	ax.set_xlabel(r'wavelength $[\mu m]$',fontsize = 20)
-	ax.set_ylabel(r'$\Delta$ DEC [px]',fontsize = 20)
-	ax.tick_params(axis='both', which='major', labelsize=20)
-	ax.tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp)
-	cbar.ax.set_ylabel(r"Residuals")
-	plt.tight_layout()
-
-	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
-
-	plt.show()
-	plt.close()
-
-
-def plot_velocity_profile(image, x0, y0, direct_size, velocities, save_to_folder = None, name = None):
-	x = jnp.linspace(0 - x0, direct_size- 1 - x0, velocities.shape[1])
-	y = jnp.linspace(0 - y0, direct_size- 1 - y0, velocities.shape[0])
-	X, Y = jnp.meshgrid(x, y)
-
-	extent = -y0, y0, -x0, x0
-	plt.imshow(image, origin = 'lower', extent = extent, cmap = 'viridis')
-	CS = plt.contour(X,Y,velocities, 7, cmap = 'RdBu', origin = 'lower')
-	cbar =plt.colorbar(CS)
-	plt.tick_params(axis='both', which='major', labelsize=11)
-	plt.xlabel(r'$\Delta$ RA [px]',fontsize = 11)
-	plt.ylabel(r'$\Delta$ DEC [px]',fontsize = 11)
-	cbar.ax.set_ylabel('velocity [km/s]')
-	cbar.add_lines(CS)
-	plt.tight_layout()
-
-	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
-
-	plt.show()
-	plt.close()
-
-def plot_summary(image, image_model, image_error, map, map_model, map_error, x0, y0, direct_size, wave_space, title = None, save_to_folder = None, name = None):
-	x = jnp.linspace(0 - x0, direct_size- 1 - x0, image.shape[1])
-	y = jnp.linspace(0 - y0, direct_size- 1 - y0, image.shape[0])
-	X, Y = jnp.meshgrid(x, y)
-
-	fig, axs = plt.subplots(2, 3, figsize=(50, 30))
-
-	cp = axs[0,0].pcolormesh(X,Y,image,shading= 'nearest', vmax=image.max(), vmin=image.min()) #RdBu
-	axs[0,0].set_xlabel(r'$\Delta$ RA [px]',fontsize = 30)
-	axs[0,0].set_ylabel(r'$\Delta$ DEC [px]',fontsize = 30)
-	axs[0,0].tick_params(axis='both', which='major', labelsize=30)
-	axs[0,0].tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp, ax=axs[0,0])
-	cbar.ax.set_ylabel(r"Flux [a.u.]")
-	cbar.ax.tick_params(labelsize=30)
-	axs[0,0].set_title('Observed image', fontsize = 50)
-	# plt.tight_layout()
-
-	cp = axs[0,1].pcolormesh(X,Y,image_model,shading= 'nearest', vmax=image.max(), vmin=image.min()) #RdBu
-	axs[0,1].set_xlabel(r'$\Delta$ RA [px]',fontsize = 30)
-	axs[0,1].set_ylabel(r'$\Delta$ DEC [px]',fontsize = 30)
-	axs[0,1].tick_params(axis='both', which='major', labelsize=30)
-	axs[0,1].tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp, ax=axs[0,1])
-	cbar.ax.set_ylabel(r"Flux [a.u.]")
-	cbar.ax.tick_params(labelsize=30)	
-	axs[0,1].set_title('Model image', fontsize = 50)
-
-	cp = axs[0,2].pcolormesh(X,Y,(image_model-image)/image_error,shading= 'nearest') #RdBu
-	axs[0,2].set_xlabel(r'$\Delta$ RA [px]',fontsize = 30)
-	axs[0,2].set_ylabel(r'$\Delta$ DEC [px]',fontsize = 30)
-	axs[0,2].tick_params(axis='both', which='major', labelsize=30)
-	axs[0,2].tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp, ax=axs[0,2])
-	cbar.ax.set_ylabel(r"Chi")
-	cbar.ax.tick_params(labelsize=30)
-	axs[0,2].set_title('Residuals', fontsize = 50)
-
-	x = wave_space
-	y = jnp.linspace(0 - y0, direct_size- 1 - y0, map.shape[0])
-	X, Y = jnp.meshgrid(x, y)
-
-	cp = axs[1,0].pcolormesh(X,Y,map,shading= 'nearest', vmax=map.max(), vmin=map.min()) #RdBu
-	axs[1,0].set_xlabel(r'wavelength $[\mu m]$',fontsize = 30)
-	axs[1,0].set_ylabel(r'$\Delta$ DEC [px]',fontsize = 30)
-	axs[1,0].tick_params(axis='both', which='major', labelsize=30)
-	axs[1,0].tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp, ax=axs[1,0])
-	cbar.ax.set_ylabel(r"Flux [a.u.]")
-	cbar.ax.tick_params(labelsize=30)
-	axs[1,0].set_title('Observed grism', fontsize = 50)
-
-	cp = axs[1,1].pcolormesh(X,Y,map_model,shading= 'nearest', vmax=map.max(), vmin=map.min()) #RdBu
-	axs[1,1].set_xlabel(r'wavelength $[\mu m]$',fontsize = 30)
-	axs[1,1].set_ylabel(r'$\Delta$ DEC [px]',fontsize = 30)
-	axs[1,1].tick_params(axis='both', which='major', labelsize=30)
-	axs[1,1].tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp, ax=axs[1,1])
-	cbar.ax.set_ylabel(r"Flux [a.u.]")
-	cbar.ax.tick_params(labelsize=30)
-	axs[1,1].set_title('Model grism', fontsize = 50)
-
-	cp = axs[1,2].pcolormesh(X,Y,(map_model-map)/map_error,shading= 'nearest') #RdBu
-	axs[1,2].set_xlabel(r'wavelength $[\mu m]$',fontsize = 30)
-	axs[1,2].set_ylabel(r'$\Delta$ DEC [px]',fontsize = 30)
-	axs[1,2].tick_params(axis='both', which='major', labelsize=30)
-	axs[1,2].tick_params(axis='both', which='minor')
-	cbar = fig.colorbar(cp, ax=axs[1,2])
-	cbar.ax.set_ylabel(r'Chi')
-	cbar.ax.tick_params(labelsize=30)
-	axs[1,2].set_title('Residuals',	fontsize = 50)
-
-	if title != None:
-		fig.suptitle(title, fontsize = 100)
-		#add a bigger space between title and rest of figure
-		fig.subplots_adjust(top=20)
-
-
-	plt.tight_layout()
-
-	if save_to_folder != None:
-		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
-
-	plt.show()
-	plt.close()
 # -----------------------------------------------------------plotting model at point parameter space-----------------------------------------------------------------------------------
 
 def generate_map(grism_object,fluxes, PA, i, Va, r_t, sigma0, x0, y0, factor = 2, wave_factor = 10, y_factor =1):
@@ -2391,7 +2196,7 @@ if __name__ == "__main__":
 
 		# truth_flux_high *= truth_flux.sum()/truth_flux_high.sum()
 
-		plot_image(truth_flux, x0, y0, direct_image_size)
+		plotting.plot_image(truth_flux, x0, y0, direct_image_size)
 
 		len_wave = int((5.068-3.835)/(0.001/wave_factor))
 		wave_space = jnp.linspace(3.835, 5.068, len_wave+1)
@@ -2469,8 +2274,8 @@ if __name__ == "__main__":
 		obs_map = jnp.where(jnp.abs(obs_map/error_map) <snr_obs, 0.0, obs_map)
 		# obs_map_high = obs_map
 		error_map_high = error_map
-		plot_grism(obs_map, y0, direct_image_size, wave_axis2)
-		plot_grism(random_noise, y0, direct_image_size, wave_axis2)
+		plotting.plot_grism(obs_map, y0, direct_image_size, wave_axis2)
+		plotting.plot_grism(random_noise, y0, direct_image_size, wave_axis2)
 
 		# print(truth_map[28], obs_map[28], error_map[28])
 
@@ -2516,18 +2321,18 @@ if __name__ == "__main__":
 
 		model_map = jnp.matmul( fluxes[:,None, :] , gaussian)[:,0,:]
 		#grism_object.disperse(fluxes, truth_velocities, truth_dispersions)
-		plot_image(fluxes, x0, y0, direct_image_size)
+		plotting.plot_image(fluxes, x0, y0, direct_image_size)
 		# plt.imshow(truth_flux/fluxes_errors,origin = 'lower')
 		# plt.show()
 		# plot_grism_residual(obs_map, model_map, error_map, y0, direct_image_size, wave_space[int(lower_index*wave_factor):int((upper_index +1)*wave_factor)])
 		# fluxes_errors = jnp.where(jnp.abs(truth_flux/fluxes_errors) < snr_flux, 1e6*fluxes_errors , fluxes_errors)
-		plot_image_residual(truth_flux, fluxes, fluxes_errors*error_scaling_low, x0, y0, direct_image_size)
+		plotting.plot_image_residual(truth_flux, fluxes, fluxes_errors*error_scaling_low, x0, y0, direct_image_size)
 		delta_wave = int((5.068-3.835)/(0.001))
 		wave_space = jnp.linspace(3.835, 5.068, delta_wave+1)
 		wave_axis = wave_space[lower_index:upper_index+1]
 		run_fit.wave_axis = wave_axis
 
-		plot_grism_residual(obs_map, resample(model_map,y_factor*factor,1), error_map, 14, obs_map.shape[0],wave_axis )
+		plotting.plot_grism_residual(obs_map, resample(model_map,y_factor*factor,1), error_map, 14, obs_map.shape[0],wave_axis )
 		 #sending with obs_map = obs_map_high bc i can't get the resampling to work correctly
 		# fluxes = jnp.where(fluxes<0, 0, fluxes)
 		# resample fluxes to fluxes prior shape
