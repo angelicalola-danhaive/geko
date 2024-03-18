@@ -68,7 +68,7 @@ numpyro.set_host_device_count(2)
 # jnp.set_printoptions(precision=15, floatmode='maxprec')
 # import figure_setup as setup
 
-# XLA_FLAGS=--xla_gpu_force_compilation_parallelism=1
+XLA_FLAGS="--xla_gpu_force_compilation_parallelism=1"
 
 # plotting settings
 
@@ -76,7 +76,7 @@ numpyro.set_host_device_count(2)
 
 
 class Fit_Numpyro():
-	def __init__(self, obs_map=None, obs_error=None, obs_map_low = None, obs_error_low = None, grism_object=None, factor=1, wave_factor=1, fitting_object=None, flux_prior=None, x0 = None, y0 = None, cov_matrix = None, fluxes_errors = None, snr_flux = None, error_scaling_low = None, alpha = None, x0_vel = None, y0_vel = None):
+	def __init__(self, obs_map=None, obs_error=None, obs_map_low = None, obs_error_low = None, grism_object=None, factor=1, wave_factor=1, fitting_object=None, flux_prior=None, x0 = None, y0 = None, cov_matrix = None, fluxes_errors = None, snr_flux = None, error_scaling_low = None, alpha = None, x0_vel = None, y0_vel = None, wavelength = None):
 		""" Class to fit model to data
 
 						Parameters
@@ -125,6 +125,8 @@ class Fit_Numpyro():
 		self.error_scaling_low = error_scaling_low
 		self.alpha = alpha
 
+		#this is the wavelength taken from config file that will be the center of our wave prior
+		self.wavelength = wavelength
 
 		# define the grid on which functions are
 		# x = jnp.linspace(0 - grism_object.jcenter,
@@ -196,9 +198,9 @@ class Fit_Numpyro():
 
 	    # compute the parameters of the sampling distributionS
 
-		plt.imshow(self.flux_prior, origin='lower')
-		plt.title('flux prior')
-		plt.show()
+		# plt.imshow(self.flux_prior, origin='lower')
+		# plt.title('flux prior')
+		# plt.show()
 		# fluxes
 		if model == 'two_disc_model':
 			self.mu = jnp.array(self.flux_prior)
@@ -348,7 +350,13 @@ class Fit_Numpyro():
 			Pa = 30
 		else:
 			Pa = numpyro.sample('PA', dist.Uniform())
-			Pa = norm.ppf(Pa)*self.sigma_PA + self.mu_PA
+			#sample the mu_PA + 0 or 180 (orientation of velocity field)
+			rotation = numpyro.sample('rotation', dist.Uniform())
+
+			#simulate a bernouilli discrete distribution
+			PA_morph = self.mu_PA + round(rotation)*180
+
+			Pa = norm.ppf(Pa)*self.sigma_PA + PA_morph
 			# Pa = norm.ppf(  norm.cdf(self.low_PA) + Pa*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
 		if self.i_bounds == 'const':
 			i = 60
@@ -391,7 +399,10 @@ class Fit_Numpyro():
 		dispersions = sigma0*jnp.ones_like(velocities)
 
 		#sample a shift in the dispersion wavelength
+		corrected_wavelength = numpyro.sample('wavelength', dist.Uniform())
+		corrected_wavelength = norm.ppf(corrected_wavelength)*0.001 + self.wavelength
 
+		self.grism_object.set_wavelength(corrected_wavelength)
 
 		self.model_map = self.grism_object.disperse(fluxes, velocities, dispersions)
 
@@ -2591,14 +2602,14 @@ if __name__ == "__main__":
 		for i in range(obs_map.shape[0]):
 			cov_matrix_full[i] = jnp.diag(var_map_high[i])
 
-		plt.imshow(obs_map, origin='lower')
-		plt.title('obs_map input to Fit_Numpyro')
-		plt.show()
+		# plt.imshow(obs_map, origin='lower')
+		# plt.title('obs_map input to Fit_Numpyro')
+		# plt.show()
 
 		# if model_name == 'MLE':
 		
 		run_fit = Fit_Numpyro(obs_map = obs_map, obs_error = obs_error, grism_object = grism_object,
-							  flux_prior=direct, factor=factor, wave_factor=wave_factor, x0 = x0_grism, y0 = y0_grism, cov_matrix=cov_matrix_full, x0_vel=x0_vel, y0_vel = y0_vel)
+							  flux_prior=direct, factor=factor, wave_factor=wave_factor, x0 = x0_grism, y0 = y0_grism, cov_matrix=cov_matrix_full, x0_vel=x0_vel, y0_vel = y0_vel,wavelength = wavelength)
 
 		if not clump_bool:
 			clump = None
