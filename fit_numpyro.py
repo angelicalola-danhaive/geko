@@ -136,7 +136,7 @@ class Fit_Numpyro():
 		# 				 self.grism_object.direct.shape[0]/self.factor-1 - grism_object.icenter/self.factor, self.grism_object.direct.shape[0])
 		# self.x, self.y = jnp.meshgrid(x, y)
 
-		if self.x0_vel is not None and self.x0_vel is not isinstance(x0,np.ndarray):
+		if (self.x0_vel != None) and (self.x0_vel is not isinstance(x0,np.ndarray)):
 			print('Setting the velocity centroid as defined in the config file')
 			x = jnp.linspace(0 - grism_object.jcenter,
 							self.grism_object.direct.shape[1]-1 - self.x0_vel, self.grism_object.direct.shape[1]*self.factor)
@@ -247,18 +247,18 @@ class Fit_Numpyro():
 				# correct for the mask = 0 pixels
 				if self.mask is not None:
 					self.mask = jnp.array(self.mask)
-					self.mu = jnp.where(self.mask == 0, 0.0, self.mu)
-					self.sigma = jnp.where(self.mask == 0, 0.000001, self.sigma)
-					self.high = jnp.where(self.mask == 0, 0.000002, self.high)
-					self.low = jnp.where(self.mask == 0, -0.000002, self.low)
+					# self.mu = jnp.where(self.mask == 0, 0.0, self.mu)
+					# self.sigma = jnp.where(self.mask == 0, 0.000001, self.sigma)
+					# self.high = jnp.where(self.mask == 0, 0.000002, self.high)
+					# self.low = jnp.where(self.mask == 0, -0.000002, self.low)
 
 					#only fitting for pixels in the mask
-					# self.mask_shape = len(jnp.where(self.mask == 1)[0])
-					# self.masked_indices = jnp.where(self.mask == 1)
-					# self.mu = self.mu[jnp.where(self.mask == 1)]
-					# self.sigma = self.sigma[jnp.where(self.mask == 1)]
-					# self.high = self.high[jnp.where(self.mask == 1)]
-					# self.low = self.low[jnp.where(self.mask == 1)]
+					self.mask_shape = len(jnp.where(self.mask == 1)[0])
+					self.masked_indices = jnp.where(self.mask == 1)
+					self.mu = self.mu[jnp.where(self.mask == 1)]
+					self.sigma = self.sigma[jnp.where(self.mask == 1)]
+					self.high = self.high[jnp.where(self.mask == 1)]
+					self.low = self.low[jnp.where(self.mask == 1)]
 			elif flux_type == 'log':
 				self.mu = jnp.log10(jnp.array(self.flux_prior))
 				self.sigma = self.flux_bounds[1]
@@ -313,19 +313,19 @@ class Fit_Numpyro():
 				The variables are renormalized after the sampling to get a better posterior geometry!
 
 		"""
-		fluxes = numpyro.sample('fluxes', dist.Uniform(), sample_shape=self.flux_prior.shape)
-		# manually computing the ppf for a truncated normal distribution
-		fluxes = norm.ppf(norm.cdf(self.low) + fluxes*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+		# fluxes = numpyro.sample('fluxes', dist.Uniform(), sample_shape=self.flux_prior.shape)
+		# # manually computing the ppf for a truncated normal distribution
+		# fluxes = norm.ppf(norm.cdf(self.low) + fluxes*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 
 		#only fit for fluxes in the region of the mask
 		#with this method to whole changing the mus for pixels outside the mask is not necessary (in the initializing section)
-		# fluxes_sample = numpyro.sample('fluxes', dist.Uniform(), sample_shape=(int(self.mask_shape),))
+		fluxes_sample = numpyro.sample('fluxes', dist.Uniform(), sample_shape=(int(self.mask_shape),))
 
-		# # manually computing the ppf for a truncated normal distribution
-		# fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
+		# manually computing the ppf for a truncated normal distribution
+		fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 		
-		# fluxes = jnp.zeros_like(self.flux_prior)
-		# fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
+		fluxes = jnp.zeros_like(self.flux_prior)
+		fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
 
 		# fluxes = self.flux_prior
 
@@ -2687,12 +2687,11 @@ if __name__ == "__main__":
 
 		#  ================================================================================================
 
+		#mask any hot or dead pixels, setting tolerance = 4 manually 
+		obs_map, obs_error = pre.mask_bad_pixels(obs_map, obs_error)
 
-		if to_mask != None:
-			for pixels in to_mask:
-				obs_error = obs_error.at[pixels[0],pixels[1]].set(1e6)
-				obs_map = obs_map.at[pixels[0],pixels[1]].set(0)
 
+		#i think this block is useless
 		reshape = params['Params']['reshape']
 		new_bounds_direct = params['Params']['new_bounds_direct']
 		new_bounds_obs = params['Params']['new_bounds_obs']
@@ -2701,13 +2700,6 @@ if __name__ == "__main__":
 			obs_map = obs_map[new_bounds_obs[0]:new_bounds_obs[1], new_bounds_obs[2]:new_bounds_obs[3]]
 			obs_error = obs_error[new_bounds_obs[0]:new_bounds_obs[1], new_bounds_obs[2]:new_bounds_obs[3]]
 
-
-		print(obs_map.shape, obs_error.shape, direct.shape)
-
-		# rescaling of the fluxes so that they match the observed fluxes in the 2D map
-		# direct = direct/direct.sum()*obs_map[5:, :].sum()
-		# plt.imshow(direct, origin='lower')
-		# plt.show()
 
 		#renormalizing flux prior to EL map
 		direct, normalization_factor, mask, mask_grism = pre.renormalize_image(direct, obs_map, flux_threshold, y_factor)

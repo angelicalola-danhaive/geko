@@ -1304,9 +1304,11 @@ def preprocess_test(med_band_path, broad_band_path, grism_spectrum_path, redshif
 	EL_map = make_EL_map(med_band, broad_band, redshift, line)
 
 
-	if field == 'GOODS-S':
+	if field == 'GOODS-S' or field =='GOODS-S-FRESCO':
 		print('FRESCO PA is the same in GOODS-S, no correction needed')
 		med_band_flip = med_band
+		EL_map_flip = EL_map
+		rotated_wcs = wcs_med_band
 	else:
 		if field == 'GOODS-N':
 			print('Correcting image for GOODS-N FRESCO PA')
@@ -1444,8 +1446,13 @@ def preprocess_test(med_band_path, broad_band_path, grism_spectrum_path, redshif
 	obs_error = np.power(grism_spectrum_fits['WHT2D'].data[:,index_min+1:index_max+1+1], - 0.5)
 
 	#load number of module A and module B frames from the header
-	module_A = grism_spectrum_fits[0].header['N_A']
-	module_B = grism_spectrum_fits[0].header['N_B']
+	if field == 'GOODS-S-FRESCO':
+		print('Manually setting the module because the N_A and N_B params are not in the header')
+		module_A = 0
+		module_B = 1
+	else:
+		module_A = grism_spectrum_fits[0].header['N_A']
+		module_B = grism_spectrum_fits[0].header['N_B']
 
 	if module_A == 0:
 		print('Flipping map! (Mod B)')

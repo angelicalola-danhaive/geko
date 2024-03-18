@@ -33,6 +33,8 @@ from jax.scipy.special import logsumexp
 from reproject import reproject_interp, reproject_adaptive
 from photutils.centroids import centroid_com, centroid_quadratic,centroid_1dg
 
+from scipy.ndimage import median_filter
+
 #for the masking
 from skimage.morphology import binary_dilation, dilation, disk
 
@@ -58,12 +60,18 @@ def read_config_file(input, output):
 	elif broad_filter == 'F356W':
 		med_filter = 'F335M'
 	
+	field = data['Data']['field']
+	
 	#no ../ because the open() function reads from terminal directory (not module directory)
 	med_band_path = 'fitting_results/' + output + str(ID) + '_' + med_filter + '.fits'
 	broad_band_path = 'fitting_results/' + output + str(ID) + '_' + broad_filter + '.fits'
-	grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
+	if field == 'GOODS-N' or field == 'GOODS-N-CONGRESS':
+		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
+	elif field == 'GOODS-S-FRESCO':
+		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_FRESCO_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
 
-	field = data['Data']['field']
+
+
 
 	wavelength = data['Data']['wavelength']
 
@@ -151,3 +159,32 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 	mask = dilation(mask, disk(6*int(y_factor)))
 
 	return direct, normalization_factor, mask, mask_grism
+
+def mask_bad_pixels(image,errors,tolerance=4):
+	"""
+		Set the hot and dead pixels to zero and set their errors to a high value so they do not
+		carry weight in the fit
+	"""
+
+	blurred = median_filter(image, size=3)
+	difference = image - blurred
+	threshold = tolerance*np.std(difference)
+
+	hot_pixels = np.nonzero((np.abs(difference)>threshold) )
+	hot_pixels = np.array(hot_pixels)
+
+	if len(hot_pixels[0]) == 0:
+		print('No hot pixels found')
+		return image, errors
+	
+	#plot the hot pixels
+	plt.imshow(image, cmap='viridis', origin='lower')
+	plt.scatter(hot_pixels[1],hot_pixels[0],c='r',s=1)
+	plt.title('Selected hot/dead pixels')
+	plt.show()
+
+	for pixels in [hot_pixels]:
+		image = image.at[pixels[0],pixels[1]].set(0)
+		errors = errors.at[pixels[0],pixels[1]].set(1e6)
+	
+	return image, errors
