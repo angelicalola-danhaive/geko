@@ -341,43 +341,27 @@ class Fit_Numpyro():
 		# 	# over betas as a TransformedDistribution
 		# 	fluxes = numpyro.sample("fluxes",dist.TransformedDistribution(dist.TruncatedNormal(jnp.zeros(self.flux_prior.shape), jnp.ones_like(self.flux_prior), low = self.low, high = self.high),AffineTransform(self.mu, self.sigma),),)
 
-		if self.flux_type == 'log':
-			fluxes = jnp.power(10, fluxes)
-
 		fluxes = oversample(fluxes, self.factor, self.factor)
 
-		if self.PA_bounds[1] == 'const':
-			Pa = 30
-		else:
-			Pa = numpyro.sample('PA', dist.Uniform())
-			#sample the mu_PA + 0 or 180 (orientation of velocity field)
-			rotation = numpyro.sample('rotation', dist.Uniform())
 
-			#simulate a bernouilli discrete distribution
-			PA_morph = self.mu_PA + round(rotation)*180
+		Pa = numpyro.sample('PA', dist.Uniform())
+		#sample the mu_PA + 0 or 180 (orientation of velocity field)
+		rotation = numpyro.sample('rotation', dist.Uniform())
 
-			Pa = norm.ppf(Pa)*self.sigma_PA + PA_morph
-			# Pa = norm.ppf(  norm.cdf(self.low_PA) + Pa*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
-		if self.i_bounds == 'const':
-			i = 60
-		else:
-			i = numpyro.sample('i', dist.Uniform())*(self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
-		if self.Va_bounds == 'const':
-			Va  = 600
-		else:
-			Va = numpyro.sample('Va', dist.Uniform())*(self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
-		if self.r_t_bounds == 'const':
-			r_t = 2
-		else:
-			r_t = numpyro.sample('r_t', dist.Uniform())*(self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
+		#simulate a bernouilli discrete distribution
+		PA_morph = self.mu_PA + round(rotation)*180
 
-		if self.sigma0_bounds == 'const':
-			sigma0 = 100
-		else:
-			sigma0 = numpyro.sample('sigma0', dist.Uniform())*(self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
-			# sigma0 = norm.ppf(sigma0)*self.sigma_sigma0 + self.mu_sigma0
-		# sigma0 = norm.ppf(  norm.cdf(self.low_sigma0) + fluxes*(norm.cdf(self.high_sigma0)-norm.cdf(self.low_sigma0)) )*self.sigma_sigma0 + self.mu_sigma0
-		# sigma0 = 100
+		Pa = norm.ppf(Pa)*self.sigma_PA + PA_morph
+		# Pa = norm.ppf(  norm.cdf(self.low_PA) + Pa*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
+
+		i = numpyro.sample('i', dist.Uniform())*(self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
+
+		Va = numpyro.sample('Va', dist.Uniform())*(self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
+
+		r_t = numpyro.sample('r_t', dist.Uniform())*(self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
+
+		sigma0 = numpyro.sample('sigma0', dist.Uniform())*(self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
+
 
 		#sampling the velocity centroids
 		# x0 = numpyro.sample('x0', dist.Uniform())
@@ -385,6 +369,7 @@ class Fit_Numpyro():
 		# y0 = numpyro.sample('y0', dist.Uniform())
 		# y0 = norm.ppf(y0)*(2) + self.y0
 
+		#create new grid centered on those centroids
 		# x = jnp.linspace(0 - x0,self.grism_object.direct.shape[1]-1 - x0, self.grism_object.direct.shape[1]*self.factor*10)
 		# y = jnp.linspace(0 - y0,self.grism_object.direct.shape[0]-1 - y0, self.grism_object.direct.shape[0]*self.factor*10)
 		# X,Y = jnp.meshgrid(x, y)
@@ -407,19 +392,13 @@ class Fit_Numpyro():
 		self.model_map = self.grism_object.disperse(fluxes, velocities, dispersions)
 
 		self.model_map = resample(self.model_map, self.y_factor*self.factor, self.wave_factor)
-		# self.model_map = resample(self.model_map, self.factor, self.wave_factor)
 
 		self.error_scaling = numpyro.sample('error_scaling', dist.Uniform(0,1))*9 + 1
 		# self.error_scaling = 1
 		numpyro.sample('obs', dist.Normal(self.model_map,self.error_scaling*self.obs_error), obs=self.obs_map)
+
 		# numpyro.sample('obs', dist.Normal(self.model_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:],
 		# 		     self.error_scaling*self.obs_error[self.obs_map_bounds[0]:self.obs_map_bounds[1],:]), 
-		# 			 obs=self.obs_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:])
-		
-		# compare the model fluxes with the flux prior as well
-		# numpyro.sample('fluxes_prior', dist.Normal(fluxes, 0.1*fluxes), obs=oversample(self.flux_prior, self.factor))
-		# numpyro.sample('obs', dist.Normal(self.model_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:],
-		# 		     self.obs_error[self.obs_map_bounds[0]:self.obs_map_bounds[1],:]), 
 		# 			 obs=self.obs_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:])
 
 	
