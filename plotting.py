@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import corner
 from matplotlib import gridspec
+from scipy.constants import c, pi
 
 
 def plot_image(image, x0, y0, direct_size, limits = None, save_to_folder = None, name = None):
@@ -223,7 +224,7 @@ def plot_full_summary(obs_map, model_map, obs_error, model_velocities, fluxes_me
 
 	ax_obs = plt.subplot(spec[0, 0])
 	x = wave_space
-	y = np.linspace(0 - direct_image_size, y0 - 1 - direct_image_size, direct_image_size//factor)
+	y = np.linspace(0 - y0, direct_image_size- 1 - y0, obs_map.shape[0])
 	X, Y = np.meshgrid(x, y)
 	cp = ax_obs.pcolormesh(X, Y, obs_map, shading='nearest',
 						vmax=obs_map.max(), vmin=obs_map.min())  # RdBu
@@ -325,3 +326,188 @@ def plot_full_summary(obs_map, model_map, obs_error, model_velocities, fluxes_me
 
 	plt.show()
 	plt.close()
+
+def define_corner_args(divergences = False, fill_contours = True, plot_contours = True, show_titles = True, quantiles = [0.16,0.84], labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$']):
+	"""
+		Defines the cornerplot arguments
+	"""
+
+	CORNER_KWARGS = dict(
+		smooth=2,
+		label_kwargs=dict(fontsize=30),
+		title_kwargs=dict(fontsize=20),
+		quantiles=quantiles,
+		plot_density=False,
+		plot_datapoints=False,
+		fill_contours=fill_contours,
+		plot_contours=plot_contours,
+		show_titles=show_titles,
+		labels=labels,
+		max_n_ticks=3,
+		divergences=divergences)
+
+	return CORNER_KWARGS
+
+def plot_pp_cornerplot(data, choice='model', model = None, PA=None, i=None, Va=None, r_t=None, sigma0=None, save=False, div = False, save_to_folder = None, name = None, prior = True):
+	"""
+
+			Plots cornerplot with both prior and posterior, only for the 4/5 central pixels in terms of flux (following Price et al 2021)
+
+	"""
+	if choice == 'model':
+
+		v_r = Va * (2/pi) * np.arctan(2/r_t)
+
+		truths = { 'PA': PA, 'i': i, 'Va': Va,
+						  'r_t': r_t, 'sigma0': sigma0,'v_r': v_r}
+
+		CORNER_KWARGS = define_corner_args(divergences = div)		
+
+		fig = corner.corner(data, group='posterior', var_names=['PA', 'Va', 'i', 'r_t','sigma0','v_r'], truths = truths, truth_color='crimson',
+									color='blue', **CORNER_KWARGS)
+			
+		if prior:
+			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False)
+
+			fig = corner.corner(data , group='prior', var_names=['PA', 'Va', 'i','r_t','sigma0','v_r'], fig=fig, 
+										color='lightgray', **CORNER_KWARGS)
+			
+
+	if choice == 'real':
+
+		if model == 'one_component_model':
+
+			CORNER_KWARGS = define_corner_args(divergences = div)
+
+			fig = corner.corner(data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','v_r'],
+										color='blue', **CORNER_KWARGS)
+				
+			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False)
+
+			fig = corner.corner(data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','v_r'], fig=fig,
+										color='lightgray', **CORNER_KWARGS)
+
+				
+	if model == 'two_disc_model':
+		CORNER_KWARGS = dict(
+					smooth=2,
+					label_kwargs=dict(fontsize=16),
+					title_kwargs=dict(fontsize=16),
+					quantiles=[0.16, 0.84],
+					plot_density=False,
+					plot_datapoints=False,
+					fill_contours=True,
+					plot_contours=True,
+					show_titles=True,
+					max_n_ticks=3,
+					divergences=div)
+
+		fig = corner.corner(data, group='posterior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1', 'v_offset','PA_2', 'i_2','sigma0_2','v_r_2'],
+									color='blue', **CORNER_KWARGS)
+		CORNER_KWARGS = dict(
+					smooth=2,
+					label_kwargs=dict(fontsize=16),
+					title_kwargs=dict(fontsize=16),
+					plot_density=False,
+					plot_datapoints=True,
+					fill_contours=False,
+					plot_contours=False,
+					show_titles=False,
+					max_n_ticks=3)
+
+		fig = corner.corner(data, group='prior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1','v_offset','PA_2', 'i_2','sigma0_2','v_r_2'], fig=fig,
+									color='lightgray', **CORNER_KWARGS)
+			
+			
+
+		if model == 'unified_two_discs_model':
+			CORNER_KWARGS = dict(
+					smooth=2,
+					label_kwargs=dict(fontsize=16),
+					title_kwargs=dict(fontsize=16),
+					quantiles=[0.16, 0.84],
+					plot_density=False,
+					plot_datapoints=False,
+					fill_contours=True,
+					plot_contours=True,
+					show_titles=True,
+					max_n_ticks=3,
+					divergences=div)
+
+			fig = corner.corner(data, group='posterior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1','PA_2', 'i_2','sigma0_2','v_r_2', 'x0_1', 'y0_1', 'x0_2', 'y0_2'],
+									color='blue', **CORNER_KWARGS)
+			CORNER_KWARGS = dict(
+					smooth=2,
+					label_kwargs=dict(fontsize=16),
+					title_kwargs=dict(fontsize=16),
+					plot_density=False,
+					plot_datapoints=True,
+					fill_contours=False,
+					plot_contours=False,
+					show_titles=False,
+					max_n_ticks=3)
+
+			fig = corner.corner(data, group='prior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1','PA_2', 'i_2','sigma0_2','v_r_2', 'x0_1', 'y0_1', 'x0_2', 'y0_2'], fig=fig,
+									color='lightgray', **CORNER_KWARGS)
+			
+		if save_to_folder != None:
+				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.show()
+
+
+def plot_tuning_parameters(data, model = 'one_component_model', rotation = True, wavelength = True, errors = True, div = False, save_to_folder = None, name = None):
+		"""
+
+			Plots cornerplot with both prior and posterior, for the tuning parameters
+
+		"""
+	
+		if model == 'one_component_model':
+
+			var_names = []
+			labels = []
+			if rotation:
+				var_names.append('rotation')
+				labels.append(r'$\theta$')
+			if wavelength:
+				var_names.append('wavelength')
+				labels.append(r'$\lambda_{EL}$')
+			if errors:
+				var_names.append('error_scaling')
+				labels.append(r'$f_{err}$')
+
+			CORNER_KWARGS = define_corner_args(divergences = div, labels = labels)
+
+			fig = corner.corner(data, group='posterior', var_names=var_names,
+										color='blue', **CORNER_KWARGS)
+				
+			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False, labels = labels)
+
+			fig = corner.corner(data, group='prior', var_names=var_names, fig=fig,
+										color='lightgray', **CORNER_KWARGS)
+			
+		if save_to_folder != None:
+			plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.show()
+
+
+def plot_flux_corner(data, index_min, index_max, model = 'one_component_model', div = False, save_to_folder = None, name = None):
+		"""
+
+			Plots cornerplot with both prior and posterior for some of the fluxes
+
+		"""
+	
+		if model == 'one_component_model':
+
+			CORNER_KWARGS = define_corner_args(divergences = div, labels = None)
+
+			fig = corner.corner(data.data['posterior']['fluxes'][:,:,index_min:index_max], group='posterior', color='blue', **CORNER_KWARGS)
+				
+			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False, labels = None)
+
+			fig = corner.corner(data.data['prior']['fluxes'][:,:,index_min:index_max], group='prior', fig=fig, color='lightgray', **CORNER_KWARGS)
+			
+		if save_to_folder != None:
+			plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		plt.show()

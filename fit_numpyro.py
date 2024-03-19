@@ -409,8 +409,8 @@ class Fit_Numpyro():
 		self.model_map = resample(self.model_map, self.y_factor*self.factor, self.wave_factor)
 		# self.model_map = resample(self.model_map, self.factor, self.wave_factor)
 
-		# self.error_scaling = numpyro.sample('error_scaling', dist.Uniform(0,1))*9 + 1
-		self.error_scaling = 1
+		self.error_scaling = numpyro.sample('error_scaling', dist.Uniform(0,1))*9 + 1
+		# self.error_scaling = 1
 		numpyro.sample('obs', dist.Normal(self.model_map,self.error_scaling*self.obs_error), obs=self.obs_map)
 		# numpyro.sample('obs', dist.Normal(self.model_map[self.obs_map_bounds[0]:self.obs_map_bounds[1],:],
 		# 		     self.error_scaling*self.obs_error[self.obs_map_bounds[0]:self.obs_map_bounds[1],:]), 
@@ -1170,6 +1170,10 @@ class Fit_Numpyro():
 		"""
 
 		if model_name == 'one_component_model':
+		#find indices of highest log likelihood sample
+
+			best_indices = np.unravel_index(self.data['sample_stats']['lp'].argmin(), self.data['sample_stats']['lp'].shape)
+
 		# rescale all of the posteriors from uniform to the actual parameter space
 
 			# print(self.mu[15], self.sigma[15], self.low[15], self.high[15])
@@ -1184,7 +1188,10 @@ class Fit_Numpyro():
 			# only fit for fluxes in the region of the mask
 			self.data.posterior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.posterior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
 			self.data.prior['fluxes'].data = norm.ppf(norm.cdf(self.low) + self.data.prior['fluxes'].data*(norm.cdf(self.high)-norm.cdf(self.low)))*self.sigma + self.mu
-			self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+			#take the posterior median
+			# self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].median(dim=["chain", "draw"]))
+			#take the maximum likelihood sample
+			self.fluxes_sample_mean = jnp.array(self.data.posterior['fluxes'].isel(chain=best_indices[0], draw=best_indices[1]))
 
 			self.fluxes_mean = jnp.zeros_like(self.flux_prior)
 			self.fluxes_mean = self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
@@ -1193,10 +1200,14 @@ class Fit_Numpyro():
 			# self.data.posterior['PA'].data = norm.ppf(  norm.cdf(self.low_PA) + self.data.posterior['PA'].data*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
 			# self.data.prior['PA'].data = norm.ppf(  norm.cdf(self.low_PA) + self.data.prior['PA'].data*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
 			if self.PA_bounds[1] != 'const':
-				self.data.posterior['PA'].data = norm.ppf(self.data.posterior['PA'].data)*self.sigma_PA + self.mu_PA
-				self.data.prior['PA'].data = norm.ppf(self.data.prior['PA'].data)*self.sigma_PA + self.mu_PA
-				self.PA_mean = jnp.array(self.data.posterior['PA'].median())
-				# self.PA_mean = -53
+				rotation = float(self.data.posterior['rotation'].median(dim=["chain", "draw"]))
+				PA_morph = self.mu_PA + round(rotation)*180
+				self.data.posterior['PA'].data = norm.ppf(self.data.posterior['PA'].data)*self.sigma_PA + PA_morph
+				self.data.prior['PA'].data = norm.ppf(self.data.prior['PA'].data)*self.sigma_PA +  PA_morph
+				# self.PA_mean = jnp.array(self.data.posterior['PA'].median())
+				#take the maximum likelihood sample
+				self.PA_mean = jnp.array(self.data.posterior['PA'].isel(chain=best_indices[0], draw=best_indices[1]))
+
 			else:
 				self.PA_mean = 30
 			# self.data.posterior['sigma0'].data = norm.ppf(  norm.cdf(self.low_sigma0) + self.data.posterior['sigma0'].data*(norm.cdf(self.high_sigma0)-norm.cdf(self.low_sigma0)) )*self.sigma_sigma0 + self.mu_sigma0
@@ -1207,21 +1218,27 @@ class Fit_Numpyro():
 				# self.data.prior['sigma0'].data = norm.ppf(self.data.prior['sigma0'].data)*self.sigma_sigma0 + self.mu_sigma0
 				self.data.prior['sigma0'].data = self.data.prior['sigma0'].data * (self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
 				self.data.posterior['sigma0'].data = self.data.posterior['sigma0'].data * (self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
-				self.sigma0_mean_model = jnp.array(self.data.posterior['sigma0'].median())
+				# self.sigma0_mean_model = jnp.array(self.data.posterior['sigma0'].median())
+				#take the maximum likelihood sample
+				self.sigma0_mean_model = jnp.array(self.data.posterior['sigma0'].isel(chain=best_indices[0], draw=best_indices[1]))
 				# self.sigma0_mean_model= 100
 			else:
 				self.sigma0_mean_model= 100
 			if self.i_bounds != 'const':	
 				self.data.posterior['i'].data = self.data.posterior['i'].data * (self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
 				self.data.prior['i'].data = self.data.prior['i'].data * (self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
-				self.i_mean = jnp.array(self.data.posterior['i'].median())
+				# self.i_mean = jnp.array(self.data.posterior['i'].median())
+				#take the maximum likelihood sample
+				self.i_mean = jnp.array(self.data.posterior['i'].isel(chain=best_indices[0], draw=best_indices[1]))
 				# self.i_mean = 41
 			else:
 				self.i_mean = 60
 			if self.Va_bounds != 'const':
 				self.data.posterior['Va'].data = self.data.posterior['Va'].data * (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
 				self.data.prior['Va'].data = self.data.prior['Va'].data * (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
-				self.Va_mean = jnp.array(self.data.posterior['Va'].median())
+				# self.Va_mean = jnp.array(self.data.posterior['Va'].median())
+				#take the maximum likelihood sample
+				self.Va_mean = jnp.array(self.data.posterior['Va'].isel(chain=best_indices[0], draw=best_indices[1]))
 				# self.Va_mean = 400
 
 			else:
@@ -1229,8 +1246,9 @@ class Fit_Numpyro():
 			if self.r_t_bounds != 'const':
 				self.data.posterior['r_t'].data = self.data.posterior['r_t'].data * (self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
 				self.data.prior['r_t'].data = self.data.prior['r_t'].data * (self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
-				self.r_t_mean = jnp.array(self.data.posterior['r_t'].median())
-				self.r_t_mean = 4
+				# self.r_t_mean = jnp.array(self.data.posterior['r_t'].median())
+				#take the maximum likelihood sample
+				self.r_t_mean = jnp.array(self.data.posterior['r_t'].isel(chain=best_indices[0], draw=best_indices[1]))
 			else:
 				self.r_t_mean = 2
 			
@@ -1266,6 +1284,14 @@ class Fit_Numpyro():
 			self.model_dispersions = self.sigma0_mean_model*jnp.ones_like(self.model_velocities)
 			# plt.imshow(self.model_dispersions)
 			# self.grism_object.wavelength = 3.5612
+			
+			self.data.posterior['wavelength'].data = norm.ppf(self.data.posterior['wavelength'].data)*0.001 + self.wavelength
+			self.data.prior['wavelength'].data = norm.ppf(self.data.prior['wavelength'].data)*0.001 + self.wavelength
+			#take the maximum likelihood sample
+			corrected_wavelength = float(jnp.array(self.data.posterior['wavelength'].isel(chain=best_indices[0], draw=best_indices[1])))
+			# corrected_wavelength = float(self.data.posterior['wavelength'].median(dim=["chain", "draw"]))
+			self.grism_object.set_wavelength(corrected_wavelength)
+
 			self.model_map_high = self.grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
 			self.model_map = resample(self.model_map_high, self.y_factor*self.factor, self.wave_factor)
 			# self.model_map = resample(self.model_map_high, self.factor, self.wave_factor
@@ -1779,154 +1805,6 @@ class Fit_Numpyro():
 		
 		self.model_map = resample(self.model_map, self.y_factor*self.factor, self.wave_factor)
 		
-	def plot_pp_cornerplot(self, choice='model', model = None, PA=None, i=None, Va=None, r_t=None, sigma0=None, save=False, div = False, save_to_folder = None, name = None, prior = True):
-		"""
-
-			Plots cornerplot with both prior and posterior, only for the 4/5 central pixels in terms of flux (following Price et al 2021)
-
-		"""
-		if choice == 'model':
-
-			v_r = Va * (2/pi) * jnp.arctan(2/r_t)
-			print(v_r)
-
-			truths = { 'PA': PA, 'i': i, 'Va': Va,
-						  'r_t': r_t, 'sigma0': sigma0,'v_r': v_r}
-
-			CORNER_KWARGS = dict(
-					smooth=2,
-					label_kwargs=dict(fontsize=16),
-					title_kwargs=dict(fontsize=16),
-					quantiles=[0.16, 0.84],
-					plot_density=False,
-					plot_datapoints=False,
-					fill_contours=True,
-					plot_contours=True,
-					show_titles=True,
-					max_n_ticks=3,
-					divergences=True)
-
-			fig = corner.corner(self.data, group='posterior', var_names=['PA', 'Va', 'i', 'r_t','sigma0','v_r'], truths = truths, truth_color='crimson',
-									color='blue', **CORNER_KWARGS)
-			
-			if prior:
-				CORNER_KWARGS = dict(
-						smooth=2,
-						label_kwargs=dict(fontsize=16),
-						title_kwargs=dict(fontsize=16),
-						plot_density=False,
-						plot_datapoints=True,
-						fill_contours=False,
-						plot_contours=False,
-						show_titles=False,
-						max_n_ticks=3)
-
-				fig = corner.corner(self.data, group='prior', var_names=['PA', 'Va', 'i','r_t','sigma0','v_r'], fig=fig, 
-										color='lightgray', **CORNER_KWARGS)
-
-				# corner.overplot_lines(fig, [10, 450, 10, 10, 10])
-			
-
-		if choice == 'real':
-
-			if model == 'one_component_model':
-
-				CORNER_KWARGS = dict(
-						smooth=2,
-						label_kwargs=dict(fontsize=16),
-						title_kwargs=dict(fontsize=16),
-						quantiles=[0.16, 0.84],
-						plot_density=False,
-						plot_datapoints=False,
-						fill_contours=True,
-						plot_contours=True,
-						show_titles=True,
-						max_n_ticks=3,
-						divergences=div)
-
-				fig = corner.corner(self.data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','v_r'],
-										color='blue', **CORNER_KWARGS)
-				CORNER_KWARGS = dict(
-						smooth=2,
-						label_kwargs=dict(fontsize=16),
-						title_kwargs=dict(fontsize=16),
-						plot_density=False,
-						plot_datapoints=True,
-						fill_contours=False,
-						plot_contours=False,
-						show_titles=False,
-						max_n_ticks=3)
-
-				fig = corner.corner(self.data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','v_r'], fig=fig,
-										color='lightgray', **CORNER_KWARGS)
-
-				# corner.overplot_lines(fig, [10, 450, 10, 10, 10])
-				
-		if model == 'two_disc_model':
-			CORNER_KWARGS = dict(
-					smooth=2,
-					label_kwargs=dict(fontsize=16),
-					title_kwargs=dict(fontsize=16),
-					quantiles=[0.16, 0.84],
-					plot_density=False,
-					plot_datapoints=False,
-					fill_contours=True,
-					plot_contours=True,
-					show_titles=True,
-					max_n_ticks=3,
-					divergences=div)
-
-			fig = corner.corner(self.data, group='posterior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1', 'v_offset','PA_2', 'i_2','sigma0_2','v_r_2'],
-									color='blue', **CORNER_KWARGS)
-			CORNER_KWARGS = dict(
-					smooth=2,
-					label_kwargs=dict(fontsize=16),
-					title_kwargs=dict(fontsize=16),
-					plot_density=False,
-					plot_datapoints=True,
-					fill_contours=False,
-					plot_contours=False,
-					show_titles=False,
-					max_n_ticks=3)
-
-			fig = corner.corner(self.data, group='prior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1','v_offset','PA_2', 'i_2','sigma0_2','v_r_2'], fig=fig,
-									color='lightgray', **CORNER_KWARGS)
-			
-			
-
-		if model == 'unified_two_discs_model':
-			CORNER_KWARGS = dict(
-					smooth=2,
-					label_kwargs=dict(fontsize=16),
-					title_kwargs=dict(fontsize=16),
-					quantiles=[0.16, 0.84],
-					plot_density=False,
-					plot_datapoints=False,
-					fill_contours=True,
-					plot_contours=True,
-					show_titles=True,
-					max_n_ticks=3,
-					divergences=div)
-
-			fig = corner.corner(self.data, group='posterior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1','PA_2', 'i_2','sigma0_2','v_r_2', 'x0_1', 'y0_1', 'x0_2', 'y0_2'],
-									color='blue', **CORNER_KWARGS)
-			CORNER_KWARGS = dict(
-					smooth=2,
-					label_kwargs=dict(fontsize=16),
-					title_kwargs=dict(fontsize=16),
-					plot_density=False,
-					plot_datapoints=True,
-					fill_contours=False,
-					plot_contours=False,
-					show_titles=False,
-					max_n_ticks=3)
-
-			fig = corner.corner(self.data, group='prior', var_names=['PA_1', 'i_1','sigma0_1','v_r_1','PA_2', 'i_2','sigma0_2','v_r_2', 'x0_1', 'y0_1', 'x0_2', 'y0_2'], fig=fig,
-									color='lightgray', **CORNER_KWARGS)
-			
-		if save_to_folder != None:
-				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
-		plt.show()
 
 
 	def diverging_parameters(self, chain_number, divergence_number):
