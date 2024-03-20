@@ -12,6 +12,7 @@ import numpy as np
 import corner
 from matplotlib import gridspec
 from scipy.constants import c, pi
+from jax import image
 
 
 def plot_image(image, x0, y0, direct_size, limits = None, save_to_folder = None, name = None):
@@ -112,7 +113,7 @@ def plot_velocity_profile(image, x0, y0, direct_size, velocities, save_to_folder
 	X, Y = np.meshgrid(x, y)
 
 	extent = -y0, y0, -x0, x0
-	plt.imshow(image, origin = 'lower', extent = extent, cmap = 'viridis')
+	plt.imshow(image, origin = 'lower', extent = extent, cmap = 'binary')
 	CS = plt.contour(X,Y,velocities, 7, cmap = 'RdBu', origin = 'lower')
 	cbar =plt.colorbar(CS)
 	plt.tick_params(axis='both', which='major', labelsize=11)
@@ -121,6 +122,28 @@ def plot_velocity_profile(image, x0, y0, direct_size, velocities, save_to_folder
 	cbar.ax.set_ylabel('velocity [km/s]')
 	cbar.add_lines(CS)
 	plt.tight_layout()
+
+	if save_to_folder != None:
+		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+
+	plt.show()
+	plt.close()
+
+def plot_velocity_map(velocities, mask, x0, y0, direct_size,save_to_folder = None, name = None):
+	x = np.linspace(0 - x0, direct_size- 1 - x0, direct_size)
+	y = np.linspace(0 - y0, direct_size- 1 - y0, direct_size)
+	X, Y = np.meshgrid(x, y)
+
+	if mask.shape[0]!=velocities.shape[0]:
+		velocities = image.resize(velocities, (int(velocities.shape[0]/2), int(velocities.shape[1]/2)), method='nearest')
+
+	plt.imshow(np.where(mask ==1, velocities, np.nan), origin = 'lower', cmap = 'RdBu')
+	plt.xlabel(r'$\Delta$ RA [px]',fontsize = 11)
+	plt.ylabel(r'$\Delta$ DEC [px]',fontsize = 11)
+	cbar = plt.colorbar()
+	cbar.ax.set_ylabel('velocity [km/s]')
+	plt.tight_layout()
+
 
 	if save_to_folder != None:
 		plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
@@ -215,7 +238,7 @@ def plot_summary(image, image_model, image_error, map, map_model, map_error, x0,
 	plt.close()
 	
 
-def plot_full_summary(obs_map, model_map, obs_error, model_velocities, fluxes_mean, data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None):
+def plot_full_summary(obs_map, model_map, obs_error, model_velocities, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None):
 	fig = plt.figure()
 	fig.set_size_inches(10, 5)
 	spec = gridspec.GridSpec(ncols=3, nrows=3,
@@ -263,8 +286,8 @@ def plot_full_summary(obs_map, model_map, obs_error, model_velocities, fluxes_me
 
 
 	vel_ax = plt.subplot(spec[:, 2])
-	x = np.linspace(0 - x0, direct_image_size - 1 - x0, direct_image_size*factor)
-	y = np.linspace(0 - y0, direct_image_size - 1 - y0, direct_image_size*factor)
+	x = np.linspace(0 - x0, direct_image_size - 1 - x0, direct_image_size)
+	y = np.linspace(0 - y0, direct_image_size - 1 - y0, direct_image_size)
 	X, Y = np.meshgrid(x, y)
 
 	extent = -y0, y0, -x0, x0
@@ -291,11 +314,11 @@ def plot_full_summary(obs_map, model_map, obs_error, model_velocities, fluxes_me
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=True,
-		labels=[r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$'],
+		labels=[r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
 		max_n_ticks=3,
 		divergences=False)
 
-	figure = corner.corner(data.data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_r'],
+	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'],
 						color='blue', **CORNER_KWARGS)
 	CORNER_KWARGS = dict(
 		smooth=2,
@@ -305,11 +328,11 @@ def plot_full_summary(obs_map, model_map, obs_error, model_velocities, fluxes_me
 		plot_datapoints=True,
 		fill_contours=False,
 		plot_contours=False,
-		labels=[r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$'],
+		labels=[r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
 		show_titles=False,
 		max_n_ticks=3)
 
-	figure = corner.corner(data.data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_r'], fig=figure,
+	figure = corner.corner(inf_data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'], fig=figure,
 						color='lightgray', **CORNER_KWARGS)
 
 	plt.savefig('cornerplot.png', dpi=300)
@@ -375,16 +398,16 @@ def plot_pp_cornerplot(data, choice='model', model = None, PA=None, i=None, Va=N
 
 	if choice == 'real':
 
-		if model == 'one_component_model':
+		if model == 'Disk':
 
 			CORNER_KWARGS = define_corner_args(divergences = div)
 
-			fig = corner.corner(data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','v_r'],
+			fig = corner.corner(data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'],
 										color='blue', **CORNER_KWARGS)
 				
 			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False)
 
-			fig = corner.corner(data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','v_r'], fig=fig,
+			fig = corner.corner(data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'], fig=fig,
 										color='lightgray', **CORNER_KWARGS)
 
 				
@@ -453,28 +476,32 @@ def plot_pp_cornerplot(data, choice='model', model = None, PA=None, i=None, Va=N
 		if save_to_folder != None:
 				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 		plt.show()
+		plt.close()
 
 
-def plot_tuning_parameters(data, model = 'one_component_model', rotation = True, wavelength = True, errors = True, div = False, save_to_folder = None, name = None):
+def plot_tuning_parameters(data, model = 'one_component_model', rotation = True, v0 = True, errors = True, y0 = True, div = False, save_to_folder = None, name = None):
 		"""
 
 			Plots cornerplot with both prior and posterior, for the tuning parameters
 
 		"""
 	
-		if model == 'one_component_model':
+		if model == 'Disk':
 
 			var_names = []
 			labels = []
 			if rotation:
 				var_names.append('rotation')
 				labels.append(r'$\theta$')
-			if wavelength:
-				var_names.append('wavelength')
-				labels.append(r'$\lambda_{EL}$')
+			if v0:
+				var_names.append('v0')
+				labels.append(r'$v_0$')
 			if errors:
 				var_names.append('error_scaling')
 				labels.append(r'$f_{err}$')
+			if y0:
+				var_names.append('y0_vel')
+				labels.append(r'$y_{0,vel}$')
 
 			CORNER_KWARGS = define_corner_args(divergences = div, labels = labels)
 
@@ -489,9 +516,10 @@ def plot_tuning_parameters(data, model = 'one_component_model', rotation = True,
 		if save_to_folder != None:
 			plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 		plt.show()
+		plt.close()
 
 
-def plot_flux_corner(data, index_min, index_max, model = 'one_component_model', div = False, save_to_folder = None, name = None):
+def plot_flux_corner(inf_data, index_min, index_max, model = 'one_component_model', div = False, save_to_folder = None, name = None):
 		"""
 
 			Plots cornerplot with both prior and posterior for some of the fluxes
@@ -502,12 +530,13 @@ def plot_flux_corner(data, index_min, index_max, model = 'one_component_model', 
 
 			CORNER_KWARGS = define_corner_args(divergences = div, labels = None)
 
-			fig = corner.corner(data.data['posterior']['fluxes'][:,:,index_min:index_max], group='posterior', color='blue', **CORNER_KWARGS)
+			fig = corner.corner(inf_data['posterior']['fluxes'][:,:,index_min:index_max], group='posterior', color='blue', **CORNER_KWARGS)
 				
 			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False, labels = None)
 
-			fig = corner.corner(data.data['prior']['fluxes'][:,:,index_min:index_max], group='prior', fig=fig, color='lightgray', **CORNER_KWARGS)
+			fig = corner.corner(inf_data['prior']['fluxes'][:,:,index_min:index_max], group='prior', fig=fig, color='lightgray', **CORNER_KWARGS)
 			
 		if save_to_folder != None:
 			plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
 		plt.show()
+		plt.close()

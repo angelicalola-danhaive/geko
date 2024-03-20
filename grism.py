@@ -42,7 +42,7 @@ from photutils.centroids import centroid_1dg
 
 
 class Grism:
-	def __init__(self, direct = None, direct_scale = 0.03, factor = 1, icenter = 5, jcenter = 5, segmentation = None, xcenter_detector = 1024, ycenter_detector = 1024, 
+	def __init__(self, direct = None, direct_scale = 0.03, factor = 1, y_factor = 1, icenter = 5, jcenter = 5, segmentation = None, xcenter_detector = 1024, ycenter_detector = 1024, 
 		wavelength = 4.2 , redshift = 7.2, wave_space = None, wave_factor = 1, wave_scale = 0.001, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', higher_res = False):
 		"""Object for computing dispersed model spectra (emission line)
 
@@ -137,6 +137,7 @@ class Grism:
 
 		self.factor = factor
 		self.wave_factor = wave_factor
+		self.y_factor = y_factor
 
 		#segmentation map over the object pixels that need to be considered
 		self.seg = jnp.array(segmentation)

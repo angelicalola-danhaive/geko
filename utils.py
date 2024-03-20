@@ -63,6 +63,8 @@ def scale_distribution(distribution, mu, sigma, max, min):
         #if mu and max are not None, then the distribution is truncated Gaussian
         rescaled_distribution = scale_truncated_gaussian(
             distribution, mu, sigma, max, min)
+        
+    return rescaled_distribution
 
 
 def scale_uniform(distribution, max, min):
@@ -78,6 +80,7 @@ def scale_gaussian(distribution, mu, sigma):
         Rescale a distribution to a Gaussian distribution
     """
     rescaled_distribution = norm.ppf(distribution) * sigma + mu
+    return rescaled_distribution
 
 def scale_truncated_gaussian(distribution, mu, sigma, high, low):
     """
@@ -93,16 +96,15 @@ def find_best_sample(inference_data, variable, mu, sigma, max, min, MLS):
        MLS is either none to take median sample or it contains the indices with the higest
        likelihood sample
     """
-    variable = [variable]
-    rescaled_posterior = []
-    rescaled_prior = []
+    #even if only one variable is passed, make sure it is still a list (with only one entry)
+    variable = variable
     best_sample = []
 
     for i, var in enumerate(variable):
-        rescaled_posterior.append(scale_distribution(
-            inference_data.posterior[var].data, mu[i], sigma[i], max[i], min[i]))
-        rescaled_prior.append(scale_distribution(
-            inference_data.prior[var].data, mu[i], sigma[i], max[i], min[i]))
+
+        #inference_data is modified even if it is not returned
+        inference_data.posterior[var].data = scale_distribution(inference_data.posterior[var].data, mu[i], sigma[i], max[i], min[i])
+        inference_data.prior[var].data = scale_distribution(inference_data.prior[var].data, mu[i], sigma[i], max[i], min[i])
         
         if MLS == None:
             print('Taking posterior median sample')
@@ -110,7 +112,8 @@ def find_best_sample(inference_data, variable, mu, sigma, max, min, MLS):
         else:
             print('Taking the maximum likelihood sample')
             best_sample.append(jnp.array(inference_data.posterior[var].isel(chain=MLS[0], draw=MLS[1])))
+
     
-    return rescaled_posterior, rescaled_prior, best_sample
+    return best_sample
 
 

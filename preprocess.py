@@ -100,7 +100,7 @@ def read_config_file(input, output):
     #import all of the bounds needed for the priors
 	flux_bounds = inference['Inference']['flux_bounds']
 	flux_type = inference['Inference']['flux_type']
-	PA_normal = inference['Inference']['PA_normal']
+	PA_bounds = inference['Inference']['PA_bounds']
 	i_bounds = inference['Inference']['i_bounds']
 	Va_bounds = inference['Inference']['Va_bounds']
 	r_t_bounds = inference['Inference']['r_t_bounds']
@@ -122,7 +122,7 @@ def read_config_file(input, output):
 	target_accept_prob = inference['Inference']['target_accept_prob']
 	
 	#return all of the parameters
-	return data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_normal, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
+	return data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
 def renormalize_image(direct, obs_map, flux_threshold, y_factor):
@@ -130,21 +130,26 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 		Normalize the image to match the total flux in the EL map
 	"""
 
-	threshold = flux_threshold*direct.max()
+	threshold = flux_threshold*0.5*direct.max()
 	mask = jnp.zeros_like(direct)
 	mask = mask.at[jnp.where(direct>threshold)].set(1)
-	mask = dilation(mask, disk(2))
+	# mask = dilation(mask, disk(2))
 
-	#plot the direct image found within the mask, the rest set to 0
-	# plt.imshow(direct*mask, cmap='viridis', origin='lower')
-	# plt.title('Direct image within the mask')
-	# plt.show()
+	# plot the direct image found within the mask, the rest set to 0
+	plt.imshow(direct*mask, cmap='viridis', origin='lower')
+	plt.title('Direct image within the mask')
+	plt.show()
 
 	#create a mask for the grism map
-	threshold_grism = flux_threshold*obs_map.max()
+	threshold_grism = flux_threshold*0.5*obs_map.max()
 	mask_grism = jnp.zeros_like(obs_map)
 	mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
-	mask_grism = dilation(mask_grism, disk(6))
+	# mask_grism = dilation(mask_grism, disk(6))
+
+	# plot the grism image found within the mask, the rest set to 0
+	plt.imshow(obs_map*mask_grism, cmap='viridis', origin='lower')
+	plt.title('Grism data within the mask')
+	plt.show()
 
 	#compute the normalization factor
 	normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask == 1)].sum()
@@ -159,7 +164,7 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 
 	return direct, normalization_factor, mask, mask_grism
 
-def mask_bad_pixels(image,errors,tolerance=4):
+def mask_bad_pixels(image,errors,tolerance=3.5):
 	"""
 		Set the hot and dead pixels to zero and set their errors to a high value so they do not
 		carry weight in the fit
@@ -177,10 +182,10 @@ def mask_bad_pixels(image,errors,tolerance=4):
 		return image, errors
 	
 	#plot the hot pixels
-	# plt.imshow(image, cmap='viridis', origin='lower')
-	# plt.scatter(hot_pixels[1],hot_pixels[0],c='r',s=1)
-	# plt.title('Selected hot/dead pixels')
-	# plt.show()
+	plt.imshow(image, cmap='viridis', origin='lower')
+	plt.scatter(hot_pixels[1],hot_pixels[0],c='r',s=1)
+	plt.title('Selected hot/dead pixels')
+	plt.show()
 
 	for pixels in [hot_pixels]:
 		image = image.at[pixels[0],pixels[1]].set(0)
@@ -460,4 +465,4 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 	#compute PA from the cropped med band image (not the EL map)
 	PA_truth = compute_PA(med_band_cutout)
 
-	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), PA_truth, xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior, wave_space, d_wave, index_min, index_max , factor
+	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), PA_truth, xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max

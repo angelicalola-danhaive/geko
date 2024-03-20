@@ -14,6 +14,7 @@ import utils
 # jax and its functions
 import jax.numpy as jnp
 from jax.scipy.stats import norm
+from jax import image
 
 # scipy and its functions
 from scipy.constants import pi
@@ -55,8 +56,8 @@ class KinModels:
     def sigma(self, x, y, sigma0, r_eff=None, I0=None, PA=None, i=None):
         return sigma0
 
-    def set_main_bounds(self, flux_prior, flux_bounds, flux_type, PA_bounds, PA_normal, i_bounds, Va_bounds, r_t_bounds,
-                        sigma0_mean, sigma0_disp, sigma0_bounds, obs_map_bounds,  mask, y_factor, x0, x0_vel, y0, y0_vel,
+    def set_main_bounds(self, flux_prior, flux_bounds, flux_type, PA_bounds, i_bounds, Va_bounds, r_t_bounds,
+                         sigma0_bounds, mask, y_factor, x0, x0_vel, y0, y0_vel,
                         delta_V_bounds, clump, clump_v_prior, clump_sigma_prior, clump_flux_prior):
         """
         Set the bounds for the model parameters by reading the ones from the config file.
@@ -69,15 +70,11 @@ class KinModels:
         self.flux_bounds = flux_bounds
         self.flux_type = flux_type
         self.PA_bounds = PA_bounds
-        self.PA_normal = PA_normal
         # these are in the form (low, high)
         self.i_bounds = i_bounds
         self.Va_bounds = Va_bounds
         self.r_t_bounds = r_t_bounds
-        self.sigma0_mean = sigma0_mean
-        self.sigma0_disp = sigma0_disp
         self.sigma0_bounds = sigma0_bounds
-        self.obs_map_bounds = obs_map_bounds
         self.clump = clump
         self.mask = mask
         self.delta_V_bounds = delta_V_bounds
@@ -87,10 +84,6 @@ class KinModels:
         self.clump_v_prior = clump_v_prior
         self.clump_sigma_prior = clump_sigma_prior
         self.clump_flux_prior = clump_flux_prior
-
-        if self.PA_bounds[1] != 'const':
-            self.mu_PA = self.PA_bounds[0]
-            self.sigma_PA = self.PA_bounds[1]*90
 
         self.x0 = x0
         self.y0 = y0
@@ -111,20 +104,19 @@ class Disk(KinModels):
     def __init__(self):
         print('Disk model created')
 
-    def set_bounds(self, flux_prior, flux_bounds, flux_type, PA_bounds, PA_normal, i_bounds, Va_bounds, r_t_bounds,
-                   sigma0_mean, sigma0_disp, sigma0_bounds, obs_map_bounds, mask, y_factor, x0, x0_vel, y0, y0_vel):
+    def set_bounds(self, flux_prior, flux_bounds, flux_type, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, mask, y_factor, x0, x0_vel, y0, y0_vel):
         """
 
         Compute all of the necessary bounds for the disk model sampling distributions
 
         """
         # first set all of the main bounds taken from the config file
-        self.set_main_bounds(flux_prior, flux_bounds, flux_type, PA_bounds, PA_normal, i_bounds, Va_bounds, r_t_bounds,
-                             sigma0_mean, sigma0_disp, sigma0_bounds, obs_map_bounds, mask, y_factor, x0, x0_vel, y0, y0_vel,
+        self.set_main_bounds(flux_prior, flux_bounds, flux_type, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, mask, y_factor, x0, x0_vel, y0, y0_vel,
                              delta_V_bounds=None, clump=None, clump_v_prior=None, clump_sigma_prior=None, clump_flux_prior=None)
 
         # now compute the specific bounds for the disk model
-
+        self.mu_PA = self.PA_bounds[0]
+        self.sigma_PA = self.PA_bounds[1]*90
         # if the fluxes are negative, set their prior to zero
         self.mu = jnp.maximum(
             jnp.zeros(self.flux_prior.shape), jnp.array(self.flux_prior))
@@ -155,19 +147,20 @@ class Disk(KinModels):
         """
 
         # sample the fluxes within the mask from a truncated normal distribution
-        reparam_config = {"fluxes": TransformReparam()}
-        with numpyro.handlers.reparam(config=reparam_config):
-            # in order to use TransformReparam we have to express the prior
-            # over betas as a TransformedDistribution
-            fluxes_sample = numpyro.sample("fluxes", dist.TransformedDistribution(dist.TruncatedNormal(jnp.zeros(int(
-                self.mask_shape)), jnp.ones_like(int(self.mask_shape)), low=self.low, high=self.high), AffineTransform(self.mu, self.sigma),),)
+
+        #manually
+        fluxes_sample = numpyro.sample('fluxes', dist.Uniform(), sample_shape=(int(self.mask_shape),))
+        fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.std + self.mu
+
+        #using the numpyro function
+        # reparam_config = {"fluxes": TransformReparam()}
+        # with numpyro.handlers.reparam(config=reparam_config):
+        #     # in order to use TransformReparam we have to express the prior
+        #     # over betas as a TransformedDistribution
+        #     fluxes_sample = numpyro.sample("fluxes", dist.TransformedDistribution(dist.TruncatedNormal(jnp.zeros(int(self.mask_shape)), jnp.ones_like(int(self.mask_shape)), low=self.low, high=self.high), AffineTransform(self.mu, self.std),),)
 
         fluxes = jnp.zeros_like(self.flux_prior)
         fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
-
-        # oversample to reach model space resolution
-        fluxes = utils.oversample(
-            fluxes, grism_object.factor, grism_object.factor)
 
         Pa = numpyro.sample('PA', dist.Uniform())
         # sample the mu_PA + 0 or 180 (orientation of velocity field)
@@ -179,7 +172,7 @@ class Disk(KinModels):
         Pa = norm.ppf(Pa)*self.sigma_PA + PA_morph
         # Pa = norm.ppf(  norm.cdf(self.low_PA) + Pa*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
 
-        #could probably use utils for this too 
+        #could probably use utils for this too
         i = numpyro.sample('i', dist.Uniform()) * \
             (self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
 
@@ -199,14 +192,13 @@ class Disk(KinModels):
         y0_vel = norm.ppf(y0_vel)*(2) + self.y0_vel
 
         # create new grid centered on those centroids
-        x = jnp.linspace(0 - self.x0_vel, grism_object.direct.shape[1]-1 - self.x0_vel, grism_object.direct.shape[1]*grism_object.factor)
-        y = jnp.linspace(0 - y0_vel, grism_object.direct.shape[0]-1 - y0_vel, grism_object.direct.shape[0]*grism_object.factor)
+        x = jnp.linspace(0 - self.x0_vel, self.flux_prior.shape[1]-1 - self.x0_vel, self.flux_prior.shape[1])
+        y = jnp.linspace(0 - y0_vel, self.flux_prior.shape[0]-1 - y0_vel, self.flux_prior.shape[0])
         X, Y = jnp.meshgrid(x, y)
 
         # sample for a shift in the y velocity centroid (since the x vel centroid is degenerate with the delta V that is sampled below)
 
-        velocities = jnp.array(
-            self.v(X, Y, jnp.radians(Pa), jnp.radians(i), Va, r_t))
+        velocities = jnp.array(self.v(X, Y, jnp.radians(Pa), jnp.radians(i), Va, r_t))
         # velocities = jnp.array(v(self.x, self.y, jnp.radians(Pa),jnp.radians(i), Va, r_t))
         # velocities = image.resize(velocities, (int(velocities.shape[0]/10), int(velocities.shape[1]/10)), method='nearest')
 
@@ -216,6 +208,10 @@ class Disk(KinModels):
 
         velocities = velocities + v0
 
+        #resample flux and velocities to grism resolution which is y_factor times smaller
+        fluxes = utils.resample(fluxes, grism_object.y_factor, grism_object.y_factor)
+        velocities = image.resize(velocities, (int(velocities.shape[0]/grism_object.y_factor), int(velocities.shape[1]/grism_object.y_factor)), method='nearest')
+
         dispersions = sigma0*jnp.ones_like(velocities)
 
         # sample a shift in the dispersion wavelength
@@ -224,18 +220,15 @@ class Disk(KinModels):
 
         # self.grism_object.set_wavelength(corrected_wavelength)
 
-        self.model_map = grism_object.disperse(
-            fluxes, velocities, dispersions)
+        self.model_map = grism_object.disperse(fluxes, velocities, dispersions)
 
-        self.model_map = utils.resample(
-            self.model_map, grism_object.y_factor*grism_object.factor, grism_object.wave_factor)
+        self.model_map = utils.resample(self.model_map, 1, grism_object.wave_factor)
 
         self.error_scaling = numpyro.sample('error_scaling', dist.Uniform(0, 1))*9 + 1
         # self.error_scaling = 1
-        numpyro.sample('obs', dist.Normal(
-            self.model_map, self.error_scaling*obs_error), obs=obs_map)
+        numpyro.sample('obs', dist.Normal(self.model_map, self.error_scaling*obs_error), obs=obs_map)
 
-    def plot_model(self, inference_data, grism_object):
+    def compute_model(self, inference_data, grism_object):
         """
 
         Function used to post-process the MCMC samples and plot results from the model
@@ -265,18 +258,20 @@ class Disk(KinModels):
             sigmas.append(self.std)
             highs.append(self.high)
             lows.append(self.low)
+            
 
-        rescaled_posterior, rescaled_prior, best_sample = utils.find_best_sample(
-            inference_data, variables, mus, sigmas, highs, lows, best_indices)
+        best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, best_indices)
         
-        for i,var in enumerate(variables):
-            inference_data.posterior[var].data = rescaled_posterior[i]
-            inference_data.prior[var].data = rescaled_prior[i]
+        # for i,var in enumerate(variables):
+        #     inference_data.posterior[var].data = rescaled_posterior[i]
+        #     inference_data.prior[var].data = rescaled_prior[i]
         
         if self.flux_type == 'manual':
             self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean, self.fluxes_sample_mean = best_sample
         else:
+            print(best_sample)
             self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean = best_sample
+            self.fluxes_sample_mean = jnp.array(inference_data.posterior['fluxes'].isel(chain=best_indices[0], draw=best_indices[1]))
 
         self.fluxes_mean = jnp.zeros_like(self.flux_prior)
         self.fluxes_mean = self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
@@ -285,9 +280,9 @@ class Disk(KinModels):
         self.x0_vel_mean = self.x0_vel #change this later to put the vel offset into the x0_vel_mean
 
         x = jnp.linspace(
-            0 - self.x0_vel_mean, grism_object.direct.shape[1] - 1 - self.x0_vel_mean, grism_object.direct.shape[1]*grism_object.factor)
+            0 - self.x0_vel_mean, self.flux_prior.shape[1] - 1 - self.x0_vel_mean, self.flux_prior.shape[1])
         y = jnp.linspace(
-            0 - self.y0_vel_mean, grism_object.direct.shape[0] - 1 - self.y0_vel_mean, grism_object.direct.shape[0]*grism_object.factor)
+            0 - self.y0_vel_mean, self.flux_prior.shape[0] - 1 - self.y0_vel_mean, self.flux_prior.shape[0])
         X, Y = jnp.meshgrid(x, y)
 
         self.model_velocities = jnp.array(self.v(X, Y, jnp.radians(
@@ -296,26 +291,28 @@ class Disk(KinModels):
 
         self.model_velocities = self.model_velocities + self.v0_mean
         # self.model_dispersions = jnp.array(sigma(self.x, self.y, self.sigma0_mean_model))
-        self.model_dispersions = self.sigma0_mean_model * \
-            jnp.ones_like(self.model_velocities)
+
+        #resample flux and velocities to grism resolution which is y_factor times smaller
+        self.model_flux = utils.resample(self.fluxes_mean, grism_object.y_factor, grism_object.y_factor)
+        self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.y_factor), int(self.model_velocities.shape[1]/grism_object.y_factor)), method='nearest')
+
+        self.model_dispersions = self.sigma0_mean_model *jnp.ones_like(self.model_velocities_low)
 
         #compute posterior and prior for the rotation velocity v_r = v_obs/sin i = 1/2*(vmax - vmin)/sin i where 
         #vmax and vmin are computed within the mask
-        inference_data.posterior['v_min'] = self.v(X,Y, inference_data.posterior['PA'].data, inference_data.posterior['i'].data, inference_data.posterior['Va'].data, inference_data.posterior['r_t'].data)
-        inference_data.prior['v_min'] = self.v(X,Y, inference_data.prior['PA'].data, inference_data.prior['i'].data, inference_data.prior['Va'].data, inference_data.prior['r_t'].data)
+        # inference_data.posterior['v'] = self.v(X,Y, inference_data.posterior['PA'].data, inference_data.posterior['i'].data, inference_data.posterior['Va'].data, inference_data.posterior['r_t'].data)
+        # inference_data.prior['v'] = self.v(X,Y, inference_data.prior['PA'].data, inference_data.prior['i'].data, inference_data.prior['Va'].data, inference_data.prior['r_t'].data)
 
-        inference_data.posterior['v_max'] = self.v(X,Y, inference_data.posterior['PA'].data, inference_data.posterior['i'].data, inference_data.posterior['Va'].data, inference_data.posterior['r_t'].data)
-        inference_data.prior['v_max'] = self.v(X,Y, inference_data.prior['PA'].data, inference_data.prior['i'].data, inference_data.prior['Va'].data, inference_data.prior['r_t'].data)
+        # inference_data.posterior['v_min'] = jnp.min(inference_data.posterior['v'])
+        # inference_data.prior['v_min'] = jnp.min(inference_data.prior['v'])
 
-        inference_data.posterior['v_r'] = 0.5*(inference_data.posterior['v_max'] - inference_data.posterior['v_min'])/jnp.sin(inference_data.posterior['i'].data)
-        inference_data.prior['v_r'] = 0.5*(inference_data.prior['v_max'] - inference_data.prior['v_min'])/jnp.sin(inference_data.prior['i'].data)
+        # inference_data.posterior['v_max'] = self.v(X,Y, inference_data.posterior['PA'].data, inference_data.posterior['i'].data, inference_data.posterior['Va'].data, inference_data.posterior['r_t'].data)
+        # inference_data.prior['v_max'] = self.v(X,Y, inference_data.prior['PA'].data, inference_data.prior['i'].data, inference_data.prior['Va'].data, inference_data.prior['r_t'].data)
 
-        self.model_flux = utils.oversample(
-            self.fluxes_mean, grism_object.factor, grism_object.factor)
+        # inference_data.posterior['v_r'] = 0.5*(inference_data.posterior['v_max'] - inference_data.posterior['v_min'])/jnp.sin(inference_data.posterior['i'].data)
+        # inference_data.prior['v_r'] = 0.5*(inference_data.prior['v_max'] - inference_data.prior['v_min'])/jnp.sin(inference_data.prior['i'].data)
 
-        self.model_map_high = grism_object.disperse(
-            self.model_flux, self.model_velocities, self.model_dispersions)
-        self.model_map = utils.resample(
-            self.model_map_high, self.y_factor*grism_object.factor, grism_object.wave_factor)
+        self.model_map_high = grism_object.disperse(self.model_flux, self.model_velocities_low, self.model_dispersions)
+        self.model_map = utils.resample(self.model_map_high, 1, grism_object.wave_factor)
         # self.model_map = resample(self.model_map_high, self.factor, self.wave_factor
-        return self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
+        return self.model_map, self.fluxes_mean, self.fluxes_mean, self.model_velocities, self.model_dispersions
