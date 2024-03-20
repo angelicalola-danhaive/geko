@@ -1,7 +1,7 @@
 # imports
 
 #importing my own modules
-import model_jax as model
+import grism 
 import preprocess as pre
 import plotting
 
@@ -249,8 +249,10 @@ class Fit_Numpyro():
 			if flux_type == 'lin':
 				#if the fluxes are negative, set their prior to zero
 				self.mu = jnp.maximum(jnp.zeros(self.flux_prior.shape), jnp.array(self.flux_prior))
-				self.sigma = self.flux_bounds[0]*jnp.array(self.flux_prior)
-				self.high =(self.flux_bounds[1]* jnp.array(self.flux_prior)+ self.mu - self.mu)/self.sigma
+				#if the flux is now zero, set the sigma to 0.000001 => so that sigma is never 0
+				self.sigma = jnp.maximum(0.000001, self.flux_bounds[0]*self.mu)
+				#same here, if the flux is zero, set the high to 0.000002
+				self.high =(jnp.maximum(0.000002, self.flux_bounds[1]* self.mu) + self.mu - self.mu)/self.sigma
 				self.low =(jnp.zeros(self.flux_prior.shape)-self.mu)/self.sigma
 				# correct for the mask = 0 pixels
 				if self.mask is not None:
@@ -1264,19 +1266,25 @@ class Fit_Numpyro():
 			# self.x0_mean = self.x0
 			# self.y0_mean = self.y0
 
-			x = jnp.linspace(0 - self.x0_vel, self.grism_object.direct.shape[1] - 1 - self.x0_vel, self.grism_object.direct.shape[1]*self.factor)
+			self.data.posterior['v0'].data = norm.ppf(self.data.posterior['v0'].data)*100
+			self.data.prior['v0'].data = norm.ppf(self.data.prior['v0'].data)*100
+			#take the maximum likelihood sample
+			self.v0_mean = float(self.data.posterior['v0'].isel(chain=best_indices[0], draw=best_indices[1]))
+
+			self.delta_x0 = (1/0.001)*(self.v0_mean/(c/1000))*self.wavelength #now need to turn it in units of x0
+			print('delta_x0: ', self.delta_x0)
+
+			self.x0_vel_mean = self.x0_vel  #+ self.delta_x0
+
+			x = jnp.linspace(0 - self.x0_vel_mean, self.grism_object.direct.shape[1] - 1 - self.x0_vel_mean, self.grism_object.direct.shape[1]*self.factor)
 			y = jnp.linspace(0 - self.y0_vel_mean, self.grism_object.direct.shape[0] - 1 - self.y0_vel_mean, self.grism_object.direct.shape[0]*self.factor)
 			X,Y = jnp.meshgrid(x,y)
 
 			self.model_velocities = jnp.array(v(X,Y, jnp.radians(self.PA_mean), jnp.radians(self.i_mean), self.Va_mean, self.r_t_mean))
 			# self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
 
-			self.data.posterior['v0'].data = norm.ppf(self.data.posterior['v0'].data)*100
-			self.data.prior['v0'].data = norm.ppf(self.data.prior['v0'].data)*100
-			#take the maximum likelihood sample
-			self.v0_mean = float(self.data.posterior['v0'].isel(chain=best_indices[0], draw=best_indices[1]))
 
-			self.model_velocities = self.model_velocities + self.v0_mean
+			self.model_velocities = self.model_velocities  + self.v0_mean
 			# self.model_dispersions = jnp.array(sigma(self.x, self.y, self.sigma0_mean_model))
 			self.model_dispersions = self.sigma0_mean_model*jnp.ones_like(self.model_velocities)
 			# plt.imshow(self.model_dispersions)
@@ -1292,7 +1300,7 @@ class Fit_Numpyro():
 			self.model_map_high = self.grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
 			self.model_map = resample(self.model_map_high, self.y_factor*self.factor, self.wave_factor)
 			# self.model_map = resample(self.model_map_high, self.factor, self.wave_factor
-			return self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions, self.y
+			return self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
 
 # #PLOT MODEL FOR THE REAL CASE
 # 		elif model_name == 'MLE':
@@ -2094,7 +2102,7 @@ if __name__ == "__main__":
 		snr_obs = params['Params']['snr_obs']
 		snr_flux = params['Params']['snr_flux']
 
-		grism_object = model.Grism(direct=truth_flux, direct_scale=0.0629/y_factor, factor=factor, icenter=y0, jcenter=x0, segmentation=None,
+		grism_object = grism.Grism(direct=truth_flux, direct_scale=0.0629/y_factor, factor=factor, icenter=y0, jcenter=x0, segmentation=None,
 								   xcenter_detector=1024, ycenter_detector=1024, wavelength=4.2, redshift=redshift,
 								   wave_space=wave_space, wave_scale=0.001/wave_factor, wave_factor = wave_factor, index_min=int(lower_index*wave_factor), index_max=int(upper_index*wave_factor),
 								   grism_filter='F444W', grism_module='A', grism_pupil='R')
@@ -2344,7 +2352,7 @@ if __name__ == "__main__":
 		#preprocess the images and the grism spectrum
 		obs_map, obs_error, direct, PA_truth, xcenter_detector, ycenter_detector, icenter, jcenter, \
 		wave_space, delta_wave, index_min, index_max , factor = \
-		model.preprocess_test(med_band_path, broad_band_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
+		pre.preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
 
 
 		#  ==============================================ALT ==============================================
@@ -2418,7 +2426,7 @@ if __name__ == "__main__":
 		y0_grism = y0
 
 		#initialize grism object
-		grism_object = model.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor,
+		grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor,
 								   xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
 								   wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
 								   grism_filter=broad_filter, grism_module='A', grism_pupil='R')
