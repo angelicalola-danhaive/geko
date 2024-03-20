@@ -282,7 +282,7 @@ class Fit_Numpyro():
 				# self.high_PA = (self.PA_bounds[0]+45 - self.mu_PA)/self.sigma_PA
 			# self.low_PA = (self.PA_bounds[0]-45 - self.mu_PA)/self.sigma_PA
 
-		# Velocity Dispersion
+		# Velocity Dispersion - this is not needed anymore because sigma0 is drawn from a uniform prior
 		if self.sigma0_bounds != 'const':
 			if self.sigma0_mean is not None:
 				print('manually setting mean to: ', self.sigma0_mean)
@@ -2102,7 +2102,7 @@ if __name__ == "__main__":
 		snr_obs = params['Params']['snr_obs']
 		snr_flux = params['Params']['snr_flux']
 
-		grism_object = grism.Grism(direct=truth_flux, direct_scale=0.0629/y_factor, factor=factor, icenter=y0, jcenter=x0, segmentation=None,
+		grism_object = grism.Grism(direct=truth_flux, direct_scale=0.0629/y_factor, factor=factor, y_factor=y_factor, icenter=y0, jcenter=x0, segmentation=None,
 								   xcenter_detector=1024, ycenter_detector=1024, wavelength=4.2, redshift=redshift,
 								   wave_space=wave_space, wave_scale=0.001/wave_factor, wave_factor = wave_factor, index_min=int(lower_index*wave_factor), index_max=int(upper_index*wave_factor),
 								   grism_filter='F444W', grism_module='A', grism_pupil='R')
@@ -2426,7 +2426,7 @@ if __name__ == "__main__":
 		y0_grism = y0
 
 		#initialize grism object
-		grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor,
+		grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor = y_factor,
 								   xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
 								   wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
 								   grism_filter=broad_filter, grism_module='A', grism_pupil='R')
