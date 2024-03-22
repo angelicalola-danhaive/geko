@@ -39,6 +39,9 @@ import jax.numpy as jnp
 from reproject import reproject_adaptive
 from photutils.centroids import centroid_1dg
 
+#import time
+import time 
+
 
 
 class Grism:
@@ -348,10 +351,10 @@ class Grism:
 		# self.sigma_lsf = 0.5*R
 		# self.sigma_v_lsf = 0.5*(0.001*(c/1000)/self.wavelength)
 
-		self.sigma_lsf = 0.5*self.wavelength/R
-		print(self.sigma_lsf)
-		self.sigma_v_lsf = 0.5*(c/1000)/R #put c in km/s
-		print(self.sigma_v_lsf)
+		self.sigma_lsf = (1/2.36)*self.wavelength/R
+		# print(self.sigma_lsf)
+		self.sigma_v_lsf = (1/2.36)*(c/1000)/R #put c in km/s
+		# print(self.sigma_v_lsf)
 
 		# print(0.001*(c/1000)/4.2)
 
@@ -477,8 +480,31 @@ class Grism:
 		#compute the dispersion dx0 of the central pixel 
 		# print(self.wave_space.shape, self.disp_space.shape)
 		# dx0 = jnp.interp(self.wavelength*(1  + V/(c/1000) ), self.wave_space[jnp.argsort(self.disp_space)], self.disp_space[jnp.argsort(self.disp_space)])
-		dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
-		DX = self.detector_position - self.xcenter_detector + dx0 
+
+		# start = time.time()
+		# dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
+		# DX = self.detector_position - self.xcenter_detector + dx0 
+		# end = time.time()
+		# print('time for DX: ', end-start)
+
+		# print('DX: ', DX)
+
+		# print('detector_position: ', self.detector_position)
+		# print('ycenter_detector: ', self.ycenter_detector)
+
+		# X, Y = jnp.meshgrid(self.detector_position, self.ycenter_detector*jnp.ones_like(self.detector_position))
+
+		#time this function
+		# start = time.time()
+		DX_type_3 = self.grism_dispersion((self.detector_position,self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
+		# end  = time.time()
+		# print('DX_type_3: ', DX_type_3)
+		# print('time for DX_type_3: ', end-start)
+
+		DX = DX_type_3
+
+
+
 		# print(DX.type(), self.disp_space.type(), self.wave_space.type())
 
 		# J = self.compute_disp_index(DX, self.disp_space)
@@ -502,11 +528,11 @@ class Grism:
 
 		#add the LSF to the dispersion: 
 		CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
-		DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
-		DX_disp_final = self.detector_position - self.xcenter_detector + DX_disp - DX
+		# DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
+		# DX_disp_final = self.detector_position - self.xcenter_detector + DX_disp - DX
 
-
-
+		DX_disp_final_type_3 = self.grism_dispersion((self.detector_position, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt) -DX_type_3
+		DX_disp_final = DX_disp_final_type_3
 		NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
 		# print(NEW_J)
 		# grism_full = jnp.zeros(self.sh_beam)
