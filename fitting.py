@@ -140,10 +140,11 @@ if __name__ == "__main__":
 	obs_map, obs_error, direct, PA_truth, xcenter_detector, ycenter_detector, icenter, jcenter, \
             icenter_low, jcenter_low, wave_space, delta_wave, index_min, index_max = pre.preprocess_data(med_band_path, broad_band_path, grism_spectrum_path,redshift, line, wavelength, delta_wave_cutoff, field, res)
 	# mask any hot or dead pixels, setting tolerance = 4 manually
-	obs_map, obs_error = pre.mask_bad_pixels(obs_map, obs_error)
+	#commenting this out for now because the function doesn't work well for all cases
+	# obs_map, obs_error = pre.mask_bad_pixels(obs_map, obs_error)
 
 	# renormalizing flux prior to EL map
-	direct, normalization_factor, mask, mask_grism = pre.renormalize_image(
+	direct, normalization_factor,mask_grism = pre.renormalize_image(
             direct, obs_map, flux_threshold, y_factor)
 
 	# rescale the wave_space array and the direct image according to factor and wave_factor
@@ -159,12 +160,12 @@ if __name__ == "__main__":
 	if y0 == None:
 		y0 = icenter
 
-	x0_grism = jcenter_low
-	y0_grism = icenter_low
+	x0_grism = jcenter  #jcenter_low
+	y0_grism = icenter #icenter_low
 
 	# initialize grism object with the low resolution flux image
-	direct_low = utils.resample(direct, y_factor, y_factor)
-	grism_object = grism.Grism(direct=direct_low, direct_scale=0.0629, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
+	# direct_low = utils.resample(direct, y_factor, y_factor)
+	grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
                              xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
                              wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
                              grism_filter=broad_filter, grism_module='A', grism_pupil='R')
@@ -174,13 +175,21 @@ if __name__ == "__main__":
 	direct_image_size = direct.shape
 
 	#initialize chosen kinematic model
-	kin_model = models.Disk()
 	if model_name == 'Disk':
-		kin_model = models.Disk()
-		kin_model.set_bounds(direct, flux_bounds, flux_type, [PA_truth, PA_bounds],i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, mask, y_factor, x0, x0_vel, y0, y0_vel)
+		kin_model = models.DiskModel()
+		kin_model.set_bounds(direct, flux_bounds, flux_type, flux_threshold, [PA_truth, PA_bounds],i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel)
+	elif model_name == 'Merger':
+		kin_model = models.Merger()
+		kin_model.set_bounds(direct, flux_bounds, flux_type, flux_threshold, [PA_truth, PA_bounds],i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel)
+	
 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
 
+	plt.imshow(obs_map, origin='lower')
+	plt.show()
+
+	plt.imshow(direct, origin='lower')
+	plt.show()
 
 	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None)
 
