@@ -7,6 +7,8 @@ Eventually should also add here scripts to automatically create folders for sour
 """
 
 #imports
+import utils
+
 import numpy as np
 import math
 import matplotlib.pyplot as plt
@@ -23,12 +25,6 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 from astropy.io import fits
 from astropy.wcs import wcs
-
-from skimage.filters import threshold_otsu
-from skimage.segmentation import clear_border
-from skimage.measure import label, regionprops
-from skimage.morphology import closing
-from skimage.color import label2rgb
 
 from reproject import reproject_adaptive
 
@@ -144,7 +140,7 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 	threshold_grism = flux_threshold*0.5*obs_map.max()
 	mask_grism = jnp.zeros_like(obs_map)
 	mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
-	# mask_grism = dilation(mask_grism, disk(6))
+	mask_grism = dilation(mask_grism, disk(2))
 
 	# plot the grism image found within the mask, the rest set to 0
 	plt.imshow(obs_map*mask_grism, cmap='viridis', origin='lower')
@@ -156,13 +152,7 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 	#normalize the direct image to the grism image
 	direct = direct*normalization_factor
 
-	#now recompute the broader mask for the image
-	threshold = flux_threshold*direct.max()
-	mask = jnp.zeros_like(direct)
-	mask = mask.at[jnp.where(direct>threshold)].set(1)
-	mask = dilation(mask, disk(6*int(y_factor)))
-
-	return direct, normalization_factor, mask, mask_grism
+	return direct, normalization_factor, mask_grism
 
 def mask_bad_pixels(image,errors,tolerance=3.5):
 	"""
@@ -212,6 +202,9 @@ def make_EL_map(med_band, broad_band, z, line):
 	z_356W_halpha = [4.37,4.92] #Halpha falls in F356W but not 335M
 	z_335M_halpha = [3.90,4.37] #Halpha falls in F335M
 
+	z_444W_PAalpha = [1.2945, 1.6571] #PAalpha falls in F444W but not 410M
+	z_410M_PAalpha = [1.0699, 1.2944] #PAalpha falls in F410M
+
 	#define the filter widths
 	width_F410M = 0.436
 	width_F444W = 1.101
@@ -251,26 +244,17 @@ def make_EL_map(med_band, broad_band, z, line):
 			EL_map = broad_band*width_F356W - med_band*width_F356W 
 		else:
 			print('OIII_5007 is not in the observed range, returning zeros')
+	
+	elif line == 'PAalpha':
+		if z_410M_PAalpha[0] < z < z_410M_PAalpha[1]:
+			print('PAalpha is in F410M and F444W')
+			EL_map = (med_band*width_F410M*width_F444W - broad_band*width_F444W*width_F410M)/(width_F444W-width_F410M)
+		#if the galaxy is in z_444W, then estimate PAalpha map as F444W-F410M
+		elif z_444W_PAalpha[0] < z < z_444W_PAalpha[1]:
+			print('PAalpha is only in F444W')
+			EL_map = broad_band*width_F444W- med_band*width_F444W
 
 	return EL_map
-
-def compute_PA(image):
-	'''
-		compute PA of galaxy in the image using skimage measure regionprops
-
-	'''
-	threshold = threshold_otsu(image)
-	bw = closing(image > threshold)
-
-	cleared = clear_border(bw)
-
-	#label image regions
-	label_image = label(cleared)
-	image_label_overlay = label2rgb(label_image, image=image)
-	regions = regionprops(label_image, image)
-	PA = 90 + regions[0].orientation * (180/np.pi)
-	
-	return PA
 
 def rotate_wcs(med_band_fits, EL_map, field, cutout_size):
 	'''
@@ -356,6 +340,10 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 
 	#compute the EL map prior first
 	EL_map = make_EL_map(med_band, broad_band, redshift, line)
+
+	plt.imshow(EL_map, origin='lower')
+	plt.title('EL map prior')
+	plt.show()
 
 	#if needed, rotate the image WCS and the EL map to match the PA of the grism image
 	rotated_wcs, med_band_flip, EL_map_flip = rotate_wcs(med_band_fits, EL_map, field, cutout_size)
@@ -463,6 +451,6 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 	# plt.show()
 
 	#compute PA from the cropped med band image (not the EL map)
-	PA_truth = compute_PA(med_band_cutout)
+	PA_truth = utils.compute_PA(med_band_cutout)
 
 	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), PA_truth, xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max

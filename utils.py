@@ -136,7 +136,10 @@ def make_mask(image, n, flux_threshold, dilation_factor):
     # threshold =threshold_otsu(image)
     threshold = flux_threshold*image.max()
     mask = jnp.zeros_like(image)
-    mask = mask.at[jnp.where(image>threshold)].set(1)
+    masked_indices = jnp.where(image[20:40,20:40]>threshold)
+    mask = mask.at[masked_indices[0]+20,masked_indices[1]+20 ].set(1)
+    masked_indices = jnp.where(image>threshold)
+    mask = mask.at[masked_indices[0],masked_indices[1] ].set(1)
     if n == 1:
         mask = dilation(mask, disk(dilation_factor))
         return mask
@@ -179,7 +182,9 @@ def compute_PA(image):
 		compute PA of galaxy in the image using skimage measure regionprops
 
 	'''
-	threshold = threshold_otsu(image)
+    #compute the threshold from the central pixels only in case there's contaminant sources
+	# threshold = threshold_otsu(image[20:40,20:40])
+	threshold = threshold_otsu(image)/4
 	bw = closing(image > threshold)
 
 	cleared = clear_border(bw)
@@ -187,6 +192,8 @@ def compute_PA(image):
 	#label image regions
 	label_image = label(cleared)
 	image_label_overlay = label2rgb(label_image, image=image)
+	plt.imshow(image_label_overlay, origin = 'lower')
+	plt.show()
 	regions = regionprops(label_image, image)
 	PA = 90 + regions[0].orientation * (180/jnp.pi)
 	
