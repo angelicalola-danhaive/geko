@@ -19,6 +19,9 @@ from skimage.segmentation import clear_border
 from skimage.morphology import dilation, disk
 from skimage.color import label2rgb
 
+from photutils.segmentation import detect_sources, SourceCatalog, deblend_sources
+from photutils.background import Background2D, MedianBackground
+
 from matplotlib import pyplot as plt
 
 def oversample(image_low_res, factor, wave_factor, method='nearest'):
@@ -126,78 +129,71 @@ def find_best_sample(inference_data, variable, mu, sigma, max, min, MLS):
     return best_sample
 
 
-def make_mask(image, n, flux_threshold, dilation_factor):
+def make_mask(image, n = 1, threshold_sigma = 3):
     """
-       Make n masks of the image, dilated by a factor dilation. If n =1, then flux_threshold
-       gives the threshold. If n>1, the threshold is set to the smallest number needed to obtain n
-       regions (using the find_threshold function).
-    """
-        
-    # threshold =threshold_otsu(image)
-    threshold = flux_threshold*image.max()
-    mask = jnp.zeros_like(image)
-    masked_indices = jnp.where(image[20:40,20:40]>threshold)
-    mask = mask.at[masked_indices[0]+20,masked_indices[1]+20 ].set(1)
-    masked_indices = jnp.where(image>threshold)
-    mask = mask.at[masked_indices[0],masked_indices[1] ].set(1)
-    if n == 1:
-        mask = dilation(mask, disk(dilation_factor))
-        return mask
-    else:
-        masked_image = image*mask
-        #find the sub_regions only within the existing mask
-        threshold, masks = find_threshold(masked_image, n, dilation_factor)
-        return masks
-
-def find_threshold(image, n, dilation_factor):
-    """
-       Find the threshold needed to cut the image into n regions
+       Make n masks of the image.
     """
 
-    #initialize the mask at all zeros so that the while loop runs at least once
-    label_image = jnp.zeros_like(image)
-    #start the guess at the threshold otsu value
-    threshold = threshold_otsu(image)
-    increment = threshold/10
-    while len(jnp.unique(label_image))-1 != n: #-1 because zeros count as one region too
-        threshold += increment
-        bw = closing(image > threshold)
-        cleared = clear_border(bw)
-        #label image regions
-        label_image = label(cleared)
-    #print the successful threshold
+    bkg_estimator = MedianBackground()
+    bkg = Background2D(image, (20,20) , filter_size=(5, 5),bkg_estimator = bkg_estimator)
+    threshold = threshold_sigma * bkg.background_rms
+    segment_map = detect_sources(image, threshold, npixels=10)
+    cat = SourceCatalog(image, segment_map)
+    #select only the central source
+    idx_source = jnp.argmin((cat.xcentroid-image.shape[0]//2)**2 + (cat.ycentroid-image.shape[0]//2)**2)
 
-    #cut the image into n regions
-    masks = []
-    for i in range(0,n):
-        mask = jnp.zeros_like(image)
-        mask = mask.at[jnp.where(label_image==i+1)].set(1)
-        mask = dilation(mask, disk(dilation_factor))
-        masks.append(mask)
+    label_source = idx_source + 1
+    segment_map.keep_labels([label_source])
 
-    return threshold, masks
 
-def compute_PA(image):
+    plt.imshow(image*segment_map.data, origin='lower')
+    plt.show()
+
+    #separate two sources if n == 2
+    if n == 2:
+        segm_deblend = deblend_sources(image, segment_map, npixels=10, nlevels=32, contrast=0.001)
+        plt.imshow(segm_deblend.data, origin='lower')
+        plt.show()
+
+        #if more than 2 labels, keep the central one and merge the others
+        if segm_deblend.nlabels > 2:
+            idx_source = jnp.argmin((cat.xcentroid-image.shape[0]//2)**2 + (cat.ycentroid-image.shape[0]//2)**2)
+            label_source = idx_source + 1
+            new_label = segm_deblend.labels[segm_deblend.labels != label_source][0]
+            for label in segm_deblend.labels:
+                if label != label_source:
+                    segm_deblend.reassign_label(label, new_label)
+        cat = SourceCatalog(image, segm_deblend)
+        plt.imshow(segm_deblend.data, origin='lower')
+        plt.plot(cat.xcentroid, cat.ycentroid, 'ro')
+        plt.show()
+    else: 
+        segm_deblend = None
+    
+    return segment_map, segm_deblend
+
+
+def compute_gal_props(image, n=1, threshold_sigma=3):
 	'''
 		compute PA of galaxy in the image using skimage measure regionprops
 
 	'''
-    #compute the threshold from the central pixels only in case there's contaminant sources
-	# threshold = threshold_otsu(image[20:40,20:40])
-	threshold = threshold_otsu(image)/4
-	bw = closing(image > threshold)
 
-	cleared = clear_border(bw)
-
-	#label image regions
-	label_image = label(cleared)
-	image_label_overlay = label2rgb(label_image, image=image)
-	plt.imshow(image_label_overlay, origin = 'lower')
-	plt.show()
-	regions = regionprops(label_image, image)
-	PA = 90 + regions[0].orientation * (180/jnp.pi)
-	
-	return PA
+	seg_1comp, seg_2comp = make_mask(image, n, 1)
+	if n == 1:   
+		sources = SourceCatalog(image, seg_1comp)
+	if n == 2:
+		sources = SourceCatalog(image, seg_2comp)
+	PA = []
+	inc = []
+	for i in range(len(sources)):
+		PA.append(sources.orientation[i].value) #orientation is in degrees
+		inc.append(jnp.arccos(1/sources.elongation[i].value)* (180/jnp.pi))
+    
+	print('PA : ', PA)
+	print('inc : ', inc)
+                
+	return seg_1comp, seg_2comp, PA, inc
 
 
 #things to add here

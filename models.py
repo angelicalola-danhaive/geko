@@ -61,7 +61,7 @@ class KinModels:
     def sigma(self, x, y, sigma0, r_eff=None, I0=None, PA=None, i=None):
         return sigma0
 
-    def set_main_bounds(self, flux_prior, flux_bounds, flux_type,flux_threshold, PA_bounds, i_bounds, Va_bounds, r_t_bounds,
+    def set_main_bounds(self, flux_prior, flux_bounds, flux_type,flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds,
                          sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel,
                         delta_V_bounds, clump, clump_v_prior, clump_sigma_prior, clump_flux_prior):
         """
@@ -75,7 +75,7 @@ class KinModels:
         self.flux_bounds = flux_bounds
         self.flux_type = flux_type
         self.flux_threshold = flux_threshold
-        self.PA_bounds = PA_bounds
+        self.PA_sigma = PA_sigma
         # these are in the form (low, high)
         self.i_bounds = i_bounds
         self.Va_bounds = Va_bounds
@@ -128,7 +128,7 @@ class Disk():
         Class for 1 disk object. Combinations of this will be used for the single disk model, 
         then 2 disks for the 2 component ones etc
     """
-    def __init__(self, direct_shape, masked_indices, mu, std, low, high, mu_PA, sigma_PA, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, x0_vel, y0_vel, number = ''):
+    def __init__(self, direct_shape, masked_indices, mu, std, low, high, mu_PA, sigma_PA, i_bounds, mu_i, Va_bounds, r_t_bounds, sigma0_bounds, x0_vel, y0_vel, number = ''):
         print('Disk object created')
 
         #initialize all attributes with function parameters
@@ -144,6 +144,12 @@ class Disk():
         self.sigma_PA = sigma_PA
 
         self.i_bounds = i_bounds
+        self.mu_i = mu_i
+        self.sigma_i = 10
+        #has to be rescaled for the normal distribution sampling
+        self.i_low = (i_bounds[0]-self.mu_i)/self.sigma_i
+        self.i_high = (i_bounds[1]-self.mu_i)/self.sigma_i
+
         self.Va_bounds = Va_bounds
         self.r_t_bounds = r_t_bounds
         self.sigma0_bounds = sigma0_bounds
@@ -153,11 +159,7 @@ class Disk():
 
         self.number = number
 
-    
-    def sample_params(self):
-        """
-            Sample all of the parameters needed to model a disk velocity field
-        """
+    def sample_fluxes(self):
         #sample the fluxes within the mask
         fluxes_scaling = numpyro.sample('fluxes_scaling' + self.number, dist.Uniform())*5
         fluxes_sample = numpyro.sample('fluxes'+ self.number, dist.Uniform(), sample_shape=(int(len(self.masked_indices[0])),))
@@ -165,6 +167,13 @@ class Disk():
 
         fluxes = jnp.zeros(self.direct_shape)
         fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
+
+        return fluxes
+
+    def sample_params(self):
+        """
+            Sample all of the parameters needed to model a disk velocity field
+        """
 
         Pa = numpyro.sample('PA'+ self.number, dist.Uniform())
         # sample the mu_PA + 0 or 180 (orientation of velocity field)
@@ -177,8 +186,8 @@ class Disk():
         # Pa = norm.ppf(  norm.cdf(self.low_PA) + Pa*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
 
         #could probably use utils for this too
-        i = numpyro.sample('i' + self.number, dist.Uniform()) * \
-            (self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
+        i = numpyro.sample('i' + self.number, dist.Uniform())
+        i = norm.ppf(norm.cdf(self.i_low) + i*(norm.cdf(self.i_high)-norm.cdf(self.i_low)))*self.sigma_i + self.mu_i #arboitray sigma_i=10 for now
 
         Va = numpyro.sample('Va' + self.number, dist.Uniform()) * \
             (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
@@ -199,10 +208,9 @@ class Disk():
         v0 = numpyro.sample('v0'+ self.number, dist.Uniform())
         v0 = norm.ppf(v0)*100
 
-
-        return fluxes, Pa, i, Va, r_t, sigma0, y0_vel, v0
+        return Pa, i, Va, r_t, sigma0, y0_vel, v0
     
-    def compute_posterior_means(self, inference_data, flux_type = 'manual'):
+    def compute_posterior_means(self, inference_data):
         """
             Retreive the best sample from the MCMC chains for the main disk variables
         """
@@ -212,21 +220,32 @@ class Disk():
         # rescale all of the posteriors from uniform to the actual parameter space
         rotation = float(inference_data.posterior['rotation' + self.number].median(dim=["chain", "draw"]))
         #create lists with variables and their scaling parameters 
-        variables = ['PA' + self.number, 'i'+ self.number, 'Va'+ self.number, 'r_t'+ self.number, 'sigma0'+ self.number, 'y0_vel'+ self.number, 'v0'+ self.number, 'fluxes_scaling'+ self.number]
+        variables = ['PA' + self.number, 'i'+ self.number, 'Va'+ self.number, 'r_t'+ self.number, 'sigma0'+ self.number, 'y0_vel'+ self.number, 'v0'+ self.number]
         #for variables drawn from uniform dist, the scaling parameters are (low, high) so mu and sigma are set to none
-        mus = [self.mu_PA + round(rotation)*180, None, None, None, None, self.y0_vel, 0.0, None]
-        sigmas = [self.sigma_PA, None, None, None, None, 2.0, 100.0, None]
+        mus = [self.mu_PA + round(rotation)*180, self.mu_i, None, None, None, self.y0_vel, 0.0]
+        sigmas = [self.sigma_PA, self.sigma_i, None, None, None, 2.0, 100.0]
 
         #for variables drawn from normal dist, the scaling parameters are (mu, sigma) so low and high are set to none
-        highs = [None, self.i_bounds[1], self.Va_bounds[1], self.r_t_bounds[1], self.sigma0_bounds[1], None, None, 5.0]
-        lows = [None,self.i_bounds[0], self.Va_bounds[0], self.r_t_bounds[0], self.sigma0_bounds[0], None, None, 0.0]
+        highs = [None, self.i_high, self.Va_bounds[1], self.r_t_bounds[1], self.sigma0_bounds[1], None, None]
+        lows = [None,self.i_low, self.Va_bounds[0], self.r_t_bounds[0], self.sigma0_bounds[0], None, None]
 
         #find the best sample for each variable in the list of variables
         best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, best_indices)
 
-        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean, self.fluxes_scaling_mean = best_sample
+        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean = best_sample
         
+
+
+        return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean
+
+    def compute_flux_posterior(self, inference_data, flux_type = 'manual'):
+
+        best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
+        ), inference_data['sample_stats']['lp'].shape)
+
+        inference_data.posterior['fluxes_scaling'+ self.number].data = inference_data.posterior['fluxes_scaling'+ self.number].data*5
         #if the fluxes are manually rescaled in the prior, then rescale them
+        self.fluxes_scaling_mean = jnp.array(inference_data.posterior['fluxes_scaling'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
 
         if flux_type == 'manual':
             best_flux_sample = utils.find_best_sample(inference_data, ['fluxes'+ self.number], [self.mu*self.fluxes_scaling_mean], [self.std], [self.high], [self.low], best_indices)
@@ -235,8 +254,7 @@ class Disk():
         self.fluxes_mean = jnp.zeros(self.direct_shape)
         self.fluxes_mean =self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
 
-        return  self.fluxes_mean, self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean, self.fluxes_scaling_mean
-
+        return self.fluxes_mean, self.fluxes_scaling_mean
     
     def v_rot(self, fluxes_mean, model_velocities, i_mean,factor):
         """
@@ -282,37 +300,35 @@ class DiskModel(KinModels):
         self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0']
         self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$']
 
-    def set_bounds(self, flux_prior, flux_bounds, flux_type, flux_threshold, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel):
+    def set_bounds(self, flux_prior, flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel):
         """
 
         Compute all of the necessary bounds for the disk model sampling distributions
 
         """
         # first set all of the main bounds taken from the config file
-        self.set_main_bounds(flux_prior, flux_bounds, flux_type, flux_threshold, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel,
+        self.set_main_bounds(flux_prior, flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel,
                              delta_V_bounds=None, clump=None, clump_v_prior=None, clump_sigma_prior=None, clump_flux_prior=None)
 
         # now compute the specific bounds for the disk model
-        self.mu_PA = self.PA_bounds[0]
-        self.sigma_PA = self.PA_bounds[1]*90
+        self.sigma_PA = self.PA_sigma*90
 
         self.compute_flux_bounds()
 
-        #make the mask here!!!
-        self.mask = utils.make_mask(self.flux_prior, 1, flux_threshold, 6)
+        #make the mask and compute the PA and inclination
+        seg_1comp, _ , PA, inc = utils.compute_gal_props(self.flux_prior)
 
-        #compute the PA here too 
-        #not sure about this, maybe only need to recompute indiviudal PAs when 2 masks are used
+        self.mask = seg_1comp.data
+        self.mu_PA = PA[0]
+        self.mu_i = inc[0]
 
-        # correct for the mask = 0 pixels
-        # only fitting for pixels in the mask
         self.mask = jnp.array(self.mask)
         self.mask_shape = len(jnp.where(self.mask == 1)[0])
         self.masked_indices = jnp.where(self.mask == 1)
         self.mu, self.std, self.high, self.low = self.rescale_to_mask([self.mu, self.std, self.high, self.low], self.mask)
         #initialize the disk object
         self.disk = Disk(self.flux_prior.shape, self.masked_indices, self.mu, self.std, self.low, self.high, 
-                    self.mu_PA, self.sigma_PA, self.i_bounds, self.Va_bounds, self.r_t_bounds,
+                    self.mu_PA, self.sigma_PA, self.i_bounds, self.mu_i, self.Va_bounds, self.r_t_bounds,
                     self.sigma0_bounds, self.x0_vel, self.y0_vel)
         
         self.disk.plot()
@@ -327,7 +343,8 @@ class DiskModel(KinModels):
 
         # sample the fluxes within the mask from a truncated normal distribution
 
-        fluxes, Pa, i, Va, r_t, sigma0, y0_vel, v0 = self.disk.sample_params()
+        Pa, i, Va, r_t, sigma0, y0_vel, v0 = self.disk.sample_params()
+        fluxes = self.disk.sample_fluxes()
 
         fluxes = utils.oversample(fluxes, grism_object.factor, grism_object.factor)
 
@@ -361,7 +378,9 @@ class DiskModel(KinModels):
 
         """
 
-        self.fluxes_mean, self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean, self.fluxes_scaling_mean = self.disk.compute_posterior_means(inference_data)
+        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
+
+        self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data)
 
         self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor)
 
@@ -392,9 +411,9 @@ class DiskModel(KinModels):
 
         return self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
 
-    def plot_summary(self, obs_map, obs_error, inf_data, wave_space):
+    def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None):
 
-        plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_v_rot, self.fluxes_mean, inf_data, wave_space, self.mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None)
+        plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_v_rot, self.fluxes_mean, inf_data, wave_space, self.mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = save_to_folder, name = name)
 
 class TwoComps(KinModels):
     """
@@ -406,32 +425,47 @@ class TwoComps(KinModels):
         print('fill this')
         
 
-    def set_bounds(self, flux_prior, flux_bounds, flux_type, flux_threshold, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, dilation_param = 6):
+    def set_bounds(self, flux_prior, flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, dilation_param = 6):
         """
 
         Compute all of the necessary bounds
 
         """
         # first set all of the main bounds taken from the config file
-        self.set_main_bounds(flux_prior, flux_bounds, flux_type, flux_threshold, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel,
+        self.set_main_bounds(flux_prior, flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel,
                              delta_V_bounds=None, clump=None, clump_v_prior=None, clump_sigma_prior=None, clump_flux_prior=None)
 
-        #here I need to define 2 Pas, 2 masks, 2 y0_vel + x0_vel
 
-        #start by computing the masks for the 2 components
-        #this may be different for clump/merger scenarios but just doing the merger scenario for now
-        self.mask1, self.mask2 = utils.make_mask(self.flux_prior, 2, self.flux_threshold, dilation_param)
+        #make the masks and compute the PAs and inclinations
+        seg_1comp, seg_2comp , PA, inc = utils.compute_gal_props(self.flux_prior, n = 2)
+        self.mask = seg_1comp.data
+
+        self.mask1 = jnp.where(seg_2comp.data == 1, 1.0, 0.0)
+        self.mask2 = jnp.where(seg_2comp.data == 2, 1.0, 0.0)
+
+        self.mu_PA1= PA[0]
+        self.mu_PA2= PA[1]
+        self.mu_i1 = inc[0]
+        self.mu_i2 = inc[1]
+
+        #plot the main mask
+        plt.imshow(self.mask, origin='lower')
+        # plt.colorbar()
+        plt.title('Main mask')
+        plt.show()
 
         #make two separate flux priors with each mask
         self.flux_prior1 = self.flux_prior*self.mask1
         self.flux_prior2 = self.flux_prior*self.mask2
 
-        #compute the PA of each component
-        self.mu_PA1 = utils.compute_PA(self.flux_prior1)
-        self.mu_PA2 = utils.compute_PA(self.flux_prior2)
+        plt.imshow(self.flux_prior1, origin = 'lower')
+        plt.show()
 
-        self.sigma_PA1 = self.PA_bounds[1]*90
-        self.sigma_PA2 = self.PA_bounds[1]*90
+        plt.imshow(self.flux_prior2, origin = 'lower')
+        plt.show()
+
+        self.sigma_PA1 = self.PA_sigma
+        self.sigma_PA2 = self.PA_sigma
 
         #the velocity centroids can be initialized at the center of mass of each mask object
         self.x0_vel1, self.y0_vel1 = centroids.centroid_2dg(np.array(self.flux_prior1))
@@ -448,21 +482,44 @@ class TwoComps(KinModels):
         self.mask_shape2 = len(jnp.where(self.mask2 == 1)[0])
         self.masked_indices2 = jnp.where(self.mask2 == 1)
 
+        self.mask_shape = len(jnp.where(self.mask == 1)[0])
+        self.masked_indices = jnp.where(self.mask == 1)
+
+
         self.compute_flux_bounds()
 
         self.mu1, self.std1, self.high1, self.low1 = self.rescale_to_mask([self.mu, self.std, self.high, self.low], self.mask1)
         self.mu2, self.std2, self.high2, self.low2 = self.rescale_to_mask([self.mu, self.std, self.high, self.low], self.mask2)
-
+        self.mu, self.std, self.high, self.low = self.rescale_to_mask([self.mu, self.std, self.high, self.low], self.mask)
         #initialize the disk objects
         self.disk1 = Disk(self.flux_prior.shape, self.masked_indices1, self.mu1, self.std1, self.low1, self.high1,
-                    self.mu_PA1, self.sigma_PA1, self.i_bounds, self.Va_bounds, self.r_t_bounds,
+                    self.mu_PA1, self.sigma_PA1, self.i_bounds, self.mu_i1, self.Va_bounds, self.r_t_bounds,
                     self.sigma0_bounds, self.x0_vel1, self.y0_vel1, number = '1')
         self.disk2 = Disk(self.flux_prior.shape, self.masked_indices2, self.mu2, self.std2, self.low2, self.high2,
-                    self.mu_PA2, self.sigma_PA2, self.i_bounds, self.Va_bounds, self.r_t_bounds,
+                    self.mu_PA2, self.sigma_PA2, self.i_bounds, self.mu_i2, self.Va_bounds, self.r_t_bounds,
                     self.sigma0_bounds, self.x0_vel2, self.y0_vel2, number = '2')
         
-        self.disk1.plot()
-        self.disk2.plot()
+        # self.disk1.plot()
+        # self.disk2.plot()
+
+        plt.imshow(self.flux_prior*self.mask, origin = 'lower')
+        plt.scatter(self.x0_vel1, self.y0_vel1, color='red')
+        plt.scatter(self.x0_vel2, self.y0_vel2, color='red')
+        plt.show()
+
+        #compute the fraction of each component in the mask by scaling with distance from the centroid of comp 1
+        self.distances = jnp.sqrt((self.masked_indices[0] - self.y0_vel1)**2 + (self.masked_indices[1] - self.x0_vel1)**2)
+        self.distances = self.distances/jnp.max(self.distances)
+        self.frac_disk1_prior = 1 - self.distances
+
+        #just for plotting purposes
+        fraction = jnp.zeros(self.flux_prior.shape)
+        fraction = fraction.at[self.masked_indices].set(self.frac_disk1_prior)
+        # plt.imshow(fraction, origin='lower')
+        # plt.colorbar()
+        # plt.title('Fraction of disk 1 in mask')
+        # plt.show()
+
 
     # def inference_model(self, grism_object, obs_map, obs_error):
     #     """
@@ -507,10 +564,26 @@ class Merger(TwoComps):
         Inference model for two merging disks
 
         """
-            
-        # sample the fluxes within the mask from a truncated normal distribution
-        fluxes1, Pa1, i1, Va1, r_t1, sigma01, y0_vel1, v01 = self.disk1.sample_params()
-        fluxes2, Pa2, i2, Va2, r_t2, sigma02, y0_vel2, v02 = self.disk2.sample_params()
+        #sample the fractional contribution of each pixel to a component
+        frac_disk1 = numpyro.sample('frac_disk1', dist.Uniform(), sample_shape=(int(len(self.masked_indices[0])),))
+        frac_disk1 = norm.ppf(frac_disk1)*0.2 + self.frac_disk1_prior
+
+        frac_disk2 = 1 - frac_disk1
+
+        #sample the fluxes 
+        fluxes_scaling = numpyro.sample('fluxes_scaling', dist.Uniform())*5
+        fluxes_sample = numpyro.sample('fluxes', dist.Uniform(), sample_shape=(int(len(self.masked_indices[0])),))
+        fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.std + self.mu*fluxes_scaling
+
+        fluxes1 = jnp.zeros(self.flux_prior.shape)
+        fluxes2 = jnp.zeros(self.flux_prior.shape)
+
+        fluxes1 = fluxes1.at[self.masked_indices].set(fluxes_sample*frac_disk1)
+        fluxes2 = fluxes2.at[self.masked_indices].set(fluxes_sample*frac_disk2)
+
+        # sample the kin params for each disk model
+        Pa1, i1, Va1, r_t1, sigma01, y0_vel1, v01 = self.disk1.sample_params()
+        Pa2, i2, Va2, r_t2, sigma02, y0_vel2, v02 = self.disk2.sample_params()
     
         fluxes1 = utils.oversample(fluxes1, grism_object.factor, grism_object.factor)
         fluxes2 = utils.oversample(fluxes2, grism_object.factor, grism_object.factor)
@@ -555,8 +628,29 @@ class Merger(TwoComps):
 
         """
 
-        self.fluxes_mean1, self.PA_mean_1,self.i_mean_1, self.Va_mean_1, self.r_t_mean_1, self.sigma0_mean_model_1, self.y0_vel_mean_1, self.v0_mean_1, self.fluxes_scaling_mean_1 = self.disk1.compute_posterior_means(inference_data)
-        self.fluxes_mean2, self.PA_mean_2,self.i_mean_2, self.Va_mean_2, self.r_t_mean_2, self.sigma0_mean_model_2, self.y0_vel_mean_2, self.v0_mean_2, self.fluxes_scaling_mean_2 = self.disk2.compute_posterior_means(inference_data)
+        self.PA_mean_1,self.i_mean_1, self.Va_mean_1, self.r_t_mean_1, self.sigma0_mean_model_1, self.y0_vel_mean_1, self.v0_mean_1 = self.disk1.compute_posterior_means(inference_data)
+        self.PA_mean_2,self.i_mean_2, self.Va_mean_2, self.r_t_mean_2, self.sigma0_mean_model_2, self.y0_vel_mean_2, self.v0_mean_2 = self.disk2.compute_posterior_means(inference_data)
+
+        best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
+        ), inference_data['sample_stats']['lp'].shape)
+
+        inference_data.posterior['fluxes_scaling'].data = inference_data.posterior['fluxes_scaling'].data*5
+        #if the fluxes are manually rescaled in the prior, then rescale them
+        self.fluxes_scaling_mean = jnp.array(inference_data.posterior['fluxes_scaling'].isel(chain=best_indices[0], draw=best_indices[1]))
+
+        best_flux_sample = utils.find_best_sample(inference_data, ['fluxes'], [self.mu*self.fluxes_scaling_mean], [self.std], [self.high], [self.low], best_indices)
+
+        self.fluxes_sample_mean = jnp.array(inference_data.posterior['fluxes'].isel(chain=best_indices[0], draw=best_indices[1]))
+
+        best_frac_sample = utils.find_best_sample(inference_data, ['frac_disk1'], [self.frac_disk1_prior], [0.2], [None], [None], best_indices) 
+        self.frac_disk1_mean = jnp.array(inference_data.posterior['frac_disk1'].isel(chain=best_indices[0], draw=best_indices[1]))
+        self.frac_disk2_mean = 1 - self.frac_disk1_mean
+
+        self.fluxes_mean1 = jnp.zeros(self.flux_prior.shape)
+        self.fluxes_mean1 = self.fluxes_mean1.at[self.masked_indices].set( self.fluxes_sample_mean*self.frac_disk1_mean)
+
+        self.fluxes_mean2 = jnp.zeros(self.flux_prior.shape)
+        self.fluxes_mean2 = self.fluxes_mean2.at[self.masked_indices].set( self.fluxes_sample_mean*self.frac_disk2_mean)
 
         self.model_flux1 = utils.oversample(self.fluxes_mean1, grism_object.factor, grism_object.factor)
         self.model_flux2 = utils.oversample(self.fluxes_mean2, grism_object.factor, grism_object.factor)
@@ -602,9 +696,9 @@ class Merger(TwoComps):
 
         return self.model_map, self.model_flux1+self.model_flux2,  self.fluxes_mean1 + self.fluxes_mean2, self.model_velocities1 + self.model_velocities2, self.model_dispersions1+self.model_dispersions2
 
-    def plot_summary(self, obs_map, obs_error, inf_data, wave_space):
+    def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None):
 
-        plotting.plot_merger_summary(obs_map, self.model_map, obs_error, [self.model_velocities_low1, self.model_velocities_low2], [self.model_v_rot1, self.model_v_rot2], self.fluxes_mean1 + self.fluxes_mean2, inf_data, wave_space, [self.mask1,self.mask2] , x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None)
+        plotting.plot_merger_summary(obs_map, self.model_map, obs_error, [self.model_velocities_low1, self.model_velocities_low2], [self.model_v_rot1, self.model_v_rot2], self.fluxes_mean1 + self.fluxes_mean2, inf_data, wave_space, [self.mask1,self.mask2, self.mask] , x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = save_to_folder, name = name)
 
 class TwoDisks(TwoComps): 
     """
