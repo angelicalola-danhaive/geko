@@ -8,6 +8,8 @@ Eventually should also add here scripts to automatically create folders for sour
 
 #imports
 import utils
+import grism
+import models
 
 import numpy as np
 import math
@@ -15,11 +17,14 @@ import matplotlib.pyplot as plt
 
 import jax.numpy as jnp
 
-from scipy.ndimage import median_filter
+import yaml
+
+from scipy.ndimage import median_filter, sobel
 from scipy import ndimage
 
 #for the masking
 from skimage.morphology import  dilation, disk
+from skimage.filters import threshold_otsu
 
 from astropy.coordinates import SkyCoord
 from astropy import units as u
@@ -27,6 +32,7 @@ from astropy.io import fits
 from astropy.wcs import wcs
 
 from reproject import reproject_adaptive
+
 
 
 
@@ -96,7 +102,7 @@ def read_config_file(input, output):
     #import all of the bounds needed for the priors
 	flux_bounds = inference['Inference']['flux_bounds']
 	flux_type = inference['Inference']['flux_type']
-	PA_bounds = inference['Inference']['PA_bounds']
+	PA_sigma = inference['Inference']['PA_bounds']
 	i_bounds = inference['Inference']['i_bounds']
 	Va_bounds = inference['Inference']['Va_bounds']
 	r_t_bounds = inference['Inference']['r_t_bounds']
@@ -118,7 +124,7 @@ def read_config_file(input, output):
 	target_accept_prob = inference['Inference']['target_accept_prob']
 	
 	#return all of the parameters
-	return data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_bounds, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
+	return data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
 def renormalize_image(direct, obs_map, flux_threshold, y_factor):
@@ -127,6 +133,7 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 	"""
 
 	threshold = flux_threshold*0.5*direct.max()
+	# threshold = threshold_otsu(direct)
 	mask = jnp.zeros_like(direct)
 	mask = mask.at[jnp.where(direct>threshold)].set(1)
 	# mask = dilation(mask, disk(2))
@@ -138,6 +145,7 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 
 	#create a mask for the grism map
 	threshold_grism = flux_threshold*0.5*obs_map.max()
+	# threshold_grism = threshold_otsu(obs_map)
 	mask_grism = jnp.zeros_like(obs_map)
 	mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
 	mask_grism = dilation(mask_grism, disk(2))
@@ -160,12 +168,17 @@ def mask_bad_pixels(image,errors,tolerance=3.5):
 		carry weight in the fit
 	"""
 
-	blurred = median_filter(image, size=3)
-	difference = image - blurred
-	threshold = tolerance*np.std(difference)
+	#find the hot/dead pixels by using the sobel filter image
+	sobel_image_h = sobel(image, 0)
+	sobel_image_v = sobel(image, 1)
+	sobel_image = jnp.sqrt(sobel_image_h**2 + sobel_image_v**2)
+	hot_pixels = jnp.where(sobel_image > tolerance)
 
-	hot_pixels = np.nonzero((np.abs(difference)>threshold) )
-	hot_pixels = np.array(hot_pixels)
+	#show sobel image
+	plt.imshow(sobel_image, cmap='viridis', origin='lower')
+	plt.colorbar()
+	plt.title('Sobel filter image')
+	plt.show()
 
 	if len(hot_pixels[0]) == 0:
 		print('No hot pixels found')
@@ -364,8 +377,12 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 
 	#cut the med band image to 62x62 around the photometric center: icenter_medband, jcenter_medband
 	high_res_prior = EL_map_flip[icenter_high-31:icenter_high+31,jcenter_high-31:jcenter_high+31]
-	med_band_cutout = med_band_flip[icenter_high-31:icenter_high+31,jcenter_high-31:jcenter_high+31]
+	med_band_cutout = jnp.array(med_band_flip[icenter_high-31:icenter_high+31,jcenter_high-31:jcenter_high+31])
 
+	# compute mask from med band image
+	# threshold = threshold_otsu(med_band_cutout)/3
+	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
+	# plt.show()
 
 	icenter_high, jcenter_high = 31, 31 #this is by defintion of how the cutout was made
 
@@ -447,10 +464,69 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 		icenter_prior = icenter_low
 		jcenter_prior = jcenter_low
 	
-	# plt.imshow(low_res_prior, origin='lower')
+
+	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max
+
+
+def run_full_preprocessing(output):
+    """
+        Main function that automatically post-processes the inference data and saves all of the relevant plots
+    """
+    
+    with open('fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
+        input = yaml.load(file, Loader=yaml.FullLoader)
+        print('Read inputs successfully')
+
+    #load of all the parameters from the configuration file
+    data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, \
+	grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, \
+	wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
+	r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, \
+	clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/')
+
+    #preprocess the images and the grism spectrum
+    obs_map, obs_error, direct, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+	wave_space, delta_wave, index_min, index_max= preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
+
+    #renormalizing flux prior to EL map
+    direct, normalization_factor,mask_grism = renormalize_image(direct, obs_map, flux_threshold, y_factor)
+
+    factor = params['Params']['factor']
+    wave_factor = params['Params']['wave_factor']
+    # rescale the wave_space array and the direct image according to factor and wave_factor
+    len_wave = int(
+        (wave_space[len(wave_space)-1]-wave_space[0])/(delta_wave/wave_factor))
+    wave_space = jnp.linspace(
+        wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
+
+    # take x0 and y0 from the pre-processing unless specified otherwise in the config file
+    if x0 == None:
+        x0 = jcenter
+    if y0 == None:
+        y0 = icenter
+
+    x0_grism = jcenter
+    y0_grism = icenter
+
+    # direct_low = utils.resample(direct, y_factor, y_factor)
+
+    grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
+                            xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
+                            wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
+                            grism_filter=broad_filter, grism_module='A', grism_pupil='R')
+    direct_image_size = direct.shape
+
+    # initialize chosen kinematic model
+    if model_name == 'Disk':
+        kin_model = models.DiskModel()
+    elif model_name == 'Merger':
+        kin_model = models.Merger()
+    kin_model.set_bounds(direct, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel)
+    
+	# plt.imshow(obs_map, origin='lower')
 	# plt.show()
 
-	#compute PA from the cropped med band image (not the EL map)
-	PA_truth = utils.compute_PA(med_band_cutout)
-
-	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), PA_truth, xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max
+	# plt.imshow(direct, origin='lower')
+	# plt.show()
+    
+    return direct, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism,x0_grism, num_samples, num_warmup, step_size, target_accept_prob, wave_space, delta_wave, index_min, index_max, factor

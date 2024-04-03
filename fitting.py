@@ -124,72 +124,13 @@ if __name__ == "__main__":
 	output = args.output + '/'
 
 	print('Running the real data')
-	# no ../ because the open() function reads from terminal directory (not module directory)
-	with open('fitting_results/' + output+'config_real.yaml', 'r') as file:
-		input = yaml.load(file, Loader=yaml.FullLoader)
-		print('Read inputs successfully')
 
-	# load of all the parameters from the configuration file
-	data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, \
-    grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, \
-    wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_bounds, i_bounds, Va_bounds, \
-    r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, \
-    clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = pre.read_config_file(input, output)
-
-	# preprocess the images and the grism spectrum
-	obs_map, obs_error, direct, PA_truth, xcenter_detector, ycenter_detector, icenter, jcenter, \
-            icenter_low, jcenter_low, wave_space, delta_wave, index_min, index_max = pre.preprocess_data(med_band_path, broad_band_path, grism_spectrum_path,redshift, line, wavelength, delta_wave_cutoff, field, res)
-	# mask any hot or dead pixels, setting tolerance = 4 manually
-	#commenting this out for now because the function doesn't work well for all cases
-	# obs_map, obs_error = pre.mask_bad_pixels(obs_map, obs_error)
-
-	# renormalizing flux prior to EL map
-	direct, normalization_factor,mask_grism = pre.renormalize_image(
-            direct, obs_map, flux_threshold, y_factor)
-
-	# rescale the wave_space array and the direct image according to factor and wave_factor
-	len_wave = int(
-            (wave_space[len(wave_space)-1]-wave_space[0])/(delta_wave/wave_factor))
-	wave_space = jnp.linspace(
-            wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
-
-	# take x0 and y0 from the pre-processing unless specified otherwise in the config file
-	#these have to be in low res bc they are used to initialize the grism object
-	if x0 == None:
-		x0 = jcenter
-	if y0 == None:
-		y0 = icenter
-
-	x0_grism = jcenter  #jcenter_low
-	y0_grism = icenter #icenter_low
-
-	# initialize grism object with the low resolution flux image
-	# direct_low = utils.resample(direct, y_factor, y_factor)
-	grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
-                             xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
-                             wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
-                             grism_filter=broad_filter, grism_module='A', grism_pupil='R')
-
-
-
-	direct_image_size = direct.shape
-
-	#initialize chosen kinematic model
-	if model_name == 'Disk':
-		kin_model = models.DiskModel()
-		kin_model.set_bounds(direct, flux_bounds, flux_type, flux_threshold, [PA_truth, PA_bounds],i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel)
-	elif model_name == 'Merger':
-		kin_model = models.Merger()
-		kin_model.set_bounds(direct, flux_bounds, flux_type, flux_threshold, [PA_truth, PA_bounds],i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel)
+	direct, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
+	num_samples, num_warmup, step_size, target_accept_prob, \
+	wave_space, delta_wave, index_min, index_max, factor = pre.run_full_preprocessing(output)
 	
 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
-
-	plt.imshow(obs_map, origin='lower')
-	plt.show()
-
-	plt.imshow(direct, origin='lower')
-	plt.show()
 
 	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None)
 
