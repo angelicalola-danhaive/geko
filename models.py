@@ -58,8 +58,12 @@ class KinModels:
         # fluxes = jnp.where(r_int(x, y, PA, i) > r_eff*1.5, 0.0, fluxes)
         return fluxes
 
-    def sigma(self, x, y, sigma0, r_eff=None, I0=None, PA=None, i=None):
+    def sigma_const(self, x, y, sigma0, r_eff=None, I0=None, PA=None, i=None):
         return sigma0
+    
+    def sigma_disk(self, x, y,PA, i, Va, r_t, sigma0_max, sigma0_scale):
+        return sigma0_max - sigma0_scale*jnp.abs(self.v(x, y, PA, i, Va, r_t))
+
 
     def set_main_bounds(self, flux_prior, flux_bounds, flux_type,flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds,
                          sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel,
@@ -195,8 +199,11 @@ class Disk():
         r_t = numpyro.sample('r_t' + self.number, dist.Uniform(
         ))*(self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
 
-        sigma0 = numpyro.sample('sigma0'+ self.number, dist.Uniform(
-        ))*(self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
+        # sigma0 = numpyro.sample('sigma0'+ self.number, dist.Uniform(
+        # ))*(self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
+
+        sigma0_max = numpyro.sample('sigma0_max'+ self.number, dist.Uniform())*(self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
+        sigma0_scale =  numpyro.sample('sigma0_scale'+ self.number, dist.Uniform())*10
 
         # sampling the y axis velocity centroids
         # x0 = numpyro.sample('x0', dist.Uniform())
@@ -208,7 +215,8 @@ class Disk():
         v0 = numpyro.sample('v0'+ self.number, dist.Uniform())
         v0 = norm.ppf(v0)*100
 
-        return Pa, i, Va, r_t, sigma0, y0_vel, v0
+        # return Pa, i, Va, r_t,sigma0, y0_vel, v0, 
+        return Pa, i, Va, r_t,sigma0_max, sigma0_scale, y0_vel, v0, 
     
     def compute_posterior_means(self, inference_data):
         """
@@ -220,23 +228,27 @@ class Disk():
         # rescale all of the posteriors from uniform to the actual parameter space
         rotation = float(inference_data.posterior['rotation' + self.number].median(dim=["chain", "draw"]))
         #create lists with variables and their scaling parameters 
-        variables = ['PA' + self.number, 'i'+ self.number, 'Va'+ self.number, 'r_t'+ self.number, 'sigma0'+ self.number, 'y0_vel'+ self.number, 'v0'+ self.number]
+        # variables = ['PA' + self.number, 'i'+ self.number, 'Va'+ self.number, 'r_t'+ self.number, 'sigma0'+ self.number, 'y0_vel'+ self.number, 'v0'+ self.number]
+        variables = ['PA' + self.number, 'i'+ self.number, 'Va'+ self.number, 'r_t'+ self.number, 'sigma0_max'+ self.number,'sigma0_scale'+ self.number , 'y0_vel'+ self.number, 'v0'+ self.number]
         #for variables drawn from uniform dist, the scaling parameters are (low, high) so mu and sigma are set to none
-        mus = [self.mu_PA + round(rotation)*180, self.mu_i, None, None, None, self.y0_vel, 0.0]
-        sigmas = [self.sigma_PA, self.sigma_i, None, None, None, 2.0, 100.0]
+        mus = [self.mu_PA + round(rotation)*180, self.mu_i, None, None, None, None, self.y0_vel, 0.0]
+        sigmas = [self.sigma_PA, self.sigma_i, None, None, None, None, 2.0, 100.0]
 
         #for variables drawn from normal dist, the scaling parameters are (mu, sigma) so low and high are set to none
-        highs = [None, self.i_high, self.Va_bounds[1], self.r_t_bounds[1], self.sigma0_bounds[1], None, None]
-        lows = [None,self.i_low, self.Va_bounds[0], self.r_t_bounds[0], self.sigma0_bounds[0], None, None]
+        highs = [None, self.i_high, self.Va_bounds[1], self.r_t_bounds[1], self.sigma0_bounds[1], 0, None, None]
+        lows = [None,self.i_low, self.Va_bounds[0], self.r_t_bounds[0], self.sigma0_bounds[0], 10, None, None]
 
         #find the best sample for each variable in the list of variables
         best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, best_indices)
 
-        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean = best_sample
-        
+        # self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean = best_sample
+        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.y0_vel_mean, self.v0_mean = best_sample
 
 
-        return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean
+
+        # return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean
+        return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean,  self.sigma0_max_mean, self.sigma0_scale_mean, self.y0_vel_mean, self.v0_mean
+
 
     def compute_flux_posterior(self, inference_data, flux_type = 'manual'):
 
@@ -297,8 +309,10 @@ class DiskModel(KinModels):
 
         #declare var and label names for plotting
 
-        self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0']
-        self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$']
+        # self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0']
+        # self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$']
+        self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0_max', 'sigma0_scale']
+        self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_{max}$', r'$\sigma_{scale}$']
 
     def set_bounds(self, flux_prior, flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel):
         """
@@ -316,9 +330,9 @@ class DiskModel(KinModels):
         self.compute_flux_bounds()
 
         #make the mask and compute the PA and inclination
-        seg_1comp, _ , PA, inc = utils.compute_gal_props(self.flux_prior)
+        seg_1comp, seg_none , mask, mask_none, PA, inc = utils.compute_gal_props(self.flux_prior)
 
-        self.mask = seg_1comp.data
+        self.mask = mask
         self.mu_PA = PA[0]
         self.mu_i = inc[0]
 
@@ -343,7 +357,9 @@ class DiskModel(KinModels):
 
         # sample the fluxes within the mask from a truncated normal distribution
 
-        Pa, i, Va, r_t, sigma0, y0_vel, v0 = self.disk.sample_params()
+        # Pa, i, Va, r_t, sigma0, y0_vel, v0 = self.disk.sample_params()
+        Pa, i, Va, r_t, sigma0_max, sigma0_scale, y0_vel, v0 = self.disk.sample_params()
+
         fluxes = self.disk.sample_fluxes()
 
         fluxes = utils.oversample(fluxes, grism_object.factor, grism_object.factor)
@@ -361,7 +377,8 @@ class DiskModel(KinModels):
 
         velocities = velocities + v0
 
-        dispersions = sigma0*jnp.ones_like(velocities)
+        # dispersions = sigma0*jnp.ones_like(velocities)
+        dispersions = self.sigma_disk(X, Y, jnp.radians(Pa), jnp.radians(i), Va, r_t, sigma0_max, sigma0_scale)
 
         self.model_map = grism_object.disperse(fluxes, velocities, dispersions)
 
@@ -378,7 +395,8 @@ class DiskModel(KinModels):
 
         """
 
-        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
+        # self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
+        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.y0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
 
         self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data)
 
@@ -398,7 +416,8 @@ class DiskModel(KinModels):
 
         self.model_velocities = self.model_velocities  + self.v0_mean
 
-        self.model_dispersions = self.sigma0_mean_model *jnp.ones_like(self.model_velocities)
+        # self.model_dispersions = self.sigma0_mean_model *jnp.ones_like(self.model_velocities)
+        self.model_dispersions = self.sigma_disk(X, Y, jnp.radians(self.PA_mean), jnp.radians(self.i_mean), self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean)
 
 
         self.model_map_high = grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
@@ -437,11 +456,12 @@ class TwoComps(KinModels):
 
 
         #make the masks and compute the PAs and inclinations
-        seg_1comp, seg_2comp , PA, inc = utils.compute_gal_props(self.flux_prior, n = 2)
-        self.mask = seg_1comp.data
+        seg_1comp, seg_2comp , mask, mask_2comp, PA, inc = utils.compute_gal_props(self.flux_prior, n = 2)
 
-        self.mask1 = jnp.where(seg_2comp.data == 1, 1.0, 0.0)
-        self.mask2 = jnp.where(seg_2comp.data == 2, 1.0, 0.0)
+        self.mask = mask
+
+        self.mask1 = jnp.where(mask_2comp == 1, 1.0, 0.0)
+        self.mask2 = jnp.where(mask_2comp == 2, 1.0, 0.0)
 
         self.mu_PA1= PA[0]
         self.mu_PA2= PA[1]
@@ -582,9 +602,12 @@ class Merger(TwoComps):
         fluxes2 = fluxes2.at[self.masked_indices].set(fluxes_sample*frac_disk2)
 
         # sample the kin params for each disk model
-        Pa1, i1, Va1, r_t1, sigma01, y0_vel1, v01 = self.disk1.sample_params()
-        Pa2, i2, Va2, r_t2, sigma02, y0_vel2, v02 = self.disk2.sample_params()
+        # Pa1, i1, Va1, r_t1, sigma01, y0_vel1, v01 = self.disk1.sample_params()
+        # Pa2, i2, Va2, r_t2, sigma02, y0_vel2, v02 = self.disk2.sample_params()
     
+        Pa1, i1, Va1, r_t1, sigma0_max1, sigma0_scale1, y0_vel1, v01 = self.disk1.sample_params()
+        Pa2, i2, Va2, r_t2, sigma0_max2, sigma0_scale2, y0_vel2, v02 = self.disk2.sample_params()
+
         fluxes1 = utils.oversample(fluxes1, grism_object.factor, grism_object.factor)
         fluxes2 = utils.oversample(fluxes2, grism_object.factor, grism_object.factor)
     
@@ -605,8 +628,11 @@ class Merger(TwoComps):
         velocities1 = velocities1 + v01
         velocities2 = velocities2 + v02
     
-        dispersions1 = sigma01*jnp.ones_like(velocities1)
-        dispersions2 = sigma02*jnp.ones_like(velocities2)
+        # dispersions1 = sigma01*jnp.ones_like(velocities1)
+        # dispersions2 = sigma02*jnp.ones_like(velocities2)
+
+        dispersions1 = self.sigma_disk(X1, Y1, jnp.radians(Pa1), jnp.radians(i1), Va1, r_t1, sigma0_max1, sigma0_scale1)
+        dispersions2 = self.sigma_disk(X2, Y2, jnp.radians(Pa2), jnp.radians(i2), Va2, r_t2, sigma0_max2, sigma0_scale2)
     
         self.model_map1 = grism_object.disperse(fluxes1, velocities1, dispersions1)
         self.model_map2 = grism_object.disperse(fluxes2, velocities2, dispersions2)
@@ -628,8 +654,11 @@ class Merger(TwoComps):
 
         """
 
-        self.PA_mean_1,self.i_mean_1, self.Va_mean_1, self.r_t_mean_1, self.sigma0_mean_model_1, self.y0_vel_mean_1, self.v0_mean_1 = self.disk1.compute_posterior_means(inference_data)
-        self.PA_mean_2,self.i_mean_2, self.Va_mean_2, self.r_t_mean_2, self.sigma0_mean_model_2, self.y0_vel_mean_2, self.v0_mean_2 = self.disk2.compute_posterior_means(inference_data)
+        # self.PA_mean_1,self.i_mean_1, self.Va_mean_1, self.r_t_mean_1, self.sigma0_mean_model_1, self.y0_vel_mean_1, self.v0_mean_1 = self.disk1.compute_posterior_means(inference_data)
+        # self.PA_mean_2,self.i_mean_2, self.Va_mean_2, self.r_t_mean_2, self.sigma0_mean_model_2, self.y0_vel_mean_2, self.v0_mean_2 = self.disk2.compute_posterior_means(inference_data)
+
+        self.PA_mean_1,self.i_mean_1, self.Va_mean_1, self.r_t_mean_1, self.sigma0_max_mean_1, self.sigma0_scale_mean_1, self.y0_vel_mean_1, self.v0_mean_1 = self.disk1.compute_posterior_means(inference_data)
+        self.PA_mean_2,self.i_mean_2, self.Va_mean_2, self.r_t_mean_2, self.sigma0_max_mean_2, self.sigma0_scale_mean_2, self.y0_vel_mean_2, self.v0_mean_2 = self.disk2.compute_posterior_means(inference_data)
 
         best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
         ), inference_data['sample_stats']['lp'].shape)
@@ -678,8 +707,11 @@ class Merger(TwoComps):
         self.model_velocities1 = self.model_velocities1 + self.v0_mean_1
         self.model_velocities2 = self.model_velocities2 + self.v0_mean_2
 
-        self.model_dispersions1 = self.sigma0_mean_model_1 *jnp.ones_like(self.model_velocities1)
-        self.model_dispersions2 = self.sigma0_mean_model_2 *jnp.ones_like(self.model_velocities2)
+        # self.model_dispersions1 = self.sigma0_mean_model_1 *jnp.ones_like(self.model_velocities1)
+        # self.model_dispersions2 = self.sigma0_mean_model_2 *jnp.ones_like(self.model_velocities2)
+
+        self.model_dispersions1 = self.sigma_disk(X1, Y1, jnp.radians(self.PA_mean_1), jnp.radians(self.i_mean_1), self.Va_mean_1, self.r_t_mean_1, self.sigma0_max_mean_1, self.sigma0_scale_mean_1)
+        self.model_dispersions2 = self.sigma_disk(X2, Y2, jnp.radians(self.PA_mean_2), jnp.radians(self.i_mean_2), self.Va_mean_2, self.r_t_mean_2, self.sigma0_max_mean_2, self.sigma0_scale_mean_2)
 
         self.model_map_high1 = grism_object.disperse(self.model_flux1, self.model_velocities1, self.model_dispersions1)
         self.model_map_high2 = grism_object.disperse(self.model_flux2, self.model_velocities2, self.model_dispersions2)
