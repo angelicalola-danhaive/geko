@@ -3,6 +3,7 @@
 # importing my own modules
 import grism
 import preprocess as pre
+import postprocess as post
 import plotting
 import utils
 import models
@@ -35,7 +36,7 @@ import yaml
 
 jax.config.update('jax_enable_x64', True)
 numpyro.set_host_device_count(2)
-# numpyro.set_platform('gpu')
+numpyro.set_platform('gpu')
 
 # np.set_printoptions(precision=15, floatmode='maxprec')
 # jnp.set_printoptions(precision=15, floatmode='maxprec')
@@ -148,7 +149,7 @@ if __name__ == "__main__":
 	# no ../ because the open() function reads from terminal directory (not module directory)
 	inf_data.to_netcdf('fitting_results/' + output + 'output')
 
-
+	post.process_results(output)
 
 
 #==============================EXTRA STUFF = NEED TO PUT SOMEWHERE ELSE==================================================
@@ -174,79 +175,3 @@ if __name__ == "__main__":
 # 	generated_map = utils.resample(model_map_high, y_factor*factor, wave_factor)
 
 # 	return generated_map
-
-
-# -----------------------------------------------------------matching output (F,V,sigma) to an IFU-----------------------------------------------------------------------------------
-
-# def match_to_IFU(F1, V1, D1, F2, V2, D2, full_PSF, FWHM_PSF, R_LSF, wavelength, IFU='kmos'):
-# 	# if there is no second component than you should input zero arrays in the F2,V2,D2
-# 	# create a 3D cube with the model best fit, basically with f[i,j,k]=F[i,j]*gaussian(k)
-# 		# make the gaussian with stats.norm.pdf(velocity_space, v[i,j],sigma_v[i,j])
-# 	velocity_space = jnp.linspace(-1000, 1000, 2001)
-# 	broadcast_velocity_space = np.broadcast_to(
-# 	    velocity_space[:, np.newaxis, np.newaxis], (velocity_space.size, F1.shape[0], F1.shape[0]))
-# 	if F2 is not None:
-# 		cube = F1*stats.norm.pdf(broadcast_velocity_space, V1, D1) + \
-# 		                         F2*stats.norm.pdf(broadcast_velocity_space, V2, D2)
-# 	else:
-# 		cube = F1*stats.norm.pdf(broadcast_velocity_space, V1, D1)
-
-# 	print('cube created')
-# 	# if no full PSF given, use the FWHM to create a 2D gaussian kernel
-# 	if full_PSF is None:
-# 		FWHM_PSF_pixels = FWHM_PSF/0.0629
-# 		sigma_PSF = FWHM_PSF_pixels/(2*np.sqrt(2*np.log(2)))
-# 		full_PSF = np.array(Gaussian2DKernel(sigma_PSF))
-# 	print('PSF created')
-# 	# create the LSF kernel - assuming a constant one for now since only emission around the same wavelength
-# 	# compute the std for the velocities from the spectral resolution
-# 	sigma_LSF = wavelength/(2.355*R_LSF)
-# 	sigma_LSF_v = (c/1000)*sigma_LSF/wavelength
-# 	LSF = np.array(Gaussian1DKernel(sigma_LSF_v))
-# 	print('LSF created')
-# 	# create a 3D kernel with 2D PSF and 1D LSF
-# 	full_kernel = np.array(full_PSF) * np.broadcast_to(np.array(LSF)[:, np.newaxis, np.newaxis], (np.array(
-# 	    LSF).size, np.array(full_PSF).shape[0], np.array(full_PSF).shape[0]))
-# 	print('kernel created')
-# 	# convolve the cube with the kernel
-# 	print('convolving cube')
-# 	convolved_cube = signal.fftconvolve(cube, full_kernel, mode='same')
-# 	print('convolution done')
-# 	# from the convolved cube, obtain the flux, velocity and dispersion maps
-# 	F_kmos = np.sum(convolved_cube, axis=0)
-# 	# fit a gaussian to the convolved cube to obtain the velocity and dispersion maps
-# 	V_kmos = np.zeros_like(F_kmos)
-# 	D_kmos = np.zeros_like(F_kmos)
-
-# 	def gauss(x, A, mu, sigma):
-# 		return 1/(sigma*np.sqrt(2*np.pi))*np.exp(-0.5*((x-mu)/sigma)**2)*A
-
-# 	for i in range(V_kmos.shape[0]):
-# 		for j in range(V_kmos.shape[1]):
-# 			popt, pcov = curve_fit(gauss, velocity_space, convolved_cube[:, i, j], p0=[
-# 			                       F_kmos[i, j], V1[i, j], D1[i, j]])
-# 			V_kmos[i, j] = popt[1]
-# 			D_kmos[i, j] = popt[2]
-# 	# popt, pcov = curve_fit(gauss, velocity_space, convolved_cube, p0=[F_kmos,V1, D1])
-# 	# V_kmos = popt[1]
-# 	# D_kmos = popt[2]
-
-# 	# finally resample to IFU pixel scale
-# 	IFU_scale_arcseconds = 0.1799
-# 	NC_LW_scale_arcseconds = 0.0629
-# 	# rescale the maps to the IFU pixel scale
-
-# 	if IFU == 'kmos':
-# 		IFU_scale_pixels = int(IFU_scale_arcseconds/NC_LW_scale_arcseconds)
-# 		# blocks = F_kmos.reshape((int(F_kmos.shape[0]/(IFU_scale_pixels)), IFU_scale_pixels, int(F_kmos.shape[1]/IFU_scale_pixels), IFU_scale_pixels))
-# 		# F_kmos = jnp.sum(blocks, axis=(1,3))
-# 		F_kmos = image.resize(F_kmos, (int(
-# 		    F_kmos.shape[0]/IFU_scale_pixels), int(F_kmos.shape[1]/IFU_scale_pixels)), method='nearest')
-# 		F_kmos *= IFU_scale_pixels**2
-# 		V_kmos = image.resize(V_kmos, (int(
-# 		    V_kmos.shape[0]/IFU_scale_pixels), int(V_kmos.shape[1]/IFU_scale_pixels)), method='bicubic')
-# 		D_kmos = image.resize(D_kmos, (int(
-# 		    D_kmos.shape[0]/IFU_scale_pixels), int(D_kmos.shape[1]/IFU_scale_pixels)), method='bicubic')
-
-# 		print('rescaling done')
-# 	return F_kmos, V_kmos, D_kmos
