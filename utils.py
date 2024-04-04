@@ -145,7 +145,8 @@ def make_mask(image, n = 1, threshold_sigma = 3):
     label_source = idx_source + 1
     segment_map.keep_labels([label_source])
 
-
+    mask_1comp = segment_map.copy()
+    mask_1comp = dilation(mask_1comp.data, disk(3))
     plt.imshow(image*segment_map.data, origin='lower')
     plt.show()
 
@@ -163,14 +164,18 @@ def make_mask(image, n = 1, threshold_sigma = 3):
             for label in segm_deblend.labels:
                 if label != label_source:
                     segm_deblend.reassign_label(label, new_label)
+
+        mask_2comp = segm_deblend.copy()
+        mask_2comp = dilation(mask_2comp.data, disk(3))
         cat = SourceCatalog(image, segm_deblend)
         plt.imshow(segm_deblend.data, origin='lower')
-        plt.plot(cat.xcentroid, cat.ycentroid, 'ro')
+        plt.scatter(cat.xcentroid, cat.ycentroid, color='red')
         plt.show()
     else: 
         segm_deblend = None
+        mask_2comp = None
     
-    return segment_map, segm_deblend
+    return segment_map, segm_deblend, mask_1comp, mask_2comp
 
 
 def compute_gal_props(image, n=1, threshold_sigma=3):
@@ -179,7 +184,7 @@ def compute_gal_props(image, n=1, threshold_sigma=3):
 
 	'''
 
-	seg_1comp, seg_2comp = make_mask(image, n, 1)
+	seg_1comp, seg_2comp, mask_1comp, mask_2comp = make_mask(image, n, 1) #1
 	if n == 1:   
 		sources = SourceCatalog(image, seg_1comp)
 	if n == 2:
@@ -192,8 +197,9 @@ def compute_gal_props(image, n=1, threshold_sigma=3):
     
 	print('PA : ', PA)
 	print('inc : ', inc)
-                
-	return seg_1comp, seg_2comp, PA, inc
+    
+	# print(seg_1comp)
+	return seg_1comp, seg_2comp, mask_1comp, mask_2comp, PA, inc
 
 
 #things to add here
