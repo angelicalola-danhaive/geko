@@ -30,13 +30,14 @@ from astropy.coordinates import SkyCoord
 from astropy import units as u
 from astropy.io import fits
 from astropy.wcs import wcs
+from astropy.table import Table
 
 from reproject import reproject_adaptive
 
 
 
 
-def read_config_file(input, output):
+def read_config_file(input, output, master_cat_path, line):
 	"""
 
         Read the config file for the galaxy and returns all of the relevant parameters
@@ -45,16 +46,20 @@ def read_config_file(input, output):
 	data = input[0]
 	params = input[1]
 	inference = input[2]
-	priors = input[3]
 
 	ID = data['Data']['ID']
-		
-	broad_filter = data['Data']['broad_filter']
-		
-	if broad_filter == 'F444W':
+
+	master_cat =Table.read(master_cat_path, format="ascii")
+	
+	if line == 'H_alpha':
+		broad_filter = 'F444W'
 		med_filter = 'F410M'
-	elif broad_filter == 'F356W':
+	elif line == 'OIII_5007' or 'OIII_4959' or 'H_beta':
+		broad_filter = 'F356W'
 		med_filter = 'F335M'
+	else:
+		print('Line not recognized')
+		return None
 	
 	field = data['Data']['field']
 	
@@ -67,15 +72,12 @@ def read_config_file(input, output):
 		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_FRESCO_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
 
 
+	wavelength = master_cat[master_cat['ID'] == ID][str(line) + '_lambda'][0]
 
-
-	wavelength = data['Data']['wavelength']
-
-	redshift = data['Data']['redshift']
-
-	line = data['Data']['line']
+	redshift = master_cat[master_cat['ID'] == ID]['zspec'][0]
 								
 	y_factor = params['Params']['y_factor']
+
 	if y_factor == 1:
 		print('Fitting the low res image')
 		res = 'low'
@@ -83,7 +85,6 @@ def read_config_file(input, output):
 		print('Fitting the high res image')
 		res = 'high'
 		
-	to_mask = params['Params']['masking']
 	flux_threshold = inference['Inference']['flux_threshold']
 	
 	delta_wave_cutoff = params['Params']['delta_wave_cutoff']
@@ -107,16 +108,7 @@ def read_config_file(input, output):
 	Va_bounds = inference['Inference']['Va_bounds']
 	r_t_bounds = inference['Inference']['r_t_bounds']
 	sigma0_bounds = inference['Inference']['sigma0_bounds']
-	sigma0_mean = inference['Inference']['sigma0_mean']
-	sigma0_disp = inference['Inference']['sigma0_disp']
-	obs_map_bounds = inference['Inference']['obs_map_bounds']
 
-	clump_v_prior = inference['Inference']['clump_v_prior']
-	clump_sigma_prior = inference['Inference']['clump_sigma_prior']
-	clump_flux_prior = inference['Inference']['clump_flux_prior']
-	
-	clump_bool = inference['Inference']['clump_bool']
-	
 	num_samples = inference['Inference']['num_samples']
 	num_warmup = inference['Inference']['num_warmup']
 	
@@ -124,15 +116,15 @@ def read_config_file(input, output):
 	target_accept_prob = inference['Inference']['target_accept_prob']
 	
 	#return all of the parameters
-	return data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
+	return data, params, inference, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
-def renormalize_image(direct, obs_map, flux_threshold, y_factor):
+def renormalize_image(direct, obs_map):
 	"""
 		Normalize the image to match the total flux in the EL map
 	"""
 
-	threshold = flux_threshold*0.5*direct.max()
+	threshold = 0.2*direct.max()
 	# threshold = threshold_otsu(direct)
 	mask = jnp.zeros_like(direct)
 	mask = mask.at[jnp.where(direct>threshold)].set(1)
@@ -144,7 +136,7 @@ def renormalize_image(direct, obs_map, flux_threshold, y_factor):
 	plt.show()
 
 	#create a mask for the grism map
-	threshold_grism = flux_threshold*0.5*obs_map.max()
+	threshold_grism = 0.2*obs_map.max()
 	# threshold_grism = threshold_otsu(obs_map)
 	mask_grism = jnp.zeros_like(obs_map)
 	mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
@@ -228,7 +220,7 @@ def make_EL_map(med_band, broad_band, z, line):
 
 	EL_map = np.zeros((box_size, box_size))
 
-	if line == 'Halpha' :
+	if line == 'H_alpha' :
 		if z_410M[0] < z < z_410M[1]:
 			print('Halpha is in F410M and F444W')
 			# Halpha_map = image_cutout_F410M - (image_cutout_F444W-image_cutout_F410M)/(width_F444W-width_F410M)*(width_F410M)
@@ -247,16 +239,16 @@ def make_EL_map(med_band, broad_band, z, line):
 		else:
 			print('Halpha is not in the observed range, returning zeros')
 	
-	elif line == 'OIII_5007':
+	elif line == 'OIII_5008':
 		if z_335M[0] < z < z_335M[1]:
-			print('OIII_5007 is in F335M and F356W')
+			print('OIII_5008 is in F335M and F356W')
 			EL_map = (med_band*width_F335M*width_F356W - broad_band*width_F356W*width_F335M)/(width_F356W-width_F335M)
 		#if the galaxy is in z_356W, then estimate OIII map as F356W-F335M
 		elif z_356W[0] < z < z_356W[1]:
-			print('OIII_5007 is only in F356W ')
+			print('OIII_5008 is only in F356W ')
 			EL_map = broad_band*width_F356W - med_band*width_F356W 
 		else:
-			print('OIII_5007 is not in the observed range, returning zeros')
+			print('OIII_508 is not in the observed range, returning zeros')
 	
 	elif line == 'PAalpha':
 		if z_410M_PAalpha[0] < z < z_410M_PAalpha[1]:
@@ -468,7 +460,7 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max
 
 
-def run_full_preprocessing(output):
+def run_full_preprocessing(output,master_cat, line):
     """
         Main function that automatically post-processes the inference data and saves all of the relevant plots
     """
@@ -478,18 +470,17 @@ def run_full_preprocessing(output):
         print('Read inputs successfully')
 
     #load of all the parameters from the configuration file
-    data, params, inference, priors, ID, broad_filter, med_filter, med_band_path, broad_band_path, \
-	grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, to_mask, flux_threshold, factor, \
+    data, params, inference, ID, broad_filter, med_filter, med_band_path, broad_band_path, \
+	grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, \
 	wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
-	r_t_bounds, sigma0_bounds, sigma0_mean, sigma0_disp, obs_map_bounds, clump_v_prior, clump_sigma_prior, \
-	clump_flux_prior, clump_bool, num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/')
+	r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
 
     #preprocess the images and the grism spectrum
     obs_map, obs_error, direct, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
 	wave_space, delta_wave, index_min, index_max= preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
 
     #renormalizing flux prior to EL map
-    direct, normalization_factor,mask_grism = renormalize_image(direct, obs_map, flux_threshold, y_factor)
+    direct, normalization_factor,mask_grism = renormalize_image(direct, obs_map)
 
     factor = params['Params']['factor']
     wave_factor = params['Params']['wave_factor']
@@ -507,13 +498,15 @@ def run_full_preprocessing(output):
 
     x0_grism = jcenter
     y0_grism = icenter
+    
+    PSF = 'gdn_mpsf_f356w_small.fits'
 
     # direct_low = utils.resample(direct, y_factor, y_factor)
 
     grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
                             xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
                             wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
-                            grism_filter=broad_filter, grism_module='A', grism_pupil='R')
+                            grism_filter=broad_filter, grism_module='A', grism_pupil='R', PSF = PSF)
     direct_image_size = direct.shape
 
     # initialize chosen kinematic model
