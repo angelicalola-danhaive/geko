@@ -54,9 +54,17 @@ def read_config_file(input, output, master_cat_path, line):
 	if line == 'H_alpha':
 		broad_filter = 'F444W'
 		med_filter = 'F410M'
-	elif line == 'OIII_5007' or 'OIII_4959' or 'H_beta':
+		grism_filter = broad_filter
+	elif line == 'OIII_5007' or 'OIII_4959':
 		broad_filter = 'F356W'
 		med_filter = 'F335M'
+		grism_filter = broad_filter
+	elif line == 'H_beta':
+		#in this case we use Halpha as prior
+		broad_filter = 'F444W'
+		med_filter = 'F410M'
+		#but still use the correct grim data!
+		grism_filter = 'F356W'
 	else:
 		print('Line not recognized')
 		return None
@@ -67,10 +75,11 @@ def read_config_file(input, output, master_cat_path, line):
 	med_band_path = 'fitting_results/' + output + str(ID) + '_' + med_filter + '.fits'
 	broad_band_path = 'fitting_results/' + output + str(ID) + '_' + broad_filter + '.fits'
 	if field == 'GOODS-N' or field == 'GOODS-N-CONGRESS':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
+		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
 	elif field == 'GOODS-S-FRESCO':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_FRESCO_' + broad_filter + '_ID' + str(ID) + '_comb.fits'
+		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_FRESCO_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
 
+	broad_band_mask_path = 'fitting_results/' + output + str(ID) + '_' + 'F444W' + '.fits'
 
 	wavelength = master_cat[master_cat['ID'] == ID][str(line) + '_lambda'][0]
 
@@ -116,7 +125,7 @@ def read_config_file(input, output, master_cat_path, line):
 	target_accept_prob = inference['Inference']['target_accept_prob']
 	
 	#return all of the parameters
-	return data, params, inference, ID, broad_filter, med_filter, med_band_path, broad_band_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
+	return data, params, inference, ID, broad_filter, med_filter, grism_filter, med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
 def renormalize_image(direct, obs_map):
@@ -220,14 +229,14 @@ def make_EL_map(med_band, broad_band, z, line):
 
 	EL_map = np.zeros((box_size, box_size))
 
-	if line == 'H_alpha' :
-		if z_410M[0] < z < z_410M[1]:
+	if line == 'H_alpha' or line == 'H_beta': #use Halpha map as prior for Hbeta 
+		if 4.916158536585365 < z < 5.557926829268291:
 			print('Halpha is in F410M and F444W')
 			# Halpha_map = image_cutout_F410M - (image_cutout_F444W-image_cutout_F410M)/(width_F444W-width_F410M)*(width_F410M)
 			EL_map = (med_band*width_F410M*width_F444W - broad_band*width_F444W*width_F410M)/(width_F444W-width_F410M)
 			# Halpha_map = image_cutout_F410M - image_cutout_F444W
 		#if the galaxy is in z_444W, then estimate Halpha map as F444W-F410M
-		elif z_444W[0] < z < z_444W[1]:
+		elif 5.5579268292682915 < z < 6.594512195121951:
 			print('Halpha is only in F444W')
 			EL_map = broad_band*width_F444W- med_band*width_F444W
 		elif z_356W_halpha[0] < z < z_356W_halpha[1]:
@@ -240,15 +249,16 @@ def make_EL_map(med_band, broad_band, z, line):
 			print('Halpha is not in the observed range, returning zeros')
 	
 	elif line == 'OIII_5008':
-		if z_335M[0] < z < z_335M[1]:
+		if 5.343849840255591 < z < 6.062699680511182 :
 			print('OIII_5008 is in F335M and F356W')
 			EL_map = (med_band*width_F335M*width_F356W - broad_band*width_F356W*width_F335M)/(width_F356W-width_F335M)
 		#if the galaxy is in z_356W, then estimate OIII map as F356W-F335M
-		elif z_356W[0] < z < z_356W[1]:
+		elif (5.259984025559104 < z < 5.3438409840255591) or (6.062699680511182< z < 6.949281150159743) or z == 4.480:
 			print('OIII_5008 is only in F356W ')
 			EL_map = broad_band*width_F356W - med_band*width_F356W 
 		else:
 			print('OIII_508 is not in the observed range, returning zeros')
+
 	
 	elif line == 'PAalpha':
 		if z_410M_PAalpha[0] < z < z_410M_PAalpha[1]:
@@ -261,7 +271,7 @@ def make_EL_map(med_band, broad_band, z, line):
 
 	return EL_map
 
-def rotate_wcs(med_band_fits, EL_map, field, cutout_size):
+def rotate_wcs(med_band_fits, EL_map, broad_map, field, cutout_size):
 	'''
 		rotate the WCS of the image to match the PA of the grism image
 	'''
@@ -272,6 +282,7 @@ def rotate_wcs(med_band_fits, EL_map, field, cutout_size):
 			print('FRESCO PA is the same in GOODS-S, no correction needed')
 			med_band_flip = med_band
 			EL_map_flip = EL_map
+			broad_map_flip = broad_map
 			rotated_wcs = wcs_med_band
 	else:
 		if field == 'GOODS-N':
@@ -308,9 +319,10 @@ def rotate_wcs(med_band_fits, EL_map, field, cutout_size):
 			EL_map_flip, footprint = reproject_adaptive((EL_map, wcs_med_band), rotated_wcs, shape_out = EL_map.shape)
 			#flip this too so the PA can be computed
 			med_band_flip, footprint = reproject_adaptive((med_band, wcs_med_band), rotated_wcs, shape_out = med_band.shape)
+			broad_map_flip, footprint = reproject_adaptive((broad_map, wcs_med_band), rotated_wcs, shape_out = broad_map.shape)
 
+	return rotated_wcs, med_band_flip, EL_map_flip, broad_map_flip
 
-	return rotated_wcs, med_band_flip, EL_map_flip
 
 def contiuum_subtraction(grism_spectrum_fits):
 	'''
@@ -327,14 +339,18 @@ def contiuum_subtraction(grism_spectrum_fits):
 
 	return grism_spectrum_data
 
-def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff = 0.02, field = 'GOODS-S', fitting = None):
+def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff = 0.02, field = 'GOODS-S', fitting = None):
 	 
 	#load data from fits files
 	med_band_fits = fits.open(med_band_path)
 	med_band = med_band_fits[1].data
+	med_band_wcs = wcs.WCS(med_band_fits[1].header)
 
 	broad_band_fits = fits.open(broad_band_path)
 	broad_band = broad_band_fits[1].data
+	broad_band_wcs = wcs.WCS(broad_band_fits[1].header)
+
+	broad_band_mask = fits.open(broad_band_mask_path)[1].data
 
 	grism_spectrum_fits = fits.open(grism_spectrum_path)
 
@@ -351,8 +367,7 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 	plt.show()
 
 	#if needed, rotate the image WCS and the EL map to match the PA of the grism image
-	rotated_wcs, med_band_flip, EL_map_flip = rotate_wcs(med_band_fits, EL_map, field, cutout_size)
-	
+	rotated_wcs, med_band_flip, EL_map_flip, broad_band_mask_flip= rotate_wcs(med_band_fits, EL_map, broad_band_mask, field, cutout_size)
 	galaxy_position = SkyCoord(ra=RA * u.deg, dec=DEC * u.deg)
 
 	#compute the med band center from the WCS coords:
@@ -370,7 +385,8 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 	#cut the med band image to 62x62 around the photometric center: icenter_medband, jcenter_medband
 	high_res_prior = EL_map_flip[icenter_high-31:icenter_high+31,jcenter_high-31:jcenter_high+31]
 	med_band_cutout = jnp.array(med_band_flip[icenter_high-31:icenter_high+31,jcenter_high-31:jcenter_high+31])
-
+	# save the broadband image needed to compute mask - using F444W for all ELs to have save mask
+	broad_band_mask = broad_band_mask_flip[icenter_high-31:icenter_high+31,jcenter_high-31:jcenter_high+31]
 	# compute mask from med band image
 	# threshold = threshold_otsu(med_band_cutout)/3
 	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
@@ -457,7 +473,7 @@ def preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshif
 		jcenter_prior = jcenter_low
 	
 
-	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max
+	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max
 
 
 def run_full_preprocessing(output,master_cat, line):
@@ -470,14 +486,14 @@ def run_full_preprocessing(output,master_cat, line):
         print('Read inputs successfully')
 
     #load of all the parameters from the configuration file
-    data, params, inference, ID, broad_filter, med_filter, med_band_path, broad_band_path, \
+    data, params, inference, ID, broad_filter, med_filter, grism_filter, med_band_path, broad_band_path,broad_band_mask_path, \
 	grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, \
 	wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
 	r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
 
     #preprocess the images and the grism spectrum
-    obs_map, obs_error, direct, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-	wave_space, delta_wave, index_min, index_max= preprocess_data(med_band_path, broad_band_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
+    obs_map, obs_error, direct, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+	wave_space, delta_wave, index_min, index_max= preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
 
     #renormalizing flux prior to EL map
     direct, normalization_factor,mask_grism = renormalize_image(direct, obs_map)
@@ -499,22 +515,24 @@ def run_full_preprocessing(output,master_cat, line):
     x0_grism = jcenter
     y0_grism = icenter
     
-    PSF = 'gdn_mpsf_f356w_small.fits'
+    PSF = 'gdn_mpsf_' + broad_filter + '_small.fits'
 
     # direct_low = utils.resample(direct, y_factor, y_factor)
 
     grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
                             xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
                             wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
-                            grism_filter=broad_filter, grism_module='A', grism_pupil='R', PSF = PSF)
+                            grism_filter=grism_filter, grism_module='A', grism_pupil='R', PSF = PSF)
     direct_image_size = direct.shape
 
     # initialize chosen kinematic model
     if model_name == 'Disk':
         kin_model = models.DiskModel()
+    elif model_name == 'Disk_prior':
+        kin_model = models.DiskModel_withPrior()
     elif model_name == 'Merger':
         kin_model = models.Merger()
-    kin_model.set_bounds(direct, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel)
+    kin_model.set_bounds(direct, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel)
     
 	# plt.imshow(obs_map, origin='lower')
 	# plt.show()

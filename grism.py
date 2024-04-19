@@ -194,6 +194,7 @@ class Grism:
 		self.load_coefficients()
 
 		self.load_poly_factors(*self.w_opt)
+		self.load_poly_coefficients()
 
 		# self.sh_beam = (self.sh[0]*factor,self.wave_space.shape[0])
 		self.sh_beam = (self.sh_high[0],self.wave_space.shape[0])
@@ -289,9 +290,22 @@ class Grism:
 
 
 	def get_trace(self):
-		# delta_wave = int((self.WRANGE[1]-self.WRANGE[0])/self.wave_scale)
-		# self.wave_space = jnp.linspace(self.WRANGE[0],self.WRANGE[1],delta_wave+1)
-		self.disp_space = self.grism_dispersion(self.xcenter_detector, self.ycenter_detector, self.wave_space)
+		xpix = self.xcenter_detector
+		ypix = self.ycenter_detector
+		wave = self.wave_space
+
+		xpix -= 1024
+		ypix -= 1024
+		wave -= 3.95
+		xpix2 = xpix**2
+		ypix2 = ypix**2
+		wave2 = wave**2
+		wave3 = wave**3
+
+		self.disp_space =  ((self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)) +
+	  					(self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)) * wave +
+						(self.c01 + (self.c02 * xpix + self.c03 * ypix)) * wave2 + (self.d01 ) * wave3)		
+
 
 	def set_wavelength(self, wavelength):
 		self.wavelength = wavelength
@@ -313,8 +327,24 @@ class Grism:
 		self.c02 = c02
 		self.c03 = c03
 		self.d01 = d01
+	
+	def load_poly_coefficients(self):
 
-	def grism_dispersion(self, xpix, ypix, wave):
+		xpix = self.detector_position
+		ypix = self.ycenter_detector
+		xpix -= 1024
+		ypix -= 1024
+		xpix2 = xpix**2
+		ypix2 = ypix**2
+
+		self.coef1 = self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)
+		self.coef2 = self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)
+		self.coef3 = self.c01 + (self.c02 * xpix + self.c03 * ypix)
+		self.coef4 = self.d01*jnp.ones_like(xpix)
+
+
+
+	def grism_dispersion(self, wave):
 		'''
 			from x0,y0 and the lamda of one pixel in direct image, get the dx in the grism image
 
@@ -329,26 +359,10 @@ class Grism:
 				in the grism image
 		'''
 
-		## data is an numpy array of the shape (3, N)
-		##     - data[0]:  x_pixel      --> fit with second-degree polynomial
-		##     - data[1]:  y_pixel      --> fit with second-degree polynomial
-		##     - data[2]:  wavelength   --> fit with third-degree polynomial
-		xpix, ypix, wave = xpix - 1024, ypix - 1024, wave - 3.95
-		xpix2 = xpix**2
-		ypix2 = ypix**2
-		wave2 = wave**2
-		wave3 = wave**3
+		wave -=3.95
 
-		# coef1 = self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)
-		# coef2 = self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)
-		# coef3 = self.c01 + (self.c02 * xpix + self.c03 * ypix)
-		# coef4 = self.d01*jnp.ones_like(xpix)
+		return ((self.coef1 + self.coef2 * wave + self.coef3 * wave**2 + self.coef4 * wave**3))
 
-		# return jnp.polyval(jnp.array([coef4, coef3, coef2, coef1]), wave)
-		
-		return ((self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)) +
-	  					(self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)) * wave +
-						(self.c01 + (self.c02 * xpix + self.c03 * ypix)) * wave2 + (self.d01 ) * wave3)		
 
 	def set_sensitivity(self):
 
@@ -428,7 +442,7 @@ class Grism:
 		'''
 		# self.f = open("timing.txt", "a")
 		# start = time.time()
-		DX = self.grism_dispersion(self.detector_position,self.ycenter_detector, self.wavelength*(1  + V/(c/1000) ))
+		DX = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
 		# print('DX shape: ', DX.shape)
 		# end = time.time()
 		# self.f.write("DX time: " + str(end-start) + "\n")
@@ -444,7 +458,7 @@ class Grism:
 		CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
 
 		# start = time.time()
-		DX_disp_final = self.grism_dispersion(self.detector_position, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )) -DX
+		DX_disp_final = self.grism_dispersion(self.wavelength*(1  + (V+CORR_D)/(c/1000) )) -DX
 		# end = time.time()
 		# self.f.write("DX_disp_final time: " + str(end-start) + "\n")
 		NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
@@ -469,12 +483,12 @@ class Grism:
 		# self.f.write("gaussian_matrix time: " + str(end-start) + "\n")
 
 		# start = time.time()
-		gaussian_matrix = convolve(gaussian_matrix, self.PSF, mode='same')
+		psf_gaussian_matrix = convolve(gaussian_matrix, self.PSF, mode='same')
 		# end = time.time()
 		# self.f.write("convolve time: " + str(end-start) + "\n")
 
 		# start = time.time()
-		grism_full = jnp.matmul( F[:,None, :] , gaussian_matrix)[:,0,:]  
+		grism_full = jnp.matmul( F[:,None, :] , psf_gaussian_matrix)[:,0,:]  
 		# end = time.time()
 		
 		# self.f.write("matmul time: " + str(end-start) + "\n")

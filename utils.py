@@ -24,6 +24,8 @@ from photutils.background import Background2D, MedianBackground
 
 from matplotlib import pyplot as plt
 
+from astropy.io import fits
+
 def oversample(image_low_res, factor, wave_factor, method='nearest'):
     image_high_res = image.resize(image_low_res, (int(
         image_low_res.shape[0]*factor), int(image_low_res.shape[1]*wave_factor)), method=method)
@@ -144,10 +146,12 @@ def make_mask(image, n = 1, threshold_sigma = 3):
 
     label_source = idx_source + 1
     segment_map.keep_labels([label_source])
+    segment_map.reassign_label(label_source, 1)
 
     mask_1comp = segment_map.copy()
     mask_1comp = dilation(mask_1comp.data, disk(3))
     plt.imshow(image*segment_map.data, origin='lower')
+    plt.title('Mask of the central source')
     plt.show()
 
     #separate two sources if n == 2
@@ -159,11 +163,12 @@ def make_mask(image, n = 1, threshold_sigma = 3):
         #if more than 2 labels, keep the central one and merge the others
         if segm_deblend.nlabels > 2:
             idx_source = jnp.argmin((cat.xcentroid-image.shape[0]//2)**2 + (cat.ycentroid-image.shape[0]//2)**2)
-            label_source = idx_source + 1
+            label_source = 3 #idx_source + 1
             new_label = segm_deblend.labels[segm_deblend.labels != label_source][0]
             for label in segm_deblend.labels:
                 if label != label_source:
-                    segm_deblend.reassign_label(label, new_label)
+                    segm_deblend.reassign_label(label, 2)
+            segm_deblend.reassign_label(label_source, 1)
 
         mask_2comp = segm_deblend.copy()
         mask_2comp = dilation(mask_2comp.data, disk(3))
@@ -184,7 +189,7 @@ def compute_gal_props(image, n=1, threshold_sigma=3):
 
 	'''
 
-	seg_1comp, seg_2comp, mask_1comp, mask_2comp = make_mask(image, n, 1) #1
+	seg_1comp, seg_2comp, mask_1comp, mask_2comp = make_mask(image, n, 3) #1
 	if n == 1:   
 		sources = SourceCatalog(image, seg_1comp)
 	if n == 2:
@@ -195,13 +200,35 @@ def compute_gal_props(image, n=1, threshold_sigma=3):
 		PA.append(sources.orientation[i].value) #orientation is in degrees
 		inc.append(jnp.arccos(1/sources.elongation[i].value)* (180/jnp.pi))
     
-	print('PA : ', PA)
-	print('inc : ', inc)
-    
 	# print(seg_1comp)
 	return seg_1comp, seg_2comp, mask_1comp, mask_2comp, PA, inc
 
 
+def save_fits_image(image, masked_indices, inference_data, filename):
+    """
+        Save a fits image to a file
+    """
+    #create list 
+    hdul = fits.HDUList()
+    #put the best fit flux map in the primary HDU
+    primary_hdu = fits.PrimaryHDU(image)
+    primary_hdu.name = 'FLUX_MAP'
+    hdul.append(primary_hdu)
+    #put the mask in the second HDU
+    mask_hdu = fits.ImageHDU(masked_indices)
+    mask_hdu.name = 'MASK'
+    hdul.append(mask_hdu)
+
+    #put the posteriors in the third HDU
+    posteriors = jnp.array(inference_data.posterior['fluxes'].data)
+    #put the two chains back to back so its only a 2D array with 1 chain per pixel
+    posteriors = posteriors.reshape((posteriors.shape[0]*posteriors.shape[1],posteriors.shape[2]))  
+    posteriors_hdu = fits.ImageHDU(posteriors)
+    posteriors_hdu.name = 'POSTERIORS'
+    hdul.append(posteriors_hdu)
+
+    hdul.writeto(filename, overwrite=True)
+     
 #things to add here
 #sampling uniform
 #creating x,y meshgrid (which takes 3 lines usually)
