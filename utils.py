@@ -189,7 +189,7 @@ def compute_gal_props(image, n=1, threshold_sigma=3):
 
 	'''
 
-	seg_1comp, seg_2comp, mask_1comp, mask_2comp = make_mask(image, n, 3) #1
+	seg_1comp, seg_2comp, mask_1comp, mask_2comp = make_mask(image, n, threshold_sigma) #1
 	if n == 1:   
 		sources = SourceCatalog(image, seg_1comp)
 	if n == 2:
@@ -197,8 +197,11 @@ def compute_gal_props(image, n=1, threshold_sigma=3):
 	PA = []
 	inc = []
 	for i in range(len(sources)):
-		PA.append(sources.orientation[i].value) #orientation is in degrees
-		inc.append(jnp.arccos(1/sources.elongation[i].value)* (180/jnp.pi))
+		angle = sources.orientation[i].value #orientation is in degrees [-180,180]
+		if angle<0:
+			angle += 180 #convert to [0,180]
+		PA.append(angle) 
+		inc.append(jnp.arccos(1/sources.elongation[i].value)* (180/jnp.pi)) #convert to degrees
     
 	# print(seg_1comp)
 	return seg_1comp, seg_2comp, mask_1comp, mask_2comp, PA, inc

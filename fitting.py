@@ -36,7 +36,7 @@ import yaml
 
 jax.config.update('jax_enable_x64', True)
 numpyro.set_host_device_count(2)
-numpyro.set_platform('gpu')
+# numpyro.set_platform('gpu')
 
 # np.set_printoptions(precision=15, floatmode='maxprec')
 # jnp.set_printoptions(precision=15, floatmode='maxprec')
@@ -86,7 +86,7 @@ class Fit_Numpyro():
 		self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
 						 num_warmup=num_warmup, num_chains=num_chains)
 		self.rng_key = random.PRNGKey(4)
-		self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error,extra_fields=("potential_energy", "accept_prob"))
+		self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, low = self.kin_model.low, high = self.kin_model.high, extra_fields=("potential_energy", "accept_prob"))
 
 		print('done')
 
@@ -118,17 +118,23 @@ class Fit_Numpyro():
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=str, default='',
                     help='output folder name')
+parser.add_argument('--line', type=str, default='H_alpha',
+		    		help='line to fit')
+parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_catalog.cat',
+		    		help='master catalog file name')			
 
 if __name__ == "__main__":
 
 	args = parser.parse_args()
 	output = args.output + '/'
+	master_cat = args.master_cat
+	line = args.line
 
 	print('Running the real data')
 
-	direct, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
+	direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
 	num_samples, num_warmup, step_size, target_accept_prob, \
-	wave_space, delta_wave, index_min, index_max, factor = pre.run_full_preprocessing(output)
+	wave_space, delta_wave, index_min, index_max, factor = pre.run_full_preprocessing(output, master_cat, line)
 	
 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
@@ -139,7 +145,7 @@ if __name__ == "__main__":
 
 	prior_predictive = Predictive(run_fit.kin_model.inference_model, num_samples=num_samples)
 
-	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error)
+	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, low = run_fit.kin_model.low, high = run_fit.kin_model.high)
 
 	run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
 		                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2)
@@ -149,7 +155,8 @@ if __name__ == "__main__":
 	# no ../ because the open() function reads from terminal directory (not module directory)
 	inf_data.to_netcdf('fitting_results/' + output + 'output')
 
-	post.process_results(output)
+	#figure out how to make this work well
+	# post.process_results(output.split('/')[0], master_cat, line)
 
 
 #==============================EXTRA STUFF = NEED TO PUT SOMEWHERE ELSE==================================================
