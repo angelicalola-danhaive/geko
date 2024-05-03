@@ -33,6 +33,12 @@ from astropy.wcs import wcs
 from astropy.table import Table
 
 from reproject import reproject_adaptive
+from scipy.constants import c
+
+from photutils.segmentation import detect_sources
+from photutils.background import Background2D, MedianBackground
+
+c_m = c*1e-9
 
 
 
@@ -119,7 +125,8 @@ def read_config_file(input, output, master_cat_path, line):
 	wcs_f444w = wcs.WCS(fits.open(broad_band_mask_path)[1].header)
 	RA_vel,DEC_vel = wcs_f444w.array_index_to_world_values(y0_vel,x0_vel)
 	print('RA, DEC of the velocity map: ', RA_vel, DEC_vel)
-	r_eff = master_cat[master_cat['ID'] == ID]['r_eff_q50'][0]
+
+	r_eff = master_cat[master_cat['ID'] == ID]['r_eff_q50'][0]*2 #convert to high res image
 
 	model_name = inference['Inference']['model']
 	
@@ -147,23 +154,35 @@ def renormalize_image(direct,direct_error, obs_map):
 		Normalize the image to match the total flux in the EL map
 	"""
 
-	threshold = 0.2*direct.max()
-	# threshold = threshold_otsu(direct)
-	mask = jnp.zeros_like(direct)
-	mask = mask.at[jnp.where(direct>threshold)].set(1)
-	# mask = dilation(mask, disk(2))
+	# threshold = 0.2*direct[31-10:31+10,31-10:31+10 ].max()
+	# # threshold = threshold_otsu(direct)
+	# mask = jnp.zeros_like(direct)
+	# mask = mask.at[jnp.where(direct>threshold)].set(1)
+	# # mask = dilation(mask, disk(2))
+
+	# # plot the direct image found within the mask, the rest set to 0
+	# plt.imshow(direct*mask, cmap='viridis', origin='lower')
+	# plt.title('Direct image within the mask')
+	# plt.show()
+
+	# #create a mask for the grism map
+	# threshold_grism = 0.2*obs_map.max()
+	# # threshold_grism = threshold_otsu(obs_map)
+	# mask_grism = jnp.zeros_like(obs_map)
+	# mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
+	# mask_grism = dilation(mask_grism, disk(2))
+
+	mask_image_seg, cat_image = utils.find_central_object(direct, 4)
+	mask_grism_seg, cat_grism = utils.find_central_object(obs_map, 1)
+
+	mask_image = mask_image_seg.data
+	mask_grism = mask_grism_seg.data
 
 	# plot the direct image found within the mask, the rest set to 0
-	plt.imshow(direct*mask, cmap='viridis', origin='lower')
+	plt.imshow(direct*mask_image, cmap='viridis', origin='lower')
 	plt.title('Direct image within the mask')
 	plt.show()
 
-	#create a mask for the grism map
-	threshold_grism = 0.2*obs_map.max()
-	# threshold_grism = threshold_otsu(obs_map)
-	mask_grism = jnp.zeros_like(obs_map)
-	mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
-	mask_grism = dilation(mask_grism, disk(2))
 
 	# plot the grism image found within the mask, the rest set to 0
 	plt.imshow(obs_map*mask_grism, cmap='viridis', origin='lower')
@@ -171,7 +190,7 @@ def renormalize_image(direct,direct_error, obs_map):
 	plt.show()
 
 	#compute the normalization factor
-	normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask == 1)].sum()
+	normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask_image == 1)].sum()
 	#normalize the direct image to the grism image
 	direct = direct*normalization_factor
 	direct_error = direct_error*normalization_factor
@@ -234,11 +253,17 @@ def make_EL_map(med_band, broad_band, med_band_err,broad_band_err,z, line):
 	z_444W_PAalpha = [1.2945, 1.6571] #PAalpha falls in F444W but not 410M
 	z_410M_PAalpha = [1.0699, 1.2944] #PAalpha falls in F410M
 
-	#define the filter widths
+	#filter bandwidths in um
 	width_F410M = 0.436
-	width_F444W = 1.101
-	width_F335M = 0.360
-	width_F356W = 0.846
+	width_F444W = 1.024
+	width_F335M = 0.347
+	width_F356W = 0.787
+
+	#pivot wavelengths of the filters
+	l410M = 4.092
+	l444W = 4.421
+	l335M = 3.365
+	l356W = 3.563
 
 	box_size = med_band.shape[0]
 
@@ -248,46 +273,100 @@ def make_EL_map(med_band, broad_band, med_band_err,broad_band_err,z, line):
 		if 4.916158536585365 < z < 5.557926829268291:
 			print('Halpha is in F410M and F444W')
 			# Halpha_map = image_cutout_F410M - (image_cutout_F444W-image_cutout_F410M)/(width_F444W-width_F410M)*(width_F410M)
+			broad_band = broad_band*c_m/l444W**2
+			med_band = med_band*c_m/l410M**2
+			broad_band_err = broad_band_err*c_m/l444W**2
+			med_band_err = med_band_err*c_m/l410M**2
 			EL_map = (med_band*width_F410M*width_F444W - broad_band*width_F444W*width_F410M)/(width_F444W-width_F410M)
+			width_sum = width_F410M + width_F444W
+			EL_map_err = np.sqrt(med_band_err**2*width_F410M/width_sum + broad_band_err**2*width_F444W/width_sum)
+
+			#see if a source is detected in the map:
+			segment_map, cat = utils.find_central_object(EL_map[69:131, 69:131], 4)
+			if segment_map == None:
+				print('No sources detected in EL map, using the med band map')
+				EL_map = med_band
+				EL_map_err = med_band_err
 			# Halpha_map = image_cutout_F410M - image_cutout_F444W
 		#if the galaxy is in z_444W, then estimate Halpha map as F444W-F410M
 		elif 5.5579268292682915 < z < 6.594512195121951:
 			print('Halpha is only in F444W')
+			broad_band = broad_band*c_m/l444W**2
+			med_band = med_band*c_m/l410M**2
+			broad_band_err = broad_band_err*c_m/l444W**2
+			med_band_err = med_band_err*c_m/l410M**2
 			EL_map = broad_band*width_F444W- med_band*width_F444W
+			width_sum = width_F410M + width_F444W
+			EL_map_err = np.sqrt(med_band_err**2*width_F410M/width_sum + broad_band_err**2*width_F444W/width_sum)
+			#see if a source is detected in the map:
+			segment_map, cat = utils.find_central_object(EL_map[69:131, 69:131], 4)
+			if segment_map == None:
+				print('No sources detected in EL map, using the broad band map')
+				EL_map = broad_band
+				EL_map_err = broad_band_err
+
 		elif z_356W_halpha[0] < z < z_356W_halpha[1]:
 			print('Halpha is only in F356W') 
+			broad_band = broad_band*c_m/l356W**2
+			med_band = med_band*c_m/l335M**2
+			broad_band_err = broad_band_err*c_m/l356W**2
+			med_band_err = med_band_err*c_m/l335M**2
 			EL_map = broad_band*width_F356W - med_band*width_F356W 
+			width_sum = width_F335M + width_F356W
+			EL_map_err = np.sqrt(med_band_err**2*width_F335M/width_sum + broad_band_err**2*width_F356W/width_sum)
 		elif z_335M_halpha[0] < z < z_335M_halpha[1]:
 			print('Halpha is in F335M and F356W')
+			broad_band = broad_band*c_m/l356W**2
+			med_band = med_band*c_m/l335M**2
+			broad_band_err = broad_band_err*c_m/l356W**2
+			med_band_err = med_band_err*c_m/l335M**2
 			EL_map = (med_band*width_F335M*width_F356W - broad_band*width_F356W*width_F335M)/(width_F356W-width_F335M)
+			width_sum = width_F335M + width_F356W
+			EL_map_err = np.sqrt(med_band_err**2*width_F335M/width_sum + broad_band_err**2*width_F356W/width_sum)
+
 		else:
 			print('Halpha is not in the observed range, returning zeros')
 	
 	elif line == 'OIII_5008':
 		if 5.343849840255591 < z < 6.062699680511182 :
 			print('OIII_5008 is in F335M and F356W')
+
+			broad_band = broad_band*c_m/l356W**2
+			med_band = med_band*c_m/l335M**2
+			broad_band_err = broad_band_err*c_m/l356W**2
+			med_band_err = med_band_err*c_m/l335M**2
 			EL_map = (med_band*width_F335M*width_F356W - broad_band*width_F356W*width_F335M)/(width_F356W-width_F335M)
+			width_sum = width_F335M + width_F356W
+			EL_map_err = np.sqrt(med_band_err**2*width_F335M/width_sum + broad_band_err**2*width_F356W/width_sum)
+			EL_map = med_band
+			EL_map_err = med_band_err
 		#if the galaxy is in z_356W, then estimate OIII map as F356W-F335M
 		elif (5.259984025559104 < z < 5.3438409840255591) or (6.062699680511182< z < 6.949281150159743) or z == 4.480:
 			print('OIII_5008 is only in F356W ')
+
+			broad_band = broad_band*c_m/l356W**2
+			med_band = med_band*c_m/l335M**2
+			broad_band_err = broad_band_err*c_m/l356W**2
+			med_band_err = med_band_err*c_m/l335M**2
 			EL_map = broad_band*width_F356W - med_band*width_F356W 
+			width_sum = width_F335M + width_F356W
+			EL_map_err = np.sqrt(med_band_err**2*width_F335M/width_sum + broad_band_err**2*width_F356W/width_sum)
+			EL_map = broad_band
+			EL_map_err = broad_band_err
 		else:
 			print('OIII_508 is not in the observed range, returning zeros')
 
 	
-	elif line == 'PAalpha':
-		if z_410M_PAalpha[0] < z < z_410M_PAalpha[1]:
-			print('PAalpha is in F410M and F444W')
-			EL_map = (med_band*width_F410M*width_F444W - broad_band*width_F444W*width_F410M)/(width_F444W-width_F410M)
-		#if the galaxy is in z_444W, then estimate PAalpha map as F444W-F410M
-		elif z_444W_PAalpha[0] < z < z_444W_PAalpha[1]:
-			print('PAalpha is only in F444W')
-			EL_map = broad_band*width_F444W- med_band*width_F444W
+	# elif line == 'PAalpha':
+	# 	if z_410M_PAalpha[0] < z < z_410M_PAalpha[1]:
+	# 		print('PAalpha is in F410M and F444W')
+	# 		EL_map = (med_band*width_F410M*width_F444W - broad_band*width_F444W*width_F410M)/(width_F444W-width_F410M)
+	# 	#if the galaxy is in z_444W, then estimate PAalpha map as F444W-F410M
+	# 	elif z_444W_PAalpha[0] < z < z_444W_PAalpha[1]:
+	# 		print('PAalpha is only in F444W')
+	# 		EL_map = broad_band*width_F444W- med_band*width_F444W
 
-	#compute the filter width weighed square sum of the errors
-	err_sum = med_band_err + broad_band_err
-	EL_map_err = np.sqrt(med_band_err/err_sum*(width_F410M)**2 + broad_band_err/err_sum*(width_F444W)**2)
-
+	
 	return EL_map, EL_map_err
 
 def rotate_wcs(med_band_fits, EL_map, EL_error, broad_map, field, cutout_size):
@@ -345,18 +424,55 @@ def rotate_wcs(med_band_fits, EL_map, EL_error, broad_map, field, cutout_size):
 	return rotated_wcs, med_band_flip, EL_map_flip, EL_err_flip, broad_map_flip
 
 
-def contiuum_subtraction(grism_spectrum_fits):
+def contiuum_subtraction(grism_spectrum_fits, min, max):
 	'''
 		Subtract the continuum from the EL map
 	'''
-	grism_spectrum_data = grism_spectrum_fits['SPEC2D'].data #NOT cont sub
+	grism_spectrum_data = jnp.array(grism_spectrum_fits['SPEC2D'].data[:,min:max]) #NOT cont sub
+
+	grism_spectrum_data = jnp.where(jnp.isnan(grism_spectrum_data), 0.0, jnp.array(grism_spectrum_data))
+
+	plt.imshow(grism_spectrum_data, origin='lower')
+	plt.title('EL map before continuum subtraction')
+	plt.colorbar()
+	plt.show()
 
 	#do the cont subtraction
-	L_box, L_mask = 25, 4
+	L_box, L_mask = 25, 9
 	mf_footprint = np.ones((1, L_box * 2 + 1))
 	mf_footprint[:, L_box-L_mask:L_box+L_mask+1] = 0
-	tmp_grism_img_median = ndimage.median_filter(grism_spectrum_data, footprint=mf_footprint, mode='reflect')
+	# last_index = grism_spectrum_data.shape[1] - 1
+	# grism_spectrum_data[:,0:50] = jnp.nan 
+	# grism_spectrum_data[:,last_index-50:last_index] = jnp.nan
+	# print(grism_spectrum_data[0:2,12], grism_spectrum_data[0:2,-12])
+	# tmp_grism_img_median = ndimage.generic_filter(grism_spectrum_data, np.nanmedian, footprint=mf_footprint, mode='reflect')
+	tmp_grism_img_median = ndimage.median_filter(grism_spectrum_data,footprint=mf_footprint, mode='reflect')
+
+
 	grism_spectrum_data = grism_spectrum_data - tmp_grism_img_median  # emission line map
+
+	#second round of filtering but masking bright regions
+
+	mask_seg, cat = utils.find_central_object(grism_spectrum_data[:,140:160], 0.5)
+	mask = mask_seg.data
+
+	grism_spectrum_data_crop = grism_spectrum_data[:,140:160]
+	grism_spectrum_data_crop= grism_spectrum_data_crop.at[jnp.where(mask == 1)].set(jnp.nan)
+	grism_spectrum_data_masked = grism_spectrum_data
+	grism_spectrum_data_masked= grism_spectrum_data_masked.at[:,140:160].set(grism_spectrum_data_crop)
+	plt.imshow(mask, origin='lower')
+	plt.title('mask')
+	plt.colorbar()
+	plt.show()
+	L_box, L_mask = 10, 12
+	mf_footprint = np.ones((1, L_box * 2 + 1))
+	tmp_grism_img_median = ndimage.generic_filter(grism_spectrum_data_masked, np.nanmedian, footprint=mf_footprint, mode='reflect')
+	grism_spectrum_data = grism_spectrum_data - tmp_grism_img_median  # emission line map
+	plt.imshow(grism_spectrum_data, origin='lower')
+	plt.title('EL map after continuum subtraction')
+	plt.colorbar()
+	plt.show()
+
 
 	return grism_spectrum_data
 
@@ -384,7 +500,6 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 
 	#compute the EL map prior first
 	EL_map, EL_error = make_EL_map(med_band, broad_band, med_band_err,broad_band_err, redshift, line)
-
 
 	plt.imshow(EL_map, origin='lower')
 	plt.title('EL map prior')
@@ -419,6 +534,16 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
 	# plt.show()
 
+	plt.imshow(high_res_prior, origin='lower')
+	plt.title('Flipped and correct scale image 62x62 high res cutout')
+	plt.colorbar()
+	plt.show()
+
+	plt.imshow(high_res_error, origin='lower')
+	plt.title('Flipped and correct scale image 62x62 high res error cutout')
+	plt.colorbar()
+	plt.show()
+
 	icenter_vel, jcenter_vel = icenter_vel - icenter_high + 31, jcenter_vel - jcenter_high + 31
 
 	icenter_high, jcenter_high = 31, 31 #this is by defintion of how the cutout was made
@@ -442,8 +567,7 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 
 	#now moving on to the grism data
 
-	#subtract continuum
-	grism_spectrum_data = contiuum_subtraction(grism_spectrum_fits)
+
 
 	xcenter_detector = 1024
 	ycenter_detector = 1024
@@ -471,12 +595,16 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	# print(index_min, index_max)
 	index_wave = round((wavelength - wave_first)/d_wave)
 
+	#subtract continuum and crop image by 200 on each size of EL
+	grism_spectrum_data = contiuum_subtraction(grism_spectrum_fits, index_wave - 150, index_wave + 150)
 
 	#cut EL map by using those wavelengths => saved as obs_map which is an input for Fit_Numpyro class
-	obs_map = grism_spectrum_data[:,index_min+1:index_max+1+1]
+	obs_map = grism_spectrum_data[:,index_min-(index_wave -150) +1:index_max-(index_wave -150)+1+1]
 
-	#save the error array of the EL map cutout
 	obs_error = np.power(grism_spectrum_fits['WHT2D'].data[:,index_min+1:index_max+1+1], - 0.5)
+	#mask bad pixels in obs/error map
+	obs_error = jnp.where(jnp.isnan(obs_map)| jnp.isnan(obs_error) | jnp.isinf(obs_error), 1e10, obs_error)
+
 
 	#load number of module A and module B frames from the header
 	if field == 'GOODS-S-FRESCO':
@@ -531,7 +659,7 @@ def run_full_preprocessing(output,master_cat, line):
 
     #renormalizing flux prior to EL map
     direct, direct_error,normalization_factor,mask_grism = renormalize_image(direct, direct_error,obs_map)
-
+    print('renormalizing factor:', normalization_factor)
     factor = params['Params']['factor']
     wave_factor = params['Params']['wave_factor']
     # rescale the wave_space array and the direct image according to factor and wave_factor

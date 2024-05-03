@@ -130,16 +130,18 @@ def find_best_sample(inference_data, variable, mu, sigma, max, min, MLS):
     
     return best_sample
 
-
-def make_mask(image, n = 1, threshold_sigma = 3):
+def find_central_object(image,threshold_sigma):
     """
-       Make n masks of the image.
+       Make a mask that selects only the central object
     """
-
     bkg_estimator = MedianBackground()
     bkg = Background2D(image, (20,20) , filter_size=(5, 5),bkg_estimator = bkg_estimator)
     threshold = threshold_sigma * bkg.background_rms
+    # print('Threshold:', threshold)
     segment_map = detect_sources(image, threshold, npixels=10)
+    if segment_map == None:
+        print('No sources found')
+        return None, None
     cat = SourceCatalog(image, segment_map)
     #select only the central source
     idx_source = jnp.argmin((cat.xcentroid-image.shape[0]//2)**2 + (cat.ycentroid-image.shape[0]//2)**2)
@@ -148,8 +150,20 @@ def make_mask(image, n = 1, threshold_sigma = 3):
     segment_map.keep_labels([label_source])
     segment_map.reassign_label(label_source, 1)
 
+    return segment_map, cat
+
+def make_mask(image, n = 1, threshold_sigma = 3):
+    """
+       Make n masks of the image.
+    """
+
+    segment_map, cat = find_central_object(image, threshold_sigma)
+
     mask_1comp = segment_map.copy()
     mask_1comp = dilation(mask_1comp.data, disk(3))
+    plt.imshow(segment_map.data, origin='lower')
+    plt.scatter(cat.xcentroid, cat.ycentroid, color='red')
+    plt.show()
     plt.imshow(image*segment_map.data, origin='lower')
     plt.title('Mask of the central source')
     plt.show()
