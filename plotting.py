@@ -254,10 +254,12 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	x = wave_space
 	y = np.linspace(0 - y0, direct_image_size- 1 - y0, obs_map.shape[0])
 	X, Y = np.meshgrid(x, y)
+	#put Y in arcseconds
+	Y *= 0.063
 	cp = ax_obs.pcolormesh(X, Y, obs_map, shading='nearest',
 						vmax=obs_map.max(), vmin=obs_map.min())  # RdBu
 	ax_obs.set_xlabel(r'wavelength $[\mu m]$', fontsize=5)
-	ax_obs.set_ylabel(r'$\Delta$ DEC [px]', fontsize=5)
+	ax_obs.set_ylabel(r'$\Delta$ DEC ["]', fontsize=5)
 	ax_obs.tick_params(axis='both', which='major', labelsize=5)
 	ax_obs.tick_params(axis='both', which='minor')
 	cbar = fig.colorbar(cp, ax=ax_obs)
@@ -268,7 +270,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	ax_model = fig.add_subplot(gs00[1,0])
 	cp = ax_model.pcolormesh(X, Y, model_map, shading='nearest', vmax=obs_map.max(), vmin=obs_map.min())  # RdBu
 	ax_model.set_xlabel(r'wavelength $[\mu m]$', fontsize=5)
-	ax_model.set_ylabel(r'$\Delta$ DEC [px]', fontsize=5)
+	ax_model.set_ylabel(r'$\Delta$ DEC ["]', fontsize=5)
 	ax_model.tick_params(axis='both', which='major', labelsize=5)
 	ax_model.tick_params(axis='both', which='minor')
 	cbar = fig.colorbar(cp, ax=ax_model)
@@ -276,21 +278,27 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	cbar.ax.tick_params(labelsize=5)
 	ax_model.set_title('Model grism', fontsize=10)
 
+
+	chi = (model_map-obs_map)/obs_error
+	chi_icenter,chi_jcenter = np.unravel_index(np.argmax(obs_map), obs_map.shape)
+	chi_central_region = chi[chi_icenter-10:chi_icenter+10,chi_jcenter-10:chi_jcenter+10]
 	ax_residuals = fig.add_subplot(gs00[2,0])
-	cp = ax_residuals.pcolormesh(X, Y, (model_map-obs_map)/obs_error, shading='nearest', vmin = -3, vmax =3)  # RdBu
+	cp = ax_residuals.pcolormesh(X, Y, chi, shading='nearest', vmin = -3, vmax = 3)  # RdBu
 	ax_residuals.set_xlabel(r'wavelength $[\mu m]$', fontsize=5)
-	ax_residuals.set_ylabel(r'$\Delta$ DEC [px]', fontsize=5)
+	ax_residuals.set_ylabel(r'$\Delta$ DEC ["]', fontsize=5)
 	ax_residuals.tick_params(axis='both', which='major', labelsize=5)
 	ax_residuals.tick_params(axis='both', which='minor')
 	cbar = fig.colorbar(cp, ax=ax_residuals)
-	cbar.ax.set_ylabel(r"$\chi^2$", fontsize=5)
+	cbar.ax.set_ylabel(r"$\chi$", fontsize=5)
 	cbar.ax.tick_params(labelsize=5)
-	ax_residuals.set_title('Residuals (M-D)', fontsize=10)
+	ax_residuals.set_title(r'$\bar\chi_{center} = $' + str(round(np.sum(np.abs(chi_central_region))/(chi_central_region.shape[0]*chi_central_region.shape[1]),3)), fontsize=10)
 
 
 	x = np.linspace(0 - x0, direct_image_size - 1 - x0, direct_image_size)
 	y = np.linspace(0 - y0, direct_image_size - 1 - y0, direct_image_size)
 	X, Y = np.meshgrid(x, y)
+	X *= 0.031#put it in arcseconds
+	Y *= 0.031
 
 	#find the coordinates of the velocity centroid from model_velocities
 	grad_x, grad_y = np.gradient(model_velocities)
@@ -299,8 +307,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	velocites_center = model_velocities[center[0], center[1]]
 	vel_map_ax = fig.add_subplot(gs01[0])
 	cp = vel_map_ax.pcolormesh(X, Y,np.where(mask ==1, model_velocities - velocites_center, np.nan), shading='nearest', cmap = 'RdBu_r')
-	plt.xlabel(r'$\Delta$ RA [px]',fontsize = 5)
-	plt.ylabel(r'$\Delta$ DEC [px]',fontsize = 5)
+	plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
+	plt.ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
 	vel_map_ax.tick_params(axis='both', which='major', labelsize=5)
 	cbar = plt.colorbar(cp, ax = vel_map_ax)
 	cbar.ax.set_ylabel('velocity [km/s]', fontsize = 5)
@@ -308,33 +316,33 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	vel_map_ax.set_title(r'Velocity map, $v_{rot} = $' + str(round(v_rot)) + ' km/s', fontsize=10)
 
 
-	vel_map_ax.plot(center[1]-y0, center[0]-x0, '+', markersize=10, label = 'velocity centroid', color = 'black')
+	vel_map_ax.plot((center[1]-y0)*0.031, (center[0]-x0)*0.031, '+', markersize=10, label = 'velocity centroid', color = 'black')
 	vel_map_ax.legend(fontsize = 5, loc = 'lower right', borderaxespad = 2)
 
 	veldisp_map_ax = fig.add_subplot(gs01[1])
 
 	cp = veldisp_map_ax.pcolormesh(X, Y,np.where(mask ==1, model_dispersions, np.nan), shading='nearest', cmap = 'YlGnBu_r')
-	plt.xlabel(r'$\Delta$ RA [px]',fontsize = 5)
-	plt.ylabel(r'$\Delta$ DEC [px]',fontsize = 5)
+	plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
+	plt.ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
 	veldisp_map_ax.tick_params(axis='both', which='major', labelsize=5)
 	cbar = plt.colorbar(cp, ax = veldisp_map_ax)
 	cbar.ax.set_ylabel(r'$\sigma_v$ [km/s]', fontsize = 5)
 	cbar.ax.tick_params(labelsize = 5)
 	veldisp_map_ax.set_title(r'$\sigma_v$ map', fontsize=10)
-	veldisp_map_ax.plot(center[1]-y0, center[0]-x0, '+', markersize=10, label = 'velocity centroid', color = 'black')
+	veldisp_map_ax.plot((center[1]-y0)*0.031, (center[0]-x0)*0.031, '+', markersize=10, label = 'velocity centroid', color = 'black')
 	veldisp_map_ax.legend(fontsize = 5, loc = 'lower right',borderaxespad = 2)
 
 	flux_map_ax = fig.add_subplot(gs01[2])
 
 	cp = flux_map_ax.pcolormesh(X, Y,np.where(mask ==1, fluxes_mean, np.nan), shading='nearest', cmap = 'PuRd')
-	plt.xlabel(r'$\Delta$ RA [px]',fontsize = 5)
-	plt.ylabel(r'$\Delta$ DEC [px]',fontsize = 5)
+	plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
+	plt.ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
 	flux_map_ax.tick_params(axis='both', which='major', labelsize=5)
 	cbar = plt.colorbar(cp, ax = flux_map_ax)
 	cbar.ax.set_ylabel('flux [Mjy?]', fontsize = 5)
 	cbar.ax.tick_params(labelsize = 5)
 	flux_map_ax.set_title('Flux map', fontsize=10)
-	flux_map_ax.plot(center[1]-y0, center[0]-x0, '+', markersize=10, label = 'velocity centroid', color = 'black')
+	flux_map_ax.plot((center[1]-y0)*0.031, (center[0]-x0)*0.031, '+', markersize=10, label = 'velocity centroid', color = 'black')
 	flux_map_ax.legend(fontsize = 5, loc = 'lower right',borderaxespad = 2)
 
 
@@ -349,7 +357,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=True,
-		labels=[r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
+		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]' ],
+		titles = [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
 		max_n_ticks=3,
 		divergences=False)
 
@@ -363,7 +372,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		plot_datapoints=True,
 		fill_contours=False,
 		plot_contours=False,
-		labels=[r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
+		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]' ],
 		show_titles=False,
 		max_n_ticks=3)
 
@@ -425,16 +434,18 @@ def plot_merger_summary(obs_map, model_map, obs_error, model_velocities, v_rot, 
 	cbar.ax.tick_params(labelsize=5)
 	ax_model.set_title('Model grism', fontsize=10)
 
+
+	chi = (model_map-obs_map)/obs_error
 	ax_residuals = fig.add_subplot(gs00[2,0])
-	cp = ax_residuals.pcolormesh(X, Y, (model_map-obs_map)/obs_error, shading='nearest', vmin = -3, vmax = 3)  # RdBu
+	cp = ax_residuals.pcolormesh(X, Y, chi, shading='nearest', vmin = -3, vmax = 3)  # RdBu
 	ax_residuals.set_xlabel(r'wavelength $[\mu m]$', fontsize=5)
 	ax_residuals.set_ylabel(r'$\Delta$ DEC [px]', fontsize=5)
 	ax_residuals.tick_params(axis='both', which='major', labelsize=5)
 	ax_residuals.tick_params(axis='both', which='minor')
 	cbar = fig.colorbar(cp, ax=ax_residuals)
-	cbar.ax.set_ylabel(r"$\chi^2$", fontsize=5)
+	cbar.ax.set_ylabel(r"$\chi$", fontsize=5)
 	cbar.ax.tick_params(labelsize=5)
-	ax_residuals.set_title('Residuals (M-D)', fontsize=10)
+	ax_residuals.set_title(r'$\bar\chi = $' + str(np.sum(chi)/(chi.shape[0]*chi.shape[1])), fontsize=10)
 
 
 	x = np.linspace(0 - x0, direct_image_size - 1 - x0, direct_image_size)
@@ -581,7 +592,7 @@ def plot_pp_cornerplot(data, kin_model, choice='real', PA=None, i=None, Va=None,
 		plt.close()
 
 
-def plot_tuning_parameters(data, model = 'one_component_model', rotation = True, v0 = True, errors = True, y0 = True, scaling = True, reg = True, div = False, save_to_folder = None, name = None):
+def plot_tuning_parameters(data, model = 'one_component_model', rotation = True, v0 = True, errors = True, y0 = True, scaling = True, error_scaling = True, reg = True, div = False, save_to_folder = None, name = None):
 		"""
 
 			Plots cornerplot with both prior and posterior, for the tuning parameters
@@ -596,9 +607,9 @@ def plot_tuning_parameters(data, model = 'one_component_model', rotation = True,
 		var_names = []
 		labels = []
 		for num in number:
-			if rotation:
-				var_names.append('rotation' + num)
-				labels.append(r'$\theta$' + num)
+			# if rotation:
+			# 	var_names.append('rotation' + num)
+			# 	labels.append(r'$\theta$' + num)
 			if v0:
 				var_names.append('v0'+num)
 				labels.append(r'$v_0$'+num)
@@ -609,6 +620,9 @@ def plot_tuning_parameters(data, model = 'one_component_model', rotation = True,
 		if scaling:
 			var_names.append('fluxes_scaling')
 			labels.append(r'$f_{scale}$')
+		if error_scaling:
+			var_names.append('fluxes_error_scaling' )
+			labels.append(r'$f_{err, scale}$' )
 		if errors:
 			var_names.append('error_scaling' )
 			labels.append(r'$f_{err}$' )
