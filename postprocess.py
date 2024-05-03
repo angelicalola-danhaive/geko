@@ -26,6 +26,8 @@ import numpy as np
 
 from jax.scipy.signal import convolve
 
+import argparse
+
 
 
 def process_results(output, master_cat, line):
@@ -63,7 +65,7 @@ def process_results(output, master_cat, line):
     plotting.plot_image(direct,x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'truth_flux')
 
     plotting.plot_image(fluxes_mean, x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'model_flux') #, limits= direct)
-    # Laplace_kernel = jnp.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
+    Laplace_kernel = jnp.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
     # fluxes_mean_lap = convolve(fluxes_mean, Laplace_kernel, mode = 'same')
     # plotting.plot_image(jnp.abs(fluxes_mean_lap),x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'truth_flux')
 
@@ -71,25 +73,25 @@ def process_results(output, master_cat, line):
     #save the fluxes image and posteriors in fits file
     utils.save_fits_image(fluxes_mean, kin_model.masked_indices, inf_data,'fitting_results/' + output + '/' + 'model_flux' + '.fits')
 
-    # fluxes_errors = direct
-    # Laplace_kernel = jnp.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
-    # plotting.plot_image_residual(direct, fluxes_mean, fluxes_errors, x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'residual_flux')
-    # laplace_fluxes = jnp.abs(convolve(direct, Laplace_kernel, mode='same'))
-    # laplace_fluxes_err = jnp.maximum(0.000001, kin_model.flux_bounds[0]* laplace_fluxes)
-    # plotting.plot_image(laplace_fluxes, x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'laplace_flux') #, limits= direct)
-    # sum_reg = jnp.sum(jnp.abs(laplace_fluxes))/jnp.sum(jnp.abs(direct))
-    # print('sum_reg: ', sum_reg)
-    # # threshold_grism = 0.2*obs_map.max()
-    # error_reg = jnp.sqrt(jnp.sum(obs_error**2))/obs_error.sum()
-    # sum_reg_norm = sum_reg/obs_map.sum() #*model_map.shape[0]*model_map.shape[1]
+    laplace_fluxes = convolve(fluxes_mean, Laplace_kernel, mode='same')
+    # sum and renormalize regularization term
+    # threshold_grism = 0.2*obs_map.max()
+    # sum_reg = jnp.sum(jnp.abs(laplace_fluxes))
+    # #use a cut to be consistent  with grism/direct renormalization + avoid negative pixels
+     # sum_reg_norm = sum_reg/jnp.sum(jnp.where(obs_map>threshold_grism,obs_map, 0.0)) #*self.model_map.shape[0]*self.model_map.shape[1]
+    # error_reg = jnp.sqrt(jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0)**2))/jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0))
+     # # error_reg_norm = error_reg*self.model_map.shape[0]*self.model_map.shape[1]/self.model_map.sum()
 
-    # print('direct sum: ', np.sum(direct[kin_model.masked_indices]))
-    # print('fluxes_mean sum: ', np.sum(fluxes_mean[kin_model.masked_indices]))
+    #new renormalization of reg term
 
+    sum_reg = jnp.sum(jnp.abs(laplace_fluxes))/jnp.sum(jnp.abs(fluxes_mean))
+    sum_reg_norm = sum_reg*jnp.max(obs_map)
+
+    error_reg = obs_error[jnp.unravel_index(jnp.argmax(obs_map), (obs_map.shape[0], obs_map.shape[1]))]
     # print('obs_map sum: ', np.sum(obs_map))
     # # error_reg_norm = error_reg*model_map.shape[0]*model_map.shape[1]/model_map.sum()
     # laplace_fluxes_r = jnp.reshape(sum_reg_norm, (1,))
-    # print(laplace_fluxes_r, error_reg)
+    print(sum_reg_norm, error_reg)
 
     #define grid for velocity plots
     x = jnp.linspace(0 - x0_grism, direct.shape[1]-1 -x0_grism, direct.shape[1]*factor)
@@ -115,6 +117,36 @@ def process_results(output, master_cat, line):
     #plot the full summary of the results
     kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary')
     print('Fluxes scaling: ', kin_model.fluxes_scaling_mean)
+    print('Mean PA: ', kin_model.PA_mean)
+    print('Mean inclination: ', kin_model.i_mean)
+    print('Mean V_a: ', kin_model.Va_mean)
+    print('Mean r_t: ', kin_model.r_t_mean)
+    print('Mean sigma_0: ', kin_model.sigma0_mean_model)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--output', type=str, default='',
+		    		help='folder of the galaxy you want to postprocess')
+parser.add_argument('--line', type=str, default='H_alpha',
+                    help='line to fit')        
+parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_catalog.cat',
+                    help = 'master catalog file to use for the post-processing')                                                                                  	
+
+if __name__ == "__main__":
+
+    #run the post-processing hands-off 
+    args = parser.parse_args()
+    output = args.output
+    line = args.line
+    master_cat = args.master_cat
+
+    inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
+    process_results(output,master_cat,line)
+
+
+
+
+
 
 
 
