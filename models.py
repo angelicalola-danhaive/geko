@@ -735,23 +735,22 @@ class DiskModel(KinModels):
         # now compute the specific bounds for the disk model
         self.sigma_PA = self.PA_sigma*90 
 
-        #restricting y0_vel to inside 1/2 light radius
-        #centering on y0_vel bc that's taken from pysersic fit centroid
-        self.y_high = self.mu_y0_vel + r_eff
-        self.y_low = self.mu_y0_vel - r_eff
-
-        self.y0_std = 0.5*r_eff
-
-
-        print('y_high: ', self.y_high, 'y_low: ', self.y_low) 
 
         self.compute_flux_bounds()
 
         #make the mask 
         # this is done using the broad band image
-        seg_1comp, seg_none , mask, mask_none, PA, inc = utils.compute_gal_props(self.broad_band, threshold_sigma = self.flux_threshold)
+        seg_1comp, seg_none , mask, mask_none, PA, inc, r_eff = utils.compute_gal_props(self.broad_band, threshold_sigma = self.flux_threshold)
 
         self.mask = mask
+        if isinstance(self.PA_morph, float) == False:
+            self.PA_morph = PA[0]
+            if self.PA_morph<0:
+                self.PA_morph = self.PA_morph + 180
+        if isinstance(self.inclination, float) == False:
+            self.inclination = inc[0]
+        if isinstance(self.r_eff, float) == False:
+            self.r_eff = r_eff[0]
         #using the grism position angle, determine the right PA for the rotation orientation
         if self.PA_grism < self.PA_morph:
             print('PA grism less than PA morph')
@@ -759,7 +758,20 @@ class DiskModel(KinModels):
         else:  
             print('PA grism greater than PA morph')
             self.mu_PA = self.PA_morph
+
         self.mu_i = self.inclination
+
+        #restricting y0_vel to inside 1/2 light radius
+        #centering on y0_vel bc that's taken from pysersic fit centroid
+        self.y_high = self.mu_y0_vel + self.r_eff
+        self.y_low = self.mu_y0_vel - self.r_eff
+
+        self.y0_std = 0.5*self.r_eff
+    
+
+
+        print('y_high: ', self.y_high, 'y_low: ', self.y_low) 
+
 
         self.mask = jnp.array(self.mask)
         self.mask_shape = len(jnp.where(self.mask == 1)[0])
