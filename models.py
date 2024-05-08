@@ -158,7 +158,7 @@ class KinModels:
         self.mu = jnp.maximum(jnp.zeros(self.flux_prior.shape), jnp.array(self.flux_prior))
         self.std = self.flux_error
         self.high = None
-        self.low = None
+        self.low = (jnp.zeros(self.flux_prior.shape) - self.mu)/self.std
     def rescale_to_mask(self, array, mask):
         """
             Rescale the bounds to the mask
@@ -233,8 +233,9 @@ class Disk():
         #     )
         fluxes_error_scaling = numpyro.sample('fluxes_error_scaling' + self.number, dist.Uniform())*4 + 1
         #just sample from normal distribution
-        unscaled_fluxes = numpyro.sample('unscaled_fluxes'+ self.number, dist.Normal(jnp.zeros(int(len(self.masked_indices[0]))),jnp.ones(int(len(self.masked_indices[0]))))  )
-        fluxes_sample = numpyro.deterministic('fluxes', unscaled_fluxes*self.std*fluxes_error_scaling + self.mu*fluxes_scaling)  
+        # unscaled_fluxes = numpyro.sample('unscaled_fluxes'+ self.number, dist.Normal(jnp.zeros(int(len(self.masked_indices[0]))),jnp.ones(int(len(self.masked_indices[0]))))  )
+        # fluxes_sample = numpyro.deterministic('fluxes', unscaled_fluxes*self.std*fluxes_error_scaling + self.mu*fluxes_scaling)  
+        fluxes_sample = numpyro.sample('fluxes', dist.TruncatedNormal(self.mu*fluxes_scaling, self.std*fluxes_scaling, low = self.low))
 
         # f.write('fluxes_sample' + str(fluxes_sample[0]) +' \n')
         fluxes = jnp.zeros(self.direct_shape)
@@ -761,12 +762,17 @@ class DiskModel(KinModels):
 
         self.mu_i = self.inclination
 
+        print('Final PA: ', self.mu_PA)
+
+        #correct r_eff for the observed height
+        self.r_eff_obs = self.r_eff * jnp.sin(jnp.radians(self.PA_morph))
+
         #restricting y0_vel to inside 1/2 light radius
         #centering on y0_vel bc that's taken from pysersic fit centroid
-        self.y_high = self.mu_y0_vel + self.r_eff
-        self.y_low = self.mu_y0_vel - self.r_eff
+        self.y_high = self.mu_y0_vel + self.r_eff_obs
+        self.y_low = self.mu_y0_vel - self.r_eff_obs
 
-        self.y0_std = 0.5*self.r_eff
+        self.y0_std = 0.5*self.r_eff_obs
     
 
 
@@ -777,8 +783,7 @@ class DiskModel(KinModels):
         self.mask_shape = len(jnp.where(self.mask == 1)[0])
         self.masked_indices = jnp.where(self.mask == 1)
         # self.mu, self.std, self.high, self.low = self.rescale_to_mask([self.mu, self.std, self.high, self.low], self.mask)
-        self.mu, self.std= self.rescale_to_mask([self.mu, self.std], self.mask)
-
+        self.mu, self.std, self.low= self.rescale_to_mask([self.mu, self.std, self.low], self.mask)
         # print(self.mu[191]/0.5752429212546458, self.std[191]/0.5752429212546458, self.high[191]*self.std[191]/0.5752429212546458+self.mu[191]/0.5752429212546458 , self.low[191]*self.std[191]/0.5752429212546458+self.mu[191]/0.5752429212546458)
         #initialize the disk object
         self.disk = Disk(self.flux_prior.shape, self.masked_indices, self.mu, self.std,self.low, self.high, 
@@ -990,7 +995,7 @@ class DiskModel(KinModels):
 
     def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None):
 
-        plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, self.model_v_rot, self.fluxes_mean, inf_data, wave_space, self.mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = save_to_folder, name = name)
+        plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, self.model_v_rot, self.fluxes_mean, inf_data, wave_space, self.mask, x0 = self.x0, y0 = self.y0, factor = 2 , direct_image_size = self.flux_prior.shape[0], save_to_folder = save_to_folder, name = name)
 
 
 
