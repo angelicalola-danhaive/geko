@@ -64,11 +64,12 @@ def process_results(output, master_cat, line):
     #plot the flux model
     plotting.plot_image(direct,x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'truth_flux')
 
+    plotting.plot_image(direct_error, x0_grism,  y0_grism, direct.shape[0])
+
     plotting.plot_image(fluxes_mean, x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'model_flux') #, limits= direct)
     Laplace_kernel = jnp.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
     # fluxes_mean_lap = convolve(fluxes_mean, Laplace_kernel, mode = 'same')
     # plotting.plot_image(jnp.abs(fluxes_mean_lap),x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'truth_flux')
-
 
     #save the fluxes image and posteriors in fits file
     utils.save_fits_image(fluxes_mean, kin_model.masked_indices, inf_data,'fitting_results/' + output + '/' + 'model_flux' + '.fits')
@@ -105,7 +106,7 @@ def process_results(output, master_cat, line):
         plotting.plot_velocity_map(model_velocities, kin_model.mask, kin_model.x0, kin_model.y0, direct.shape[0], save_to_folder=output, name = 'velocity_map')
         plotting.plot_velocity_map(model_dispersions, kin_model.mask, kin_model.x0, kin_model.y0, direct.shape[0], save_to_folder=output, name = 'dispersion_map')
     
-    #plot the posteriors of the kinematic parameters
+    #plot the posteriors of the kinemtic parameters
     plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = output, name = 'cornerplot_real')
     #plot the posteriors of the tuning parameters
     plotting.plot_tuning_parameters(inf_data, model = model_name, save_to_folder = output, name = 'tuning_parameters_real')

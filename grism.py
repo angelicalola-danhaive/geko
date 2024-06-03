@@ -306,6 +306,7 @@ class Grism:
 	  					(self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)) * wave +
 						(self.c01 + (self.c02 * xpix + self.c03 * ypix)) * wave2 + (self.d01 ) * wave3)		
 
+		# print('disp_space: ', self.disp_space)
 
 	def set_wavelength(self, wavelength):
 		self.wavelength = wavelength
@@ -403,10 +404,10 @@ class Grism:
 
 
 		#the 0.5 in front is bc I think I am over-estimating LSF
-		self.sigma_lsf = 0.5*(1/2.36)*self.wavelength/R
+		self.sigma_lsf = (1/2.36)*self.wavelength/R #0.5*
 		# print(self.sigma_lsf)
-		self.sigma_v_lsf = 0.5*(1/2.36)*(c/1000)/R #put c in km/s
-		# print(self.sigma_v_lsf)
+		self.sigma_v_lsf = (1/2.36)*(c/1000)/R #put c in km/s #0.5*
+		print(self.sigma_v_lsf)
 
 		# print(0.001*(c/1000)/4.2)
 	
@@ -442,6 +443,7 @@ class Grism:
 		'''
 		# self.f = open("timing.txt", "a")
 		# start = time.time()
+
 		DX = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
 		# print('DX shape: ', DX.shape)
 		# end = time.time()

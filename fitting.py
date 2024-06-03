@@ -36,7 +36,7 @@ import yaml
 
 jax.config.update('jax_enable_x64', True)
 numpyro.set_host_device_count(2)
-numpyro.set_platform('gpu')
+# numpyro.set_platform('gpu')
 
 # np.set_printoptions(precision=15, floatmode='maxprec')
 # jnp.set_printoptions(precision=15, floatmode='maxprec')
@@ -124,6 +124,8 @@ parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_ca
 		    		help='master catalog file name')			
 
 if __name__ == "__main__":
+
+	print('247')
 
 	args = parser.parse_args()
 	output = args.output + '/'

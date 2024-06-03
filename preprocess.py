@@ -19,12 +19,13 @@ import jax.numpy as jnp
 
 import yaml
 
-from scipy.ndimage import median_filter, sobel
+from scipy.ndimage import median_filter, sobel, center_of_mass
 from scipy import ndimage
 
 #for the masking
 from skimage.morphology import  dilation, disk
 from skimage.filters import threshold_otsu
+from skimage.measure import centroid
 
 from astropy.coordinates import SkyCoord
 from astropy import units as u
@@ -104,7 +105,7 @@ def read_config_file(input, output, master_cat_path, line):
 	if isinstance(PA_morph, float) == True:
 		if PA_morph<0:
 			PA_morph += jnp.pi
-		PA_morph = 180 - PA_morph* (180/jnp.pi) #convert to degrees and the right range
+		PA_morph *= (180/jnp.pi) #convert to degrees 
 
 	e = master_cat[master_cat['ID'] == ID]['ellip_q50'][0]
 	if isinstance(e, float) == True:
@@ -198,22 +199,22 @@ def renormalize_image(direct,direct_error, obs_map):
 	# mask_grism = mask_grism.at[jnp.where(obs_map>threshold_grism)].set(1)
 	# mask_grism = dilation(mask_grism, disk(2))
 
-	mask_image_seg, cat_image = utils.find_central_object(direct, 4)
+	mask_image_seg, cat_image = utils.find_central_object(direct,4)
 	mask_grism_seg, cat_grism = utils.find_central_object(obs_map, 1, 5)
 
 	mask_image = mask_image_seg.data
 	mask_grism = mask_grism_seg.data
 
-	# plot the direct image found within the mask, the rest set to 0
-	plt.imshow(direct*mask_image, cmap='viridis', origin='lower')
-	plt.title('Direct image within the mask')
-	plt.show()
+	# # plot the direct image found within the mask, the rest set to 0
+	# plt.imshow(direct*mask_image, cmap='viridis', origin='lower')
+	# plt.title('Direct image within the mask')
+	# plt.show()
 
 
-	# plot the grism image found within the mask, the rest set to 0
-	plt.imshow(obs_map*mask_grism, cmap='viridis', origin='lower')
-	plt.title('Grism data within the mask')
-	plt.show()
+	# # plot the grism image found within the mask, the rest set to 0
+	# plt.imshow(obs_map*mask_grism, cmap='viridis', origin='lower')
+	# plt.title('Grism data within the mask')
+	# plt.show()
 
 	#compute the normalization factor
 	normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask_image == 1)].sum()
@@ -313,6 +314,8 @@ def make_EL_map(med_band, broad_band, med_band_err,broad_band_err,z, line):
 				print('No sources detected in EL map, using the med band map')
 				EL_map = med_band
 				EL_map_err = med_band_err
+			EL_map = med_band
+			EL_map_err = med_band_err
 			# Halpha_map = image_cutout_F410M - image_cutout_F444W
 		#if the galaxy is in z_444W, then estimate Halpha map as F444W-F410M
 		elif 5.5579268292682915 < z < 6.594512195121951:
@@ -330,6 +333,8 @@ def make_EL_map(med_band, broad_band, med_band_err,broad_band_err,z, line):
 				print('No sources detected in EL map, using the broad band map')
 				EL_map = broad_band
 				EL_map_err = broad_band_err
+			EL_map = broad_band
+			EL_map_err = broad_band_err
 
 		elif z_356W_halpha[0] < z < z_356W_halpha[1]:
 			print('Halpha is only in F356W') 
@@ -340,6 +345,8 @@ def make_EL_map(med_band, broad_band, med_band_err,broad_band_err,z, line):
 			EL_map = broad_band*width_F356W - med_band*width_F356W 
 			width_sum = width_F335M + width_F356W
 			EL_map_err = np.sqrt(med_band_err**2*width_F335M/width_sum + broad_band_err**2*width_F356W/width_sum)
+			EL_map = broad_band
+			EL_map_err = broad_band_err
 		elif z_335M_halpha[0] < z < z_335M_halpha[1]:
 			print('Halpha is in F335M and F356W')
 			broad_band = broad_band*c_m/l356W**2
@@ -349,7 +356,8 @@ def make_EL_map(med_band, broad_band, med_band_err,broad_band_err,z, line):
 			EL_map = (med_band*width_F335M*width_F356W - broad_band*width_F356W*width_F335M)/(width_F356W-width_F335M)
 			width_sum = width_F335M + width_F356W
 			EL_map_err = np.sqrt(med_band_err**2*width_F335M/width_sum + broad_band_err**2*width_F356W/width_sum)
-
+			EL_map = med_band
+			EL_map_err = med_band_err
 		else:
 			print('Halpha is not in the observed range, returning zeros')
 	
@@ -398,9 +406,11 @@ def make_EL_map(med_band, broad_band, med_band_err,broad_band_err,z, line):
 def rotate_wcs(med_band_fits, EL_map, EL_error, broad_map, field, cutout_size):
 	'''
 		rotate the WCS of the image to match the PA of the grism image
+		the med_band_fits is for the WCS
 	'''
 	med_band = med_band_fits[1].data
 	wcs_med_band = wcs.WCS(med_band_fits[1].header)
+
 
 	if field == 'GOODS-S' or field =='GOODS-S-FRESCO':
 			print('FRESCO PA is the same in GOODS-S, no correction needed')
@@ -409,7 +419,7 @@ def rotate_wcs(med_band_fits, EL_map, EL_error, broad_map, field, cutout_size):
 			EL_err_flip = EL_error
 			broad_map_flip = broad_map
 			rotated_wcs = wcs_med_band
-			theta = None
+			theta = 0.0
 	else:
 		if field == 'GOODS-N':
 			print('Correcting image for GOODS-N FRESCO PA')
@@ -451,6 +461,47 @@ def rotate_wcs(med_band_fits, EL_map, EL_error, broad_map, field, cutout_size):
 	return rotated_wcs, med_band_flip, EL_map_flip, EL_err_flip, broad_map_flip, theta
 
 
+def rotate_wcs_ALT(wcs_orig, rot_wcs, EL_map, EL_error, broad_map,cutout_size, angle):
+	'''
+		rotate the WCS of the image to match the PA of the grism image
+		the med_band_fits is for the WCS
+	'''
+
+	wcs_med_band = wcs_orig
+	theta = -angle
+	# print(wcs.WCS(wcs_med_band.to_header()).wcs.pc)
+	rotated_wcs = rot_wcs
+	theta_rad = np.deg2rad(theta)
+	sinq = np.sin(theta_rad)
+	cosq = np.cos(theta_rad)
+	mrot = np.array([[cosq, -sinq],
+							[sinq, cosq]])
+	if rotated_wcs.wcs.has_cd():    # CD matrix
+		# newcd = np.dot(mrot, rotated_wcs.wcs.cd)
+		# rotated_wcs.wcs.cd = newcd
+		newpc = np.dot(wcs.WCS(rotated_wcs.to_header()).wcs.get_pc(), mrot)
+		rotated_wcs.wcs.pc = newpc
+		# rotated_wcs.wcs.set()
+	elif rotated_wcs.wcs.has_pc():      # PC matrix + CDELT
+		newpc = np.dot(rotated_wcs.wcs.get_pc(),mrot)
+		rotated_wcs.wcs.pc = newpc
+			# rotated_wcs.wcs.set()
+	rotated_wcs.wcs.crpix = [cutout_size//2,cutout_size//2]
+	rotated_wcs.wcs.crval = wcs_med_band.all_pix2world(cutout_size//2,cutout_size//2,0)
+	rotated_wcs.wcs.set()
+	print('Setting new central pixel and value: ', rotated_wcs.wcs.crpix, rotated_wcs.wcs.crval)
+		# print('wcs med band : ', wcs_med_band)
+		# print('rotated wcs : ', rotated_wcs)
+		#reproject both images in the rotated WCS frame
+		# med_band_flip, footprint = reproject_adaptive((med_band, wcs_med_band), rotated_wcs, shape_out = med_band.shape)
+		# broad_band_flip, footprint = reproject_adaptive((broad_band, wcs_med_band), rotated_wcs, shape_out = broad_band.shape)
+	EL_map_flip, footprint = reproject_adaptive((EL_map, wcs_med_band), rotated_wcs, shape_out = EL_map.shape)
+	EL_err_flip, footprint = reproject_adaptive((EL_error, wcs_med_band), rotated_wcs, shape_out = EL_error.shape)
+	#flip this too so the PA can be computed
+	broad_map_flip, footprint = reproject_adaptive((broad_map, wcs_med_band), rotated_wcs, shape_out = broad_map.shape)
+
+	return rotated_wcs, EL_map_flip, EL_err_flip, broad_map_flip
+
 def contiuum_subtraction(grism_spectrum_data, min, max):
 	'''
 		Subtract the continuum from the EL map
@@ -480,25 +531,25 @@ def contiuum_subtraction(grism_spectrum_data, min, max):
 
 	#second round of filtering but masking bright regions
 
-	mask_seg, cat = utils.find_central_object(grism_spectrum_data[:,140:160], 0.5)
-	mask = mask_seg.data
+	# mask_seg, cat = utils.find_central_object(grism_spectrum_data[:,140:160], 0.5)
+	# mask = mask_seg.data
 
-	grism_spectrum_data_crop = grism_spectrum_data[:,140:160]
-	grism_spectrum_data_crop= grism_spectrum_data_crop.at[jnp.where(mask == 1)].set(jnp.nan)
-	grism_spectrum_data_masked = grism_spectrum_data
-	grism_spectrum_data_masked= grism_spectrum_data_masked.at[:,140:160].set(grism_spectrum_data_crop)
-	plt.imshow(mask, origin='lower')
-	plt.title('mask')
-	plt.colorbar()
-	plt.show()
-	L_box, L_mask = 10, 12
-	mf_footprint = np.ones((1, L_box * 2 + 1))
-	tmp_grism_img_median = ndimage.generic_filter(grism_spectrum_data_masked, np.nanmedian, footprint=mf_footprint, mode='reflect')
-	grism_spectrum_data = grism_spectrum_data - tmp_grism_img_median  # emission line map
-	plt.imshow(grism_spectrum_data, origin='lower')
-	plt.title('EL map after continuum subtraction')
-	plt.colorbar()
-	plt.show()
+	# grism_spectrum_data_crop = grism_spectrum_data[:,140:160]
+	# grism_spectrum_data_crop= grism_spectrum_data_crop.at[jnp.where(mask == 1)].set(jnp.nan)
+	# grism_spectrum_data_masked = grism_spectrum_data
+	# grism_spectrum_data_masked= grism_spectrum_data_masked.at[:,140:160].set(grism_spectrum_data_crop)
+	# plt.imshow(mask, origin='lower')
+	# plt.title('mask')
+	# plt.colorbar()
+	# plt.show()
+	# L_box, L_mask = 10, 12
+	# mf_footprint = np.ones((1, L_box * 2 + 1))
+	# tmp_grism_img_median = ndimage.generic_filter(grism_spectrum_data_masked, np.nanmedian, footprint=mf_footprint, mode='reflect')
+	# grism_spectrum_data = grism_spectrum_data - tmp_grism_img_median  # emission line map
+	# plt.imshow(grism_spectrum_data, origin='lower')
+	# plt.title('EL map after continuum subtraction')
+	# plt.colorbar()
+	# plt.show()
 
 
 	return grism_spectrum_data
@@ -539,7 +590,9 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 
 	#compute the med band center from the WCS coords:
 	icenter_high, jcenter_high = rotated_wcs.world_to_array_index_values(galaxy_position.ra.deg, galaxy_position.dec.deg)
-	icenter_vel, jcenter_vel = rotated_wcs.world_to_array_index_values(velocity_centroid.ra.deg, velocity_centroid.dec.deg)
+	#set the center of the velocity map to the light-weighed center of the prior image
+	icenter_vel, jcenter_vel = np.unravel_index(np.argmax(med_band_flip), med_band_flip.shape)
+	 #rotated_wcs.world_to_array_index_values(velocity_centroid.ra.deg, velocity_centroid.dec.deg)
 	if icenter_high < 0 or icenter_high > cutout_size or jcenter_high < 0 or jcenter_high > cutout_size:
 		print('The galaxy is not in the cutout')
 		return None
@@ -549,6 +602,29 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	# plt.imshow(EL_map_flip, origin='lower')
 	# plt.title('Correctly rotated image')
 	# plt.show()
+
+
+	#load number of module A and module B frames from the header
+	if field == 'GOODS-S-FRESCO':
+		print('Manually setting the module because the N_A and N_B params are not in the header')
+		module_A = 0
+		module_B = 1
+	else:
+		module_A = grism_spectrum_fits[0].header['N_A']
+		module_B = grism_spectrum_fits[0].header['N_B']
+
+
+	# if module_A == 0:
+	# 	# print('Flipping map! (Mod B)')
+	# 	# obs_error = jnp.flip(obs_error, axis = 1)
+	# 	# obs_map = jnp.flip(obs_map, axis = 1)
+	# 	print('Flipping image! (Mod B)')
+	# 	EL_map_flip = jnp.flip(EL_map_flip, axis = 1)
+	# 	EL_err_flip = jnp.flip(EL_err_flip, axis = 1)
+	# 	broad_band_mask_flip = jnp.flip(broad_band_mask_flip, axis = 1)
+	# 	jcenter_high = cutout_size - jcenter_high
+	# 	jcenter_vel = cutout_size - jcenter_vel
+
 
 	#cut the med band image to 62x62 around the photometric center: icenter_medband, jcenter_medband
 	high_res_prior = EL_map_flip[icenter_high-31:icenter_high+31,jcenter_high-31:jcenter_high+31]
@@ -561,15 +637,6 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
 	# plt.show()
 
-	plt.imshow(high_res_prior, origin='lower')
-	plt.title('Flipped and correct scale image 62x62 high res cutout')
-	plt.colorbar()
-	plt.show()
-
-	plt.imshow(high_res_error, origin='lower')
-	plt.title('Flipped and correct scale image 62x62 high res error cutout')
-	plt.colorbar()
-	plt.show()
 
 	icenter_vel, jcenter_vel = icenter_vel - icenter_high + 31, jcenter_vel - jcenter_high + 31
 
@@ -633,29 +700,43 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	obs_error = jnp.where(jnp.isnan(obs_map)| jnp.isnan(obs_error) | jnp.isinf(obs_error), 1e10, obs_error)
 
 
-	#load number of module A and module B frames from the header
-	if field == 'GOODS-S-FRESCO':
-		print('Manually setting the module because the N_A and N_B params are not in the header')
-		module_A = 0
-		module_B = 1
-	else:
-		module_A = grism_spectrum_fits[0].header['N_A']
-		module_B = grism_spectrum_fits[0].header['N_B']
+
+	# plt.imshow(obs_map, origin='lower')
+	# plt.title('EL map cutout')
+	# plt.show()
+
+	direct = high_res_prior
+	direct_error = high_res_error
+	icenter_prior = icenter_high
+	jcenter_prior = jcenter_high
+	
+	#introduce error floor of max S/N in map + flux:
+	SN_max = 20
+	obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
+	direct_error = jnp.where(jnp.abs(high_res_prior/high_res_error) > SN_max, high_res_prior/SN_max, high_res_error)
 
 	if module_A == 0:
 		print('Flipping map! (Mod B)')
 		obs_error = jnp.flip(obs_error, axis = 1)
 		obs_map = jnp.flip(obs_map, axis = 1)
 
-	# plt.imshow(obs_map, origin='lower')
-	# plt.title('EL map cutout')
-	# plt.show()
-	
+	plt.imshow(direct, origin='lower')
+	plt.title('Direct')
+	plt.colorbar()
+	plt.show()
+
+	plt.imshow(direct/direct_error, origin='lower')
+	plt.title('Direct S/N')
+	plt.colorbar()
+	plt.show()
+
+	plt.imshow(obs_map/obs_error, origin='lower')
+	plt.title('obs map S/N')
+	plt.colorbar()
+	plt.show()
+
 	# if fitting == 'high':
-	direct = high_res_prior
-	direct_error = high_res_error
-	icenter_prior = icenter_high
-	jcenter_prior = jcenter_high
+
 	# elif fitting == 'low':
 	# 	direct = low_res_prior
 	# 	icenter_prior = icenter_low
@@ -681,12 +762,30 @@ def preprocess_data_ALT(obj_id, output, line, delta_wave_cutoff = 0.02, field = 
 	broad_band_err = jnp.sqrt(1/image_hdu['DWHT','F356W-CLEAR'].data)
 	broad_band_wcs = wcs.WCS(image_hdu['DSCI','F356W-CLEAR'].header)
 
-	EL_map = image_hdu['LINE',line].data
-	EL_map_error = jnp.sqrt(1/image_hdu['LINEWHT',line].data)
+	#prior from broad band image
+	EL_map = image_hdu['DSCI','F356W-CLEAR'].data
+	#for now will make the error map artificially - then will ask ALT chat
+	EL_map_error = 0.25*EL_map
+	# EL_map_error = np.power(image_hdu['DWHT','F356W-CLEAR'].data, - 0.5)
+
+	plt.imshow(EL_map_error, origin = 'lower')
+	plt.show()
+
+	EL_map_error = np.where(np.isnan(EL_map)| np.isnan(EL_map_error) | np.isinf(EL_map_error), 1e10, EL_map_error)		
+	grism_spectrum_fits = fits.open(f"fitting_results/" + output + "j001420m3023_%s.stack.fits"%(str(obj_id).zfill(5)))
+
+
+	#load grism PA
+	theta = grism_spectrum_fits['SCI'].header['PA']
+
+
+	cutout_size = EL_map.shape[0]
+
+
+	#rotate images to match grism PA
+	rotated_wcs, EL_map_flip, EL_err_flip, broad_map_flip = rotate_wcs_ALT(wcs.WCS(image_hdu['DSCI','F356W-CLEAR'].header),wcs.WCS(image_hdu['DSCI','F356W-CLEAR'].header),EL_map, EL_map_error, broad_band_mask, cutout_size, theta)
 
 	wavelength = image_hdu['LINE',line].header['WAVELEN']*1e-4
-
-	grism_spectrum_fits = fits.open(f"fitting_results/" + output + "j001420m3023_%s.stack.fits"%(str(obj_id).zfill(5)))
 
 	cutout_size = broad_band.shape[0]
 
@@ -697,8 +796,8 @@ def preprocess_data_ALT(obj_id, output, line, delta_wave_cutoff = 0.02, field = 
 		velocity_centroid = SkyCoord(ra=RA_vel * u.deg, dec=DEC_vel * u.deg)
 
 	#compute the med band center from the WCS coords:
-	icenter_high, jcenter_high = broad_band_wcs.world_to_array_index_values(galaxy_position.ra.deg, galaxy_position.dec.deg)
-	icenter_vel, jcenter_vel = broad_band_wcs.world_to_array_index_values(velocity_centroid.ra.deg, velocity_centroid.dec.deg)
+	icenter_high, jcenter_high = rotated_wcs.world_to_array_index_values(galaxy_position.ra.deg, galaxy_position.dec.deg)
+	icenter_vel, jcenter_vel = rotated_wcs.world_to_array_index_values(velocity_centroid.ra.deg, velocity_centroid.dec.deg)
 	if icenter_high < 0 or icenter_high > cutout_size or jcenter_high < 0 or jcenter_high > cutout_size:
 		print('The galaxy is not in the cutout')
 		return None
@@ -710,14 +809,14 @@ def preprocess_data_ALT(obj_id, output, line, delta_wave_cutoff = 0.02, field = 
 	# plt.show()
 
 	#cut the broad band image to 31x31 around the center
-	ny,nx = EL_map.shape
+	ny,nx = EL_map_flip.shape
 	cx = int(0.5*(nx-1))
 	dx = 32
-	high_res_prior = EL_map[cx-dx:cx+dx,cx-dx:cx+dx]
-	high_res_error = EL_map_error[cx-dx:cx+dx,cx-dx:cx+dx]
-	broad_band_cutout = jnp.array(broad_band[cx-dx:cx+dx,cx-dx:cx+dx])
+	high_res_prior = EL_map_flip[cx-dx:cx+dx,cx-dx:cx+dx]
+	high_res_error = EL_err_flip[cx-dx:cx+dx,cx-dx:cx+dx]
+	broad_band_cutout = jnp.array(broad_map_flip[cx-dx:cx+dx,cx-dx:cx+dx])
 	# save the broadband image needed to compute mask - using F444W for all ELs to have save mask
-	broad_band_mask = broad_band_mask[cx-dx:cx+dx,cx-dx:cx+dx]
+	broad_band_mask = broad_map_flip[cx-dx:cx+dx,cx-dx:cx+dx]
 	# compute mask from med band image
 	# threshold = threshold_otsu(med_band_cutout)/3
 	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
@@ -786,7 +885,178 @@ def preprocess_data_ALT(obj_id, output, line, delta_wave_cutoff = 0.02, field = 
 	icenter_low = None
 	jcenter_low = None
 
-	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, x0_vel, y0_vel, wavelength
+	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta
+
+
+def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, field = 'ALT', RA_vel = -1, DEC_vel = -1):
+
+	#no need to rotate this data, and not using EL prior bc no med band imaging
+	 
+	#load data from fits files
+	image_hdu = fits.open("fitting_results/" + output + "j001420m3023_%s.full.fits"%(str(obj_id).zfill(5)))
+
+	stacked_hdu = fits.open("fitting_results/" + output + "stacked_2D_ALT_%s.fits"%(str(obj_id).zfill(5)))
+
+	broad_hdu = fits.open("fitting_results/" + output + "%s_cutout.fits"%(str(obj_id).zfill(5)))
+
+	err_hdu = fits.open("fitting_results/" + output + "%s_wht_cutout.fits"%(str(obj_id).zfill(5)))
+
+
+	RA = RA_vel
+	DEC = DEC_vel
+
+	print('RA, DEC: ', RA, DEC)
+	broad_band = broad_hdu[0].data
+	broad_band_mask = broad_hdu[0].data
+
+	broad_band_err = jnp.sqrt(1/err_hdu[0].data)
+	broad_band_wcs = wcs.WCS(broad_hdu[0].header)
+
+	#prior from broad band image
+	EL_map = broad_hdu[0].data
+	#for now will make the error map artificially - then will ask ALT chat
+	EL_map_error = jnp.sqrt(1/err_hdu[0].data)
+	# EL_map_error = np.power(image_hdu['DWHT','F356W-CLEAR'].data, - 0.5)
+
+	plt.imshow(EL_map_error, origin = 'lower')
+	plt.show()
+
+	EL_map_error = np.where(np.isnan(EL_map)| np.isnan(EL_map_error) | np.isinf(EL_map_error), 1e10, EL_map_error)	
+
+	# grism_spectrum_fits = stacked_hdu['EMLINE']
+
+
+	#load grism PA
+	theta = - stacked_hdu['STAMP'].header['PA_V3'] #- ROLL 2 angle 
+
+
+	cutout_size = EL_map.shape[0]
+
+
+	#rotate images to match grism PA
+	rotated_wcs, EL_map_flip, EL_err_flip, broad_map_flip = rotate_wcs_ALT(wcs.WCS(broad_hdu[0].header),wcs.WCS(broad_hdu[0].header),EL_map, EL_map_error, broad_band_mask, cutout_size, theta)
+
+	wavelength = image_hdu['LINE',line].header['WAVELEN']*1e-4
+
+	cutout_size = broad_band.shape[0]
+
+	galaxy_position = SkyCoord(ra=RA * u.deg, dec=DEC * u.deg)
+	if RA_vel == None:
+		velocity_centroid = galaxy_position
+	else:
+		velocity_centroid = SkyCoord(ra=RA_vel * u.deg, dec=DEC_vel * u.deg)
+
+	#compute the med band center from the WCS coords:
+	icenter_high, jcenter_high = rotated_wcs.world_to_array_index_values(galaxy_position.ra.deg, galaxy_position.dec.deg)
+	icenter_vel, jcenter_vel = rotated_wcs.world_to_array_index_values(velocity_centroid.ra.deg, velocity_centroid.dec.deg)
+	if icenter_high < 0 or icenter_high > cutout_size or jcenter_high < 0 or jcenter_high > cutout_size:
+		print('The galaxy is not in the cutout')
+		return None
+	else:
+		print('Center of the galaxy in the high res image: ', icenter_high, jcenter_high)
+		print('Center of the velocity map in the high res image: ', icenter_vel, jcenter_vel)
+	# plt.imshow(EL_map_flip, origin='lower')
+	# plt.title('Correctly rotated image')
+	# plt.show()
+
+	#project the image to the grism scale 0.0629
+	old_wcs = rotated_wcs.deepcopy()
+	rotated_wcs.wcs.pc = rotated_wcs.wcs.pc*(0.0629/0.04)
+	rotated_wcs.wcs.crpix = [cutout_size//2,cutout_size//2]
+	rotated_wcs.wcs.crval = old_wcs.all_pix2world(cutout_size//2,cutout_size//2,0)
+	rotated_wcs.wcs.set()
+
+	EL_map_flip, footprint = reproject_adaptive((EL_map_flip, old_wcs), rotated_wcs, shape_out = EL_map_flip.shape)
+	EL_err_flip, footprint = reproject_adaptive((EL_err_flip, old_wcs), rotated_wcs, shape_out = EL_err_flip.shape)
+	#cut the broad band image to 51x51 around the center, current size 100x100
+	ny,nx = EL_map_flip.shape
+	cx = int(0.5*(nx-1))
+	dx = 25
+	high_res_prior = EL_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1]
+	high_res_error = EL_err_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1]
+	broad_band_cutout = jnp.array(broad_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1])
+	# save the broadband image needed to compute mask - using F444W for all ELs to have save mask
+	broad_band_mask = broad_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1]
+	# compute mask from med band image
+	# threshold = threshold_otsu(med_band_cutout)/3
+	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
+	# plt.show()
+
+	icenter_vel, jcenter_vel = icenter_vel - cx + dx , jcenter_vel - cx + dx
+	icenter_high, jcenter_high = icenter_high - cx + dx , jcenter_high - cx + dx#this is by defintion of how the cutout was made
+	#recompute the velocity centroid in the new 62x62 cutout arounf icenter_high, jcenter_high
+
+	x0_vel = jcenter_vel
+	y0_vel = icenter_vel
+
+	xcenter_detector = 1024
+	ycenter_detector = 1024
+
+	#grism stuff
+	h_i =stacked_hdu['EMLINE'].header
+	wave_space = ((np.arange(h_i['NAXIS1']+1)-h_i['CRPIX1']+1)*h_i['CDELT1']+ h_i['CRVAL1'])*1e-4
+
+
+	#choose which wavelengths will be the cutoff of the EL map and save those
+	wave_min = wavelength - delta_wave_cutoff 
+	wave_max = wavelength + delta_wave_cutoff 
+
+	d_wave = h_i['CDELT1']*1e-4
+	wave_first = wave_space[0]
+
+	# print(wave_min, wave_max)
+
+	index_min = round((wave_min - wave_first)/d_wave) #+10
+	index_max = round((wave_max - wave_first)/d_wave) #-10
+	# print(index_min, index_max)
+	index_wave = round((wavelength - wave_first)/d_wave)
+
+	print(index_max, index_min)
+	#subtract continuum and crop image by 200 on each size of EL
+	grism_spectrum_data = jnp.array(stacked_hdu['EMLINE'].data) #contiuum_subtraction(jnp.array(grism_spectrum_fits[('SCI','F356W')].data), index_wave - 150, index_wave + 150)
+
+	#cut EL map by using those wavelengths => saved as obs_map which is an input for Fit_Numpyro class
+	# obs_map = grism_spectrum_data[:,index_min-(index_wave -150) +1:index_max-(index_wave -150)+1+1]
+	obs_map = grism_spectrum_data[:,index_min:index_max+1]
+
+	obs_error = jnp.array(stacked_hdu['ERR'].data[:,index_min+1:index_max+1+1])
+	#mask bad pixels in obs/error map
+	obs_error = jnp.where(jnp.isnan(obs_map)| jnp.isnan(obs_error) | jnp.isinf(obs_error), 1e10, obs_error)
+
+	direct = high_res_prior
+	direct_error = high_res_error
+	icenter_prior = icenter_high
+	jcenter_prior = jcenter_high
+
+	#introduce error floor of max S/N in map + flux:
+	SN_max = 20
+	obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
+	direct_error = jnp.where(jnp.abs(high_res_prior/high_res_error) > SN_max, high_res_prior/SN_max, high_res_error)
+	plt.imshow(obs_map, origin='lower')
+	plt.title('obs_map')
+	plt.colorbar()
+	plt.show()
+
+	plt.imshow(obs_map/obs_error, origin='lower')
+	plt.title('obs map S/N')
+	plt.colorbar()
+	plt.show()
+
+	plt.imshow(direct, origin='lower')
+	plt.title('Direct')
+	plt.colorbar()
+	plt.show()
+
+	plt.imshow(direct/direct_error, origin='lower')
+	plt.title('Direct S/N')
+	plt.colorbar()
+	plt.show()
+
+	
+	icenter_low = None
+	jcenter_low = None
+
+	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta
 
 def run_full_preprocessing(output,master_cat, line):
     """
@@ -806,7 +1076,7 @@ def run_full_preprocessing(output,master_cat, line):
     #preprocess the images and the grism spectrum
     if field == 'ALT':
         obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-		wave_space, delta_wave, index_min, index_max, x0_vel, y0_vel, wavelength = preprocess_data_ALT(ID, output, line, delta_wave_cutoff, field, RA_vel, DEC_vel)
+		wave_space, delta_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta = preprocess_data_ALT_stacked(ID, output, line, delta_wave_cutoff, field, RA_vel, DEC_vel)
     else:
         obs_map, obs_error, direct, direct_error,broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
 		wave_space, delta_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta= preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res, RA_vel, DEC_vel)
@@ -844,10 +1114,13 @@ def run_full_preprocessing(output,master_cat, line):
                             xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
                             wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
                             grism_filter=grism_filter, grism_module='A', grism_pupil='R', PSF = PSF)
+    
+    print('d wave' , delta_wave)
     direct_image_size = direct.shape
     
-    _, _, _, _, PA_grism, inc_grism,_ = utils.compute_gal_props(obs_map, threshold_sigma = flux_threshold/2) # /2 bc grism lower s/n than imaging data
-    print('PA_grism: ', PA_grism)
+    _, _, _, _, PA_grism, inc_grism,_,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma = flux_threshold/2) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
+    
+    print('PA_grism: ', PA_grism) #already in [0,pi] range + in degrees
     print('inc_grism: ', inc_grism)
 
     # initialize chosen kinematic model

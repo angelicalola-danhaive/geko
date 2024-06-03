@@ -130,21 +130,25 @@ def find_best_sample(inference_data, variable, mu, sigma, max, min, MLS):
     
     return best_sample
 
-def find_central_object(image,threshold_sigma):
+def find_central_object(image,threshold_sigma, npixels = 10):
     """
        Make a mask that selects only the central object
     """
+    size = 20
+    if image.shape[0]<62:
+        size = 10
     bkg_estimator = MedianBackground()
-    bkg = Background2D(image, (20,20) , filter_size=(5, 5),bkg_estimator = bkg_estimator)
+    bkg = Background2D(image, (size,size) , filter_size=(5, 5),bkg_estimator = bkg_estimator)
     threshold = threshold_sigma * bkg.background_rms
-    # print('Threshold:', threshold)
-    segment_map = detect_sources(image, threshold, npixels=10)
+
+    segment_map = detect_sources(image, threshold, npixels)
     if segment_map == None:
         print('No sources found')
         return None, None
     cat = SourceCatalog(image, segment_map)
+
     #select only the central source
-    idx_source = jnp.argmin((cat.xcentroid-image.shape[0]//2)**2 + (cat.ycentroid-image.shape[0]//2)**2)
+    idx_source = jnp.argmin((cat.xcentroid-image.shape[1]//2)**2 + (cat.ycentroid-image.shape[0]//2)**2)
 
     label_source = idx_source + 1
     segment_map.keep_labels([label_source])
@@ -172,6 +176,7 @@ def make_mask(image, n = 1, threshold_sigma = 3):
     if n == 2:
         segm_deblend = deblend_sources(image, segment_map, npixels=10, nlevels=32, contrast=0.001)
         plt.imshow(segm_deblend.data, origin='lower')
+        plt.title('Make mask - segm debelnd')
         plt.show()
 
         #if more than 2 labels, keep the central one and merge the others
@@ -210,15 +215,22 @@ def compute_gal_props(image, n=1, threshold_sigma=3):
 		sources = SourceCatalog(image, seg_2comp)
 	PA = []
 	inc = []
+	r_eff = []
+	center = []
+	ratio = []
 	for i in range(len(sources)):
 		angle = sources.orientation[i].value #orientation is in degrees [-180,180]
 		if angle<0:
 			angle += 180 #convert to [0,180]
 		PA.append(angle) 
+		ratio.append(sources.elongation[i].value)
 		inc.append(jnp.arccos(1/sources.elongation[i].value)* (180/jnp.pi)) #convert to degrees
+		r_eff.append(sources.equivalent_radius[i].value)
+		print('centroid. ', sources.centroid[i])
+		center.append(sources.centroid_quad[i])
     
 	# print(seg_1comp)
-	return seg_1comp, seg_2comp, mask_1comp, mask_2comp, PA, inc
+	return seg_1comp, seg_2comp, mask_1comp, mask_2comp, jnp.array(PA), jnp.array(inc), jnp.array(r_eff), jnp.array(center), jnp.array(ratio)
 
 
 def save_fits_image(image, masked_indices, inference_data, filename):
