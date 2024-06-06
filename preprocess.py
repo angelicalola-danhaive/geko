@@ -700,7 +700,6 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	obs_error = jnp.where(jnp.isnan(obs_map)| jnp.isnan(obs_error) | jnp.isinf(obs_error), 1e10, obs_error)
 
 
-
 	# plt.imshow(obs_map, origin='lower')
 	# plt.title('EL map cutout')
 	# plt.show()
@@ -711,7 +710,7 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	jcenter_prior = jcenter_high
 	
 	#introduce error floor of max S/N in map + flux:
-	SN_max = 20
+	SN_max = jnp.minimum(20, jnp.max(obs_map/obs_error))
 	obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
 	direct_error = jnp.where(jnp.abs(high_res_prior/high_res_error) > SN_max, high_res_prior/SN_max, high_res_error)
 
@@ -928,6 +927,7 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 
 	#load grism PA
 	theta = - stacked_hdu['STAMP'].header['PA_V3'] #- ROLL 2 angle 
+	print('PA_V3: ', -theta)
 
 
 	cutout_size = EL_map.shape[0]
@@ -968,20 +968,25 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 
 	EL_map_flip, footprint = reproject_adaptive((EL_map_flip, old_wcs), rotated_wcs, shape_out = EL_map_flip.shape)
 	EL_err_flip, footprint = reproject_adaptive((EL_err_flip, old_wcs), rotated_wcs, shape_out = EL_err_flip.shape)
+	broad_map_flip, footprint = reproject_adaptive((broad_map_flip, old_wcs), rotated_wcs, shape_out = broad_map_flip.shape)
 	#cut the broad band image to 51x51 around the center, current size 100x100
 	ny,nx = EL_map_flip.shape
 	cx = int(0.5*(nx-1))
 	dx = 25
-	high_res_prior = EL_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1]
-	high_res_error = EL_err_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1]
+	high_res_prior = jnp.array(EL_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1])
+	high_res_error = jnp.array(EL_err_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1])
 	broad_band_cutout = jnp.array(broad_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1])
 	# save the broadband image needed to compute mask - using F444W for all ELs to have save mask
-	broad_band_mask = broad_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1]
+	broad_band_mask = jnp.array(broad_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1])
 	# compute mask from med band image
 	# threshold = threshold_otsu(med_band_cutout)/3
 	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
 	# plt.show()
 
+	plt.imshow(broad_band_mask, origin='lower')
+	plt.title('Broad band mask')
+	plt.colorbar()
+	plt.show()
 	icenter_vel, jcenter_vel = icenter_vel - cx + dx , jcenter_vel - cx + dx
 	icenter_high, jcenter_high = icenter_high - cx + dx , jcenter_high - cx + dx#this is by defintion of how the cutout was made
 	#recompute the velocity centroid in the new 62x62 cutout arounf icenter_high, jcenter_high
@@ -1003,7 +1008,6 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 
 	d_wave = h_i['CDELT1']*1e-4
 	wave_first = wave_space[0]
-
 	# print(wave_min, wave_max)
 
 	index_min = round((wave_min - wave_first)/d_wave) #+10
@@ -1023,13 +1027,21 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 	#mask bad pixels in obs/error map
 	obs_error = jnp.where(jnp.isnan(obs_map)| jnp.isnan(obs_error) | jnp.isinf(obs_error), 1e10, obs_error)
 
+	if np.all(np.isnan(stacked_hdu['EMLINEA'].data)) == True or np.all(stacked_hdu['EMLINEA'].data) == False:
+	#np.all returns False if there any elements = 0 or = False in the array
+	#here we test is either every element of Mod A is none of if it is all zeros => in this case the map is only
+	#in mod B and hence flipped
+		obs_map = jnp.flip(obs_map, axis = 1)
+		obs_error = jnp.flip(obs_error, axis = 1)
+		
 	direct = high_res_prior
 	direct_error = high_res_error
 	icenter_prior = icenter_high
 	jcenter_prior = jcenter_high
 
 	#introduce error floor of max S/N in map + flux:
-	SN_max = 20
+	# print(jnp.max(obs_map/obs_error))
+	SN_max = 20 #jnp.minimum(20, jnp.max(obs_map/obs_error))
 	obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
 	direct_error = jnp.where(jnp.abs(high_res_prior/high_res_error) > SN_max, high_res_prior/SN_max, high_res_error)
 	plt.imshow(obs_map, origin='lower')
@@ -1117,11 +1129,16 @@ def run_full_preprocessing(output,master_cat, line):
     
     print('d wave' , delta_wave)
     direct_image_size = direct.shape
-    
-    _, _, _, _, PA_grism, inc_grism,_,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma = flux_threshold/2) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
-    
+    S_N_scale = jnp.max(obs_map/obs_error)/jnp.max(direct/direct_error)
+
+    if ID == 33746:
+        _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma =flux_threshold*S_N_scale/2) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
+    else:
+        _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma = 2*flux_threshold*S_N_scale) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
+	  
     print('PA_grism: ', PA_grism) #already in [0,pi] range + in degrees
     print('inc_grism: ', inc_grism)
+    print('r_eff_grism: ', r_eff_grism)
 
     # initialize chosen kinematic model
     if model_name == 'Disk':
@@ -1130,7 +1147,7 @@ def run_full_preprocessing(output,master_cat, line):
         kin_model = models.DiskModel_withPrior()
     elif model_name == 'Merger':
         kin_model = models.Merger()
-    kin_model.set_bounds(direct, direct_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff)
+    kin_model.set_bounds(direct, direct_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_eff_grism, delta_wave, wavelength)
     
 	# plt.imshow(obs_map, origin='lower')
 	# plt.show()

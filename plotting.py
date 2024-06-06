@@ -297,8 +297,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	x = np.linspace(0 - x0, direct_image_size - 1 - x0, direct_image_size)
 	y = np.linspace(0 - y0, direct_image_size - 1 - y0, direct_image_size)
 	X, Y = np.meshgrid(x, y)
-	X *= 0.031#put it in arcseconds
-	Y *= 0.031
+	X *= 0.0629/factor#put it in arcseconds
+	Y *= 0.0629/factor
 
 	#find the coordinates of the velocity centroid from model_velocities
 	grad_x, grad_y = np.gradient(model_velocities)
@@ -316,7 +316,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	vel_map_ax.set_title(r'Velocity map, $v_{rot} = $' + str(round(v_rot)) + ' km/s', fontsize=10)
 
 
-	vel_map_ax.plot((center[1]-y0)*0.031, (center[0]-x0)*0.031, '+', markersize=10, label = 'velocity centroid', color = 'black')
+	vel_map_ax.plot((center[1]-x0)*0.0629/factor, (center[0]-y0)*0.0629/factor, '+', markersize=10, label = 'velocity centroid', color = 'black')
 	vel_map_ax.legend(fontsize = 5, loc = 'lower right', borderaxespad = 2)
 
 	veldisp_map_ax = fig.add_subplot(gs01[1])
@@ -329,7 +329,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	cbar.ax.set_ylabel(r'$\sigma_v$ [km/s]', fontsize = 5)
 	cbar.ax.tick_params(labelsize = 5)
 	veldisp_map_ax.set_title(r'$\sigma_v$ map', fontsize=10)
-	veldisp_map_ax.plot((center[1]-y0)*0.031, (center[0]-x0)*0.031, '+', markersize=10, label = 'velocity centroid', color = 'black')
+	veldisp_map_ax.plot((center[1]-x0)*0.0629/factor, (center[0]-y0)*0.0629/factor, '+', markersize=10, label = 'velocity centroid', color = 'black')
 	veldisp_map_ax.legend(fontsize = 5, loc = 'lower right',borderaxespad = 2)
 
 	flux_map_ax = fig.add_subplot(gs01[2])
@@ -342,7 +342,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	cbar.ax.set_ylabel('flux [Mjy?]', fontsize = 5)
 	cbar.ax.tick_params(labelsize = 5)
 	flux_map_ax.set_title('Flux map', fontsize=10)
-	flux_map_ax.plot((center[1]-y0)*0.031, (center[0]-x0)*0.031, '+', markersize=10, label = 'velocity centroid', color = 'black')
+	flux_map_ax.plot((center[1]-x0)*0.063/factor, (center[0]-y0)*0.063/factor, '+', markersize=10, label = 'velocity centroid', color = 'black')
 	flux_map_ax.legend(fontsize = 5, loc = 'lower right',borderaxespad = 2)
 
 
@@ -351,14 +351,14 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		smooth=2,
 		label_kwargs=dict(fontsize=30),
 		title_kwargs=dict(fontsize=20),
-		quantiles=[0.16, 0.84],
+		quantiles=[0.16, 0.5, 0.84],
 		plot_density=False,
 		plot_datapoints=False,
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=True,
 		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]' ],
-		titles = [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
+		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
 		max_n_ticks=3,
 		divergences=False)
 
@@ -390,6 +390,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	if save_to_folder != None:
 		fig.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=500)
+		# fig.savefig('summary_plots/CONGRESS/' + save_to_folder.split('/')[0] + '_' + name + '.png', dpi=500)
 	plt.show()
 	plt.close()
 
@@ -527,7 +528,7 @@ def plot_merger_summary(obs_map, model_map, obs_error, model_velocities, v_rot, 
 	plt.show()
 	plt.close()
 
-def define_corner_args(divergences = False, fill_contours = True, plot_contours = True, show_titles = True, quantiles = [0.16,0.84], var_names = ['PA', 'Va', 'i','r_t','sigma0'], labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$']):
+def define_corner_args(divergences = False, fill_contours = True, plot_contours = True, show_titles = True, quantiles = [0.16,0.5,0.84], var_names = ['PA', 'Va', 'i','r_t','sigma0'], labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$'], show_labels = True):
 	"""
 		Defines the cornerplot arguments
 	"""
@@ -544,6 +545,7 @@ def define_corner_args(divergences = False, fill_contours = True, plot_contours 
 		show_titles=show_titles,
 		var_names = var_names,
 		labels=labels,
+		show_labels = show_labels,
 		max_n_ticks=3,
 		divergences=divergences)
 
@@ -582,9 +584,9 @@ def plot_pp_cornerplot(data, kin_model, choice='real', PA=None, i=None, Va=None,
 
 		fig = corner.corner(data, group='posterior',color='crimson', **CORNER_KWARGS)
 				
-		CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False,var_names = kin_model.var_names, labels= kin_model.labels)
+		CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False,var_names = kin_model.var_names, labels= kin_model.labels, show_labels = False)
 
-		fig = corner.corner(data, group='prior',fig=fig,color='lightgray', **CORNER_KWARGS)
+		fig = corner.corner(data, group='prior',fig=fig,color='thistle', **CORNER_KWARGS)
 
 		if save_to_folder != None:
 				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)

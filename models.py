@@ -38,6 +38,9 @@ from photutils import centroids
 
 import time
 
+from scipy.constants import c
+
+
 class KinModels:
 
     def compute_factors(self, PA, i, x, y):
@@ -94,7 +97,7 @@ class KinModels:
 
 
     def set_main_bounds(self, flux_prior, flux_error, broad_band, flux_bounds, flux_type,flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds,
-                         sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff,
+                         sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism,
                         delta_V_bounds, clump, clump_v_prior, clump_sigma_prior, clump_flux_prior):
         """
         Set the bounds for the model parameters by reading the ones from the config file.
@@ -115,6 +118,7 @@ class KinModels:
         self.PA_morph = PA_morph
         self.inclination = inclination
         self.r_eff = r_eff
+        self.r_eff_grism = r_eff_grism
         # these are in the form (low, high)
         self.i_bounds = i_bounds
         self.Va_bounds = Va_bounds
@@ -178,7 +182,7 @@ class Disk():
         Class for 1 disk object. Combinations of this will be used for the single disk model, 
         then 2 disks for the 2 component ones etc
     """
-    def __init__(self, direct_shape, masked_indices, mu, std, low, high, mu_PA, sigma_PA, i_bounds, mu_i, Va_bounds, r_t_bounds, sigma0_bounds, x0_vel, mu_y0_vel, y_high, y_low, y0_std, number = ''):
+    def __init__(self, direct_shape, masked_indices, mu, std, low, high, mu_PA, sigma_PA, i_bounds, mu_i, Va_bounds, r_t_bounds, sigma0_bounds, x0_vel, mu_y0_vel, y_high, y_low, y0_std, r_eff, r_eff_obs, number = ''):
         print('Disk object created')
 
         #initialize all attributes with function parameters
@@ -212,6 +216,9 @@ class Disk():
 
         self.y0_std = y0_std
 
+        self.r_eff = r_eff
+        self.r_eff_obs = r_eff_obs
+        self.r_t_bounds = [0.0, r_eff_obs] #set the r_t bounds to the observed r_eff, we don't expect r_t/r_e to be > 1!
         self.number = number
 
 
@@ -368,11 +375,13 @@ class Disk():
         #find the best sample for each variable in the list of variables
         # best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, best_indices)
         #taking the median:
-        best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, MLS = best_indices)
+        best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, MLS = None)
 
 
         self.Va_mean, self.r_t_mean, self.sigma0_mean_model = best_sample
-        # self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean, self.y0_vel_mean, self.v0_mean = best_sample
+        # self.sigma0_mean_model*=0.5
+        # self.Va_mean*=0.05
+                # self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean, self.y0_vel_mean, self.v0_mean = best_sample
 
         #taking best sample
         # self.PA_mean =  jnp.array(inference_data.posterior['PA'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
@@ -386,7 +395,8 @@ class Disk():
         self.y0_vel_mean = jnp.array(inference_data.posterior['y0_vel'+ self.number].median(dim=["chain", "draw"]))
         self.v0_mean = jnp.array(inference_data.posterior['v0'+ self.number].median(dim=["chain", "draw"]))
 
-        # self.Va_mean = jnp.array(inference_data.posterior['Va'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
+        # self.PA_mean = 180 - self.PA_mean
+                # self.Va_mean = jnp.array(inference_data.posterior['Va'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
         # self.r_t_mean = jnp.array(inference_data.posterior['r_t'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
         # self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
 
@@ -436,8 +446,10 @@ class Disk():
         mask = jnp.zeros_like(fluxes_mean)
         mask = mask.at[jnp.where(fluxes_mean>threshold)].set(1)
         model_velocities_low = jax.image.resize(model_velocities, (int(model_velocities.shape[0]/factor), int(model_velocities.shape[1]/factor)), method='nearest')
-        model_v_rot = 0.5*(jnp.nanmax(jnp.where(mask == 1, model_velocities_low, jnp.nan)) - jnp.nanmin(jnp.where(mask == 1, model_velocities_low, jnp.nan)))/jnp.sin( jnp.radians(i_mean)) 
-
+        model_v_rot = 0.5*(jnp.nanmax(jnp.where(mask == 1, model_velocities_low, jnp.nan)) - jnp.nanmin(jnp.where(mask == 1, model_velocities_low, jnp.nan)))/ jnp.sin( jnp.radians(i_mean)) 
+        plt.imshow(jnp.where(mask ==1, fluxes_mean, np.nan), origin = 'lower')
+        plt.title('Mask for v_rot comp')
+        plt.show()
         return model_v_rot
 
     def plot(self):
@@ -735,14 +747,14 @@ class DiskModel(KinModels):
         # self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0_max', 'sigma0_scale', 'sigma0_const']
         # self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_{max}$', r'$\sigma_{scale}$', r'$\sigma_{const}$']
 
-    def set_bounds(self, flux_prior, flux_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff):
+    def set_bounds(self, flux_prior, flux_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_eff_grism, delta_wave, wavelength):
         """
 
         Compute all of the necessary bounds for the disk model sampling distributions
 
         """
         # first set all of the main bounds taken from the config file
-        self.set_main_bounds(flux_prior,flux_error, broad_band,flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff,
+        self.set_main_bounds(flux_prior,flux_error, broad_band,flux_bounds, flux_type, flux_threshold, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism,
                              delta_V_bounds=None, clump=None, clump_v_prior=None, clump_sigma_prior=None, clump_flux_prior=None)
 
         # now compute the specific bounds for the disk model
@@ -788,7 +800,7 @@ class DiskModel(KinModels):
         #     self.mu_PA = 0.0
         
         #the error has a floor and then increases for how much the gal is circular (how close the axis ratio is to 1 )
-        self.sigma_PA = 20 + 100/(jnp.abs(ratio[0])) 
+        self.sigma_PA = 50/(jnp.abs(ratio[0])) 
         print(self.sigma_PA)
         # old error self.PA_sigma*90 
         print('PA morph: ', self.PA_morph, 'PA grism: ', self.PA_grism, 'final PA: ', self.mu_PA)
@@ -804,7 +816,7 @@ class DiskModel(KinModels):
         # self.mu, self.std, self.high, self.low = self.rescale_to_mask([self.mu, self.std, self.high, self.low], self.mask)
         self.mu, self.std, self.low= self.rescale_to_mask([self.mu, self.std, self.low], self.mask)
         #manually make the flux prior error bigger to account for uncertainties about the EL map itself
-        self.std = self.std*2
+        self.std = self.std
         #set the velocity center to the brightest center of the gal within the mask
         fluxes = jnp.zeros(self.mask.shape)
         fluxes = fluxes.at[self.masked_indices].set(self.mu)
@@ -818,12 +830,17 @@ class DiskModel(KinModels):
 
         self.y0_std = 0.5*self.r_eff_obs
     
-        print('y_high: ', self.y_high, 'y_low: ', self.y_low) 
+        print('r_eff: ', self.r_eff_obs) 
 
+        #set the V_a bounds to 2*the observed vmax of the galaxy
+        vel_pix_scale = (delta_wave/wavelength)*(c/1000) #put c in km/s
+        V_grad = self.r_eff_grism*vel_pix_scale
+        self.Va_bounds = [0, 2*V_grad]
+        print('Va grad: ', V_grad)
         #initialize the disk object
         self.disk = Disk(self.flux_prior.shape, self.masked_indices, self.mu, self.std,self.low, self.high, 
                     self.mu_PA, self.sigma_PA, self.i_bounds, self.mu_i, self.Va_bounds, self.r_t_bounds,
-                    self.sigma0_bounds, self.x0_vel, self.mu_y0_vel, self.y_high, self.y_low, self.y0_std)
+                    self.sigma0_bounds, self.x0_vel, self.mu_y0_vel, self.y_high, self.y_low, self.y0_std, self.r_eff, self.r_eff_obs)
         
         self.disk.plot()
 
@@ -1030,8 +1047,7 @@ class DiskModel(KinModels):
 
     def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None):
 
-        plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, self.model_v_rot, self.fluxes_mean, inf_data, wave_space, self.mask, x0 = self.x0, y0 = self.y0, factor = 2 , direct_image_size = self.flux_prior.shape[0], save_to_folder = save_to_folder, name = name)
-
+        plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, self.model_v_rot, self.fluxes_mean, inf_data, wave_space, self.mask, x0 = self.x0, y0 = self.y0, factor = self.y_factor , direct_image_size = self.flux_prior.shape[0], save_to_folder = save_to_folder, name = name)
 
 
 

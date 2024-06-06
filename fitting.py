@@ -125,7 +125,6 @@ parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_ca
 
 if __name__ == "__main__":
 
-	print('247')
 
 	args = parser.parse_args()
 	output = args.output + '/'
@@ -158,7 +157,7 @@ if __name__ == "__main__":
 	inf_data.to_netcdf('fitting_results/' + output + 'output')
 
 	#figure out how to make this work well
-	# post.process_results(output.split('/')[0], master_cat, line)
+	post.process_results(output, master_cat, line)
 
 
 #==============================EXTRA STUFF = NEED TO PUT SOMEWHERE ELSE==================================================
