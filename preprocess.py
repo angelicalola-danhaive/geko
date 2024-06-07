@@ -10,6 +10,7 @@ Eventually should also add here scripts to automatically create folders for sour
 import utils
 import grism
 import models
+import run_pysersic as py
 
 import numpy as np
 import math
@@ -101,18 +102,6 @@ def read_config_file(input, output, master_cat_path, line):
 
 	redshift = master_cat[master_cat['ID'] == ID]['zspec'][0]
 
-	PA_morph = master_cat[master_cat['ID'] == ID]['theta_q50'][0]
-	if isinstance(PA_morph, float) == True:
-		if PA_morph<0:
-			PA_morph += jnp.pi
-		PA_morph *= (180/jnp.pi) #convert to degrees 
-
-	e = master_cat[master_cat['ID'] == ID]['ellip_q50'][0]
-	if isinstance(e, float) == True:
-		inclination = math.acos(1 - e)* (180/jnp.pi) #convert to degrees because acos returns radians
-	else:
-		inclination = None
-
 	y_factor = params['Params']['y_factor']
 
 	if y_factor == 1:
@@ -130,30 +119,7 @@ def read_config_file(input, output, master_cat_path, line):
 	
 	x0 = params['Params']['x0']
 	y0 = params['Params']['y0']
-	
-
-	# x0_vel = np.array(params['Params']['x0_vel'])
-	# y0_vel = np.array(params['Params']['y0_vel'])
-
-	#project from 40x40 to 200x200 => they are both in 0.03'' pixel size
-	x0_vel = master_cat[master_cat['ID'] == ID]['xc_q50'][0] 
-	y0_vel = master_cat[master_cat['ID'] == ID]['yc_q50'][0] 
-	print('vel: ', x0_vel)
-
-	if isinstance(x0_vel, float) == True:
-		x0_vel += 80
-		y0_vel += 80
-		#get the RA, DEC of these coordinates
-		wcs_f444w = wcs.WCS(fits.open(broad_band_mask_path)[1].header)
-		RA_vel,DEC_vel = wcs_f444w.array_index_to_world_values(y0_vel,x0_vel)
-		print('RA, DEC of the velocity map: ', RA_vel, DEC_vel)
-	else:
-		RA_vel = master_cat[master_cat['ID'] == ID]['RA'][0]
-		DEC_vel = master_cat[master_cat['ID'] == ID]['DEC'][0]
-
-
-
-	r_eff = master_cat[master_cat['ID'] == ID]['r_eff_q50'][0] #already in 0.03'' pixel size 
+ 
 
 	model_name = inference['Inference']['model']
 	
@@ -173,7 +139,7 @@ def read_config_file(input, output, master_cat_path, line):
 	target_accept_prob = inference['Inference']['target_accept_prob']
 	
 	#return all of the parameters
-	return data, params, inference, ID, broad_filter, med_filter, grism_filter, med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff, PA_morph, inclination, r_eff, RA_vel, DEC_vel
+	return data, params, inference, ID, broad_filter, med_filter, grism_filter, med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
 def renormalize_image(direct,direct_error, obs_map):
@@ -554,7 +520,7 @@ def contiuum_subtraction(grism_spectrum_data, min, max):
 
 	return grism_spectrum_data
 
-def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff = 0.02, field = 'GOODS-S', fitting = None, RA_vel = -1, DEC_vel = -1):
+def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff = 0.02, field = 'GOODS-S', fitting = None):
 	 
 	#load data from fits files
 	med_band_fits = fits.open(med_band_path)
@@ -586,19 +552,16 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	#if needed, rotate the image WCS and the EL map to match the PA of the grism image
 	rotated_wcs, med_band_flip, EL_map_flip, EL_err_flip, broad_band_mask_flip, theta = rotate_wcs(med_band_fits, EL_map, EL_error, broad_band_mask, field, cutout_size)
 	galaxy_position = SkyCoord(ra=RA * u.deg, dec=DEC * u.deg)
-	velocity_centroid = SkyCoord(ra=RA_vel * u.deg, dec=DEC_vel * u.deg)
 
 	#compute the med band center from the WCS coords:
 	icenter_high, jcenter_high = rotated_wcs.world_to_array_index_values(galaxy_position.ra.deg, galaxy_position.dec.deg)
-	#set the center of the velocity map to the light-weighed center of the prior image
-	icenter_vel, jcenter_vel = np.unravel_index(np.argmax(med_band_flip), med_band_flip.shape)
-	 #rotated_wcs.world_to_array_index_values(velocity_centroid.ra.deg, velocity_centroid.dec.deg)
+
 	if icenter_high < 0 or icenter_high > cutout_size or jcenter_high < 0 or jcenter_high > cutout_size:
 		print('The galaxy is not in the cutout')
 		return None
 	else:
 		print('Center of the galaxy in the high res image: ', icenter_high, jcenter_high)
-		print('Center of the velocity map in the high res image: ', icenter_vel, jcenter_vel)
+
 	# plt.imshow(EL_map_flip, origin='lower')
 	# plt.title('Correctly rotated image')
 	# plt.show()
@@ -637,14 +600,9 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
 	# plt.show()
 
-
-	icenter_vel, jcenter_vel = icenter_vel - icenter_high + 31, jcenter_vel - jcenter_high + 31
-
 	icenter_high, jcenter_high = 31, 31 #this is by defintion of how the cutout was made
 	#recompute the velocity centroid in the new 62x62 cutout arounf icenter_high, jcenter_high
 
-	x0_vel = jcenter_vel
-	y0_vel = icenter_vel
 
 	factor = 2
 	#Rescale the med band cutout to 31x31 cutout by halphing the resolution to LW resolution
@@ -734,15 +692,7 @@ def preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_
 	plt.colorbar()
 	plt.show()
 
-	# if fitting == 'high':
-
-	# elif fitting == 'low':
-	# 	direct = low_res_prior
-	# 	icenter_prior = icenter_low
-	# 	jcenter_prior = jcenter_low
-	
-
-	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta
+	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, wavelength, theta
 
 def preprocess_data_ALT(obj_id, output, line, delta_wave_cutoff = 0.02, field = 'ALT', RA_vel = -1, DEC_vel = -1):
 
@@ -887,7 +837,7 @@ def preprocess_data_ALT(obj_id, output, line, delta_wave_cutoff = 0.02, field = 
 	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta
 
 
-def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, field = 'ALT', RA_vel = -1, DEC_vel = -1):
+def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, field = 'ALT'):
 
 	#no need to rotate this data, and not using EL prior bc no med band imaging
 	 
@@ -900,11 +850,6 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 
 	err_hdu = fits.open("fitting_results/" + output + "%s_wht_cutout.fits"%(str(obj_id).zfill(5)))
 
-
-	RA = RA_vel
-	DEC = DEC_vel
-
-	print('RA, DEC: ', RA, DEC)
 	broad_band = broad_hdu[0].data
 	broad_band_mask = broad_hdu[0].data
 
@@ -940,25 +885,6 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 
 	cutout_size = broad_band.shape[0]
 
-	galaxy_position = SkyCoord(ra=RA * u.deg, dec=DEC * u.deg)
-	if RA_vel == None:
-		velocity_centroid = galaxy_position
-	else:
-		velocity_centroid = SkyCoord(ra=RA_vel * u.deg, dec=DEC_vel * u.deg)
-
-	#compute the med band center from the WCS coords:
-	icenter_high, jcenter_high = rotated_wcs.world_to_array_index_values(galaxy_position.ra.deg, galaxy_position.dec.deg)
-	icenter_vel, jcenter_vel = rotated_wcs.world_to_array_index_values(velocity_centroid.ra.deg, velocity_centroid.dec.deg)
-	if icenter_high < 0 or icenter_high > cutout_size or jcenter_high < 0 or jcenter_high > cutout_size:
-		print('The galaxy is not in the cutout')
-		return None
-	else:
-		print('Center of the galaxy in the high res image: ', icenter_high, jcenter_high)
-		print('Center of the velocity map in the high res image: ', icenter_vel, jcenter_vel)
-	# plt.imshow(EL_map_flip, origin='lower')
-	# plt.title('Correctly rotated image')
-	# plt.show()
-
 	#project the image to the grism scale 0.0629
 	old_wcs = rotated_wcs.deepcopy()
 	rotated_wcs.wcs.pc = rotated_wcs.wcs.pc*(0.0629/0.04)
@@ -978,6 +904,8 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 	broad_band_cutout = jnp.array(broad_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1])
 	# save the broadband image needed to compute mask - using F444W for all ELs to have save mask
 	broad_band_mask = jnp.array(broad_map_flip[cx-dx:cx+dx+1,cx-dx:cx+dx+1])
+
+	icenter_high, jcenter_high = dx, dx #this is by defintion of how the cutout was made
 	# compute mask from med band image
 	# threshold = threshold_otsu(med_band_cutout)/3
 	# plt.imshow(jnp.where(med_band_cutout>threshold,med_band_cutout, 0.0) , origin  = 'lower')
@@ -987,13 +915,6 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 	plt.title('Broad band mask')
 	plt.colorbar()
 	plt.show()
-	icenter_vel, jcenter_vel = icenter_vel - cx + dx , jcenter_vel - cx + dx
-	icenter_high, jcenter_high = icenter_high - cx + dx , jcenter_high - cx + dx#this is by defintion of how the cutout was made
-	#recompute the velocity centroid in the new 62x62 cutout arounf icenter_high, jcenter_high
-
-	x0_vel = jcenter_vel
-	y0_vel = icenter_vel
-
 	xcenter_detector = 1024
 	ycenter_detector = 1024
 
@@ -1021,7 +942,7 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 
 	#cut EL map by using those wavelengths => saved as obs_map which is an input for Fit_Numpyro class
 	# obs_map = grism_spectrum_data[:,index_min-(index_wave -150) +1:index_max-(index_wave -150)+1+1]
-	obs_map = grism_spectrum_data[:,index_min:index_max+1]
+	obs_map = grism_spectrum_data[:,index_min+1:index_max+1+1]
 
 	obs_error = jnp.array(stacked_hdu['ERR'].data[:,index_min+1:index_max+1+1])
 	#mask bad pixels in obs/error map
@@ -1068,7 +989,7 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 	icenter_low = None
 	jcenter_low = None
 
-	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta
+	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, wavelength, theta
 
 def run_full_preprocessing(output,master_cat, line):
     """
@@ -1082,17 +1003,20 @@ def run_full_preprocessing(output,master_cat, line):
     #load of all the parameters from the configuration file
     data, params, inference, ID, broad_filter, med_filter, grism_filter, med_band_path, broad_band_path,broad_band_mask_path, \
 	grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, \
-	wave_factor, x0, y0, x0_vel, y0_vel, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
-	r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff, PA_morph, inclination, r_eff, RA_vel, DEC_vel = read_config_file(input, output + '/', master_cat,line)
+	wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
+	r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
 
     #preprocess the images and the grism spectrum
     if field == 'ALT':
         obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-		wave_space, delta_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta = preprocess_data_ALT_stacked(ID, output, line, delta_wave_cutoff, field, RA_vel, DEC_vel)
+		wave_space, delta_wave, index_min, index_max, wavelength, theta = preprocess_data_ALT_stacked(ID, output, line, delta_wave_cutoff, field)
     else:
         obs_map, obs_error, direct, direct_error,broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-		wave_space, delta_wave, index_min, index_max, x0_vel, y0_vel, wavelength, theta= preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res, RA_vel, DEC_vel)
+		wave_space, delta_wave, index_min, index_max, wavelength, theta= preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
 
+    PSF = 'gdn_mpsf_' + broad_filter + '_small.fits'
+	#run pysersic fit to get morphological parameters
+    inclination, PA_morph, r_eff, x0_vel, y0_vel = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = 'fitting_results/' + output, im = direct, sig = direct_error, psf_path = PSF, type = 'image')
 	#adapt the PA according the rotation of the galaxy to match PA of grism:
     print('PA_morph before:', PA_morph)
     PA_morph += theta
@@ -1118,7 +1042,6 @@ def run_full_preprocessing(output,master_cat, line):
     x0_grism = jcenter
     y0_grism = icenter
     
-    PSF = 'gdn_mpsf_' + broad_filter + '_small.fits'
 
     # direct_low = utils.resample(direct, y_factor, y_factor)
 
@@ -1131,11 +1054,17 @@ def run_full_preprocessing(output,master_cat, line):
     direct_image_size = direct.shape
     S_N_scale = jnp.max(obs_map/obs_error)/jnp.max(direct/direct_error)
 
-    if ID == 33746:
-        _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma =flux_threshold*S_N_scale/2) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
-    else:
-        _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma = 2*flux_threshold*S_N_scale) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
-	  
+    # if ID == 33746:
+    #     _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma =flux_threshold*S_N_scale/2) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
+    # else:
+    #     _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma = 2*flux_threshold*S_N_scale) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
+
+	#make the grism data square for the pysersic fit
+    obs_shape = obs_map.shape[0]
+    square_obs_map = obs_map[:, obs_map.shape[1] // 2 - obs_shape // 2: obs_map.shape[1] // 2 + obs_shape // 2 + 1]
+    square_obs_error = obs_error[:, obs_error.shape[1] // 2 - obs_shape // 2: obs_error.shape[1] // 2 + obs_shape // 2 + 1]
+    inc_grism, PA_grism, r_eff_grism, _, _ = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = 'fitting_results/' + output, im = square_obs_map, sig = square_obs_error, psf_path = PSF, type = 'grism', perform_masking=False)
+	
     print('PA_grism: ', PA_grism) #already in [0,pi] range + in degrees
     print('inc_grism: ', inc_grism)
     print('r_eff_grism: ', r_eff_grism)
