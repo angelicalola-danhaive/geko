@@ -218,7 +218,7 @@ class Disk():
 
         self.r_eff = r_eff
         self.r_eff_obs = r_eff_obs
-        self.r_t_bounds = [0.0, r_eff_obs] #set the r_t bounds to the observed r_eff, we don't expect r_t/r_e to be > 1!
+        self.r_t_bounds = r_t_bounds  #[0.0, r_eff_obs] #set the r_t bounds to the observed r_eff, we don't expect r_t/r_e to be > 1!
         self.number = number
 
 
@@ -306,8 +306,19 @@ class Disk():
         # f.write('Va sampling time: '+ str(end-start)+ '\n')
 
         # start = time.time()
-        r_t = numpyro.sample('r_t' + self.number, dist.Uniform(
-        ))*(self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
+        # r_t = numpyro.sample('r_t' + self.number, dist.Uniform(
+        # ))*(self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
+
+        r_t_sigma = jnp.log(self.r_t_bounds[1]/2)
+        r_t_high = (jnp.log(self.r_t_bounds[2]) - jnp.log(self.r_t_bounds[1]))/r_t_sigma
+        reparam_config = {"log_r_t": TransformReparam()}
+        with numpyro.handlers.reparam(config=reparam_config):
+            log_r_t = numpyro.sample("log_r_t",dist.TransformedDistribution(
+                    dist.TruncatedNormal(0.0, 1.0, high=r_t_high),
+                    AffineTransform(jnp.log(self.r_t_bounds[1]), r_t_sigma),
+                ),
+            )
+        r_t = jnp.exp(log_r_t)
         # end = time.time()
         # f.write('r_t sampling time: '+ str(end-start)+ '\n')
 
@@ -783,15 +794,21 @@ class DiskModel(KinModels):
         # self.mu_y0_vel = center[0][1]
    
         #using the grism position angle, determine the right PA for the rotation orientation
-        if self.PA_grism < self.PA_morph:
-            print('PA grism less than PA morph')
-            self.mu_PA = self.PA_morph + 180
-        else:  
-            print('PA grism greater than PA morph')
-            self.mu_PA = self.PA_morph
-            #correct r_eff for the observed height
+        # if self.PA_grism < self.PA_morph:
+        #     print('PA grism less than PA morph')
+        #     self.mu_PA = self.PA_morph + 180
+        # else:  
+        #     print('PA grism greater than PA morph')
+        #     self.mu_PA = self.PA_morph
 
-        self.r_eff_obs = self.r_eff * jnp.sin(jnp.radians(self.PA_morph))
+            
+        self.mu_PA = self.PA_morph
+
+        #correct r_eff for the observed height
+        q0=0.2
+        axis_ratio = np.sqrt(np.cos(np.radians(self.inclination))**2*(1-q0**2) + q0**2)
+        minor_r_eff = axis_ratio*r_eff
+        self.r_eff_y = jnp.maximum(self.r_eff * jnp.abs(jnp.sin(jnp.radians(self.PA_morph))), minor_r_eff*jnp.abs(jnp.sin(jnp.radians(90-self.PA_morph))))[0]
         
         #convert to the PA used in kinematics
         self.mu_PA = 180 - self.mu_PA
@@ -816,31 +833,37 @@ class DiskModel(KinModels):
         # self.mu, self.std, self.high, self.low = self.rescale_to_mask([self.mu, self.std, self.high, self.low], self.mask)
         self.mu, self.std, self.low= self.rescale_to_mask([self.mu, self.std, self.low], self.mask)
         #manually make the flux prior error bigger to account for uncertainties about the EL map itself
-        self.std = self.std
+        # self.std = self.std
         #set the velocity center to the brightest center of the gal within the mask
-        fluxes = jnp.zeros(self.mask.shape)
-        fluxes = fluxes.at[self.masked_indices].set(self.mu)
-        self.mu_y0_vel, self.x0_vel = np.unravel_index(np.argmax( fluxes),  fluxes.shape)
+        # fluxes = jnp.zeros(self.mask.shape)
+        # fluxes = fluxes.at[self.masked_indices].set(self.mu)
+        # self.mu_y0_vel, self.x0_vel = np.unravel_index(np.argmax( fluxes),  fluxes.shape)
 
 
         #restricting y0_vel to inside 1/2 light radius
         #centering on y0_vel bc that's taken from pysersic fit centroid
-        self.y_high = self.mu_y0_vel + self.r_eff_obs
-        self.y_low = self.mu_y0_vel - self.r_eff_obs
+        self.y_high = self.mu_y0_vel + self.r_eff_y
+        self.y_low = self.mu_y0_vel - self.r_eff_y
 
-        self.y0_std = 0.5*self.r_eff_obs
+        self.y0_std = 0.5*self.r_eff_y
     
-        print('r_eff: ', self.r_eff_obs) 
+        print('r_eff_y: ', self.r_eff_y) 
 
         #set the V_a bounds to 2*the observed vmax of the galaxy
         vel_pix_scale = (delta_wave/wavelength)*(c/1000) #put c in km/s
         V_grad = self.r_eff_grism*vel_pix_scale
         self.Va_bounds = [0, 2*V_grad]
         print('Va grad: ', V_grad)
+        #set the sigma0 bounds to 2*the observed vmax of the galaxy
+        self.sigma0_bounds = [0, 2*V_grad]
+        #set the r_t bounds in the form [min, mu, max]:
+        r_t_mu = 0.4*self.r_eff/1.676
+        r_t_max = 2*r_eff
+        self.r_t_bounds = [0, r_t_mu, r_t_max]
         #initialize the disk object
         self.disk = Disk(self.flux_prior.shape, self.masked_indices, self.mu, self.std,self.low, self.high, 
                     self.mu_PA, self.sigma_PA, self.i_bounds, self.mu_i, self.Va_bounds, self.r_t_bounds,
-                    self.sigma0_bounds, self.x0_vel, self.mu_y0_vel, self.y_high, self.y_low, self.y0_std, self.r_eff, self.r_eff_obs)
+                    self.sigma0_bounds, self.x0_vel, self.mu_y0_vel, self.y_high, self.y_low, self.y0_std, self.r_eff, self.r_eff_y)
         
         self.disk.plot()
 
