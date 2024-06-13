@@ -41,6 +41,7 @@ import jax.numpy as jnp
 
 from reproject import reproject_adaptive
 from photutils.centroids import centroid_1dg
+from numpy.fft import rfftn, irfftn, fftshift
 
 #import time
 import time 
@@ -163,20 +164,20 @@ class Grism:
 		# self.detector_x_space = jnp.linspace(self.detector_xmin, self.detector_xmax, self.sh[1]*factor)
 		self.detector_x_space = jnp.linspace(self.detector_xmin, self.detector_xmax, self.sh_high[1])
 
-		# print(self.detector_x_space.shape)
+		# print('det x space: ', self.detector_x_space)
 
 		# self.detector_position = self.detector_x_space * jnp.ones_like(np.zeros( (self.sh[0]*factor,1) ))
 		# self.detector_position = self.detector_x_space * jnp.ones_like(jnp.zeros( (self.sh[0]*factor,1) ))
 		self.detector_position = self.detector_x_space * jnp.ones_like(jnp.zeros( (self.sh_high[0],1) ))
 
 
-		# print(self.detector_position.shape)
-		#dispersed grism attributes
+		print(self.detector_position)
 
 		#these are already in the high model
 		self.wave_scale = wave_scale
+		
 		self.wave_space = wave_space 
-
+		# print('wave space: ', wave_space)
 		#make a higer res wave_space => the computed disp space will also be higher res
 		# wave_min = wave_space[0]
 		# wave_max = wave_space[len(self.wave_space)-1]
@@ -294,6 +295,9 @@ class Grism:
 		ypix = self.ycenter_detector
 		wave = self.wave_space
 
+		# wave_low = jnp.arrange(wave_high[0], wave_high[-1], self.wave_scale*self.wave_factor)
+		# wave= wave_low
+
 		xpix -= 1024
 		ypix -= 1024
 		wave -= 3.95
@@ -302,11 +306,13 @@ class Grism:
 		wave2 = wave**2
 		wave3 = wave**3
 
-		self.disp_space =  ((self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)) +
+		self.disp_space=  ((self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)) +
 	  					(self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)) * wave +
 						(self.c01 + (self.c02 * xpix + self.c03 * ypix)) * wave2 + (self.d01 ) * wave3)		
+		
+		# self.disp_space = jnp.linspace(self.disp_space_low[0], self.disp_space_low[-1], self.disp_space_low.shape[0]*self.wave_factor)
 
-		# print('disp_space: ', self.disp_space)
+		# print('disp_space min max: ', self.disp_space[0], self.disp_space[-1])
 
 	def set_wavelength(self, wavelength):
 		self.wavelength = wavelength
@@ -332,7 +338,7 @@ class Grism:
 	def load_poly_coefficients(self):
 
 		xpix = self.detector_position
-		ypix = self.ycenter_detector
+		ypix = self.detector_position
 		xpix -= 1024
 		ypix -= 1024
 		xpix2 = xpix**2
@@ -412,15 +418,14 @@ class Grism:
 		# print(0.001*(c/1000)/4.2)
 	
 	def compute_PSF(self, PSF):
-		#load the PSF 
-		PSF = jnp.array(fits.open(PSF)[0].data)
-		print('PSF sum = ', jnp.sum(PSF))
-		#sets the grism object's oversampled PSF and the velocity space needed for the cube
-		oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method='bilinear')
-		self.PSF = oversampled_PSF[jnp.newaxis,:,:]
 
-		velocity_space = jnp.linspace(-1000, 1000, 2001)
-		self.velocity_space = jnp.broadcast_to(velocity_space[:, jnp.newaxis, jnp.newaxis], (velocity_space.size, self.sh_high[0], self.sh_high[0]))
+		#sets the grism object's oversampled PSF and the velocity space needed for the cube
+		self.oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method='bilinear')
+		print('oversampled PSF sum = ', jnp.sum(self.oversampled_PSF ))
+		self.PSF = self.oversampled_PSF [:,:, jnp.newaxis]
+
+		# velocity_space = jnp.linspace(-1000, 1000, 2001)
+		# self.velocity_space = jnp.broadcast_to(velocity_space[:, jnp.newaxis, jnp.newaxis], (velocity_space.size, self.sh_high[0], self.sh_high[0]))
 
 	def compute_disp_index(self, values, disp_space):
 
@@ -436,22 +441,176 @@ class Grism:
 
 		return jnp.argmin(wave_space-values)
 
+	def padding(self,cube, axes=None):
+		"""
+		Computes padding needed for a cube to make sure it has
+		a power of 2 shape along dimensions of passed axes (default [0,1])
+		Returns padded cube and cube slices,
+		which are the indices of the actual data in the padded cube.
+		"""
+
+		if axes is None:
+			axes = [0, 1]
+
+		# Compute padding size for each axis
+		old_shape = np.shape(cube)
+		new_shape = np.array(old_shape)
+		for axis in axes:
+			zdim = cube.shape[axis]
+			s = np.binary_repr(zdim - 1)
+			s = s[:-1] + '0'
+			new_shape[axis] = 2 ** len(s)
+
+		cube_padded = np.zeros(new_shape)
+		#cube_slices = np.empty(len(old_shape), slice).tolist()
+		cube_slices = [None for i in range(len(old_shape))]
+
+		for i, v in enumerate(old_shape):
+			cube_slices[i] = slice(0, old_shape[i])
+
+		for axis in axes:
+			diff = new_shape[axis] - old_shape[axis]
+			if (diff & 1):
+				half = diff // 2 + 1
+			else:
+				half = diff // 2
+			cube_slices[axis] = slice(half, old_shape[axis] + half)
+
+		cube_slices = tuple(cube_slices)
+		# Copy cube contents into padded cube
+		cube_padded[cube_slices] = cube.copy()
+
+		return cube_padded, cube_slices
+
+
+	def convolve_3d_xy(self,cube, psf, compute_fourier=True):
+		"""
+			Convolve 3D cube along spatial directions only,
+			using provided Point Spread Function.
+		"""
+
+		# Compute needed padding
+		cubep, boxcube = self.padding(cube, axes=[1, 2])
+
+		size = np.array(np.shape(cubep)[slice(1, 3)])
+
+		if compute_fourier:
+			psfp, boxpsf = self.padding(psf, axes=[1, 2])
+			fftpsf = np.fft.rfftn(psfp, s=size, axes=[1, 2])
+
+		else:
+			fftpsf = psf
+
+		fftimg = np.fft.rfftn(cubep, s=size, axes=[1, 2])
+
+		#Convolution
+		fft = np.fft.fftshift(np.fft.irfftn(fftimg * fftpsf, s=size, axes=[1, 2]), axes=[1, 2]).real
+
+		# Remove padding
+		cube_conv = fft[boxcube]
+
+		return cube_conv, fftpsf
+
+
+	# def disperse(self, F, V, D):
+	# 	'''
+	# 		Dispersion function going from flux space F to grism space G
+	# 	'''
+	# 	# self.f = open("timing.txt", "a")
+	# 	# start = time.time()
+	# 	J_min = self.index_min
+	# 	J_max = self.index_max
+	# 	DX = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
+	# 	print(self.disp_space[J_min:J_max+1])
+	# 	print(np.diff(DX))
+	# 	# print('DX shape: ', DX.shape)
+	# 	# end = time.time()
+	# 	# self.f.write("DX time: " + str(end-start) + "\n")
+
+
+
+
+	# 	#compute the dispersion due to the LSF
+	# 	D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
+
+	# 	#add the LSF to the dispersion: 
+	# 	CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
+
+	# 	# start = time.time()
+	# 	DX_disp_final = self.grism_dispersion(self.wavelength*(1  + (V+CORR_D)/(c/1000) )) - DX
+	# 	# end = time.time()
+	# 	# self.f.write("DX_disp_final time: " + str(end-start) + "\n")
+	# 	NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+
+	# 	disp_space_edges_prov= self.disp_space[1:] - jnp.diff(self.disp_space)/2
+	# 	print('disp space diff: ', jnp.max(jnp.diff(self.disp_space)), jnp.min(jnp.diff(self.disp_space)))
+	# 	disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(self.disp_space)[0])
+	# 	disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(self.disp_space)[-1])
+
+	# 	NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, J_max-J_min+1*self.wave_factor+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+	# 	print('NEW_K_cdf shape: ', NEW_K_cdf.shape)
+	# 	print('DX shape: ', DX.shape)
+	# 	# mu = DX[:,NEW_K_cdf]
+	# 	mu = DX[:,:,np.newaxis]
+	# 	print('mu shape: ', mu.shape)
+	# 	# sigma = DX_disp_final[:,NEW_K_cdf]
+	# 	sigma = DX_disp_final[:,:,np.newaxis]
+	# 	# print('DX: ', DX.shape, DX)
+	# 	# print('mu: ', mu.shape, mu)
+	# 	# start = time.time()
+	# 	cdf = 0.5* (1 + special.erf( (disp_space_edges[np.newaxis,np.newaxis, J_min:J_max+1*self.wave_factor+1] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	# print('cdf: ', cdf[15,15])
+	# 	# print('cdf shape: ', cdf.shape)
+
+	# 	# cdf = norm.cdf( (disp_space_edges[NEW_J_cdf] - mu) / (sigma*math.sqrt(2.)) )
+	# 	# end = time.time()
+	# 	# self.f.write("cdf time: " + str(end-start) + "\n")
+
+	# 	# start = time.time()
+	# 	gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+
+	# 	# gaussian_matrix = norm.pdf((self.disp_space[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)))
+	# 	# end = time.time()
+	# 	# self.f.write("gaussian_matrix time: " + str(end-start) + "\n")
+
+	# 	# start = time.time()
+	# 	plt.imshow(gaussian_matrix[5])
+	# 	plt.show()
+	# 	cube = F[:,:,None]*gaussian_matrix
+	# 	psf_cube, fft_psf  = self.convolve_3d_xy(cube,self.PSF, compute_fourier=True)
+	# 	# end = time.time()
+	# 	# self.f.write("convolve time: " + str(end-start) + "\n")
+
+	# 	# start = time.time()
+	# 	# print(psf_gaussian_matrix[15,15].sum())
+	# 	plt.imshow(psf_cube[15])
+	# 	plt.show()
+	# 	# psf_F = convolve(F, self.oversampled_PSF, mode='same')
+	# 	# pdf_gaussian_matrix_low = np.zeros((V.shape[0],V.shape[0], 41))
+	# 	# for i in range(V.shape[0]):
+	# 	# 	pdf_gaussian_matrix_low[i] = utils.resample(psf_gaussian_matrix[i], 1, self.wave_factor)
+	# 	# pdf_gaussian_matrix_low = utils.resample(psf_gaussian_matrix, 1, self.wave_factor)
+	# 	# grism_full = jnp.matmul( F[:,None, :] , gaussian_matrix)[:,0,:]  
+	# 	grism_full = jnp.sum(cube, axis = 1)
+	# 	# end = time.time()
+		
+	# 	# self.f.write("matmul time: " + str(end-start) + "\n")
+
+	# 	# self.f.close()
+
+	# 	return grism_full
+
 
 	def disperse(self, F, V, D):
 		'''
 			Dispersion function going from flux space F to grism space G
 		'''
-		# self.f = open("timing.txt", "a")
-		# start = time.time()
-
-		DX = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
-		# print('DX shape: ', DX.shape)
-		# end = time.time()
-		# self.f.write("DX time: " + str(end-start) + "\n")
 
 		J_min = self.index_min
 		J_max = self.index_max
 
+		DX = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
+		x_grism = DX + self.detector_position
 
 		#compute the dispersion due to the LSF
 		D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
@@ -460,37 +619,30 @@ class Grism:
 		CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
 
 		# start = time.time()
-		DX_disp_final = self.grism_dispersion(self.wavelength*(1  + (V+CORR_D)/(c/1000) )) -DX
-		# end = time.time()
-		# self.f.write("DX_disp_final time: " + str(end-start) + "\n")
-		NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-
+		DX_disp_final = self.grism_dispersion(self.wavelength*(1  + (V+CORR_D)/(c/1000) )) - DX
+		x_grism_sigma = DX_disp_final
+		
+		self.disp_space = self.disp_space + 1024
 		disp_space_edges_prov= self.disp_space[1:] - jnp.diff(self.disp_space)/2
+		# print('disp space diff: ', jnp.max(jnp.diff(self.disp_space)), jnp.min(jnp.diff(self.disp_space)))
 		disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(self.disp_space)[0])
 		disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(self.disp_space)[-1])
 
-		NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, J_max-J_min+1*self.wave_factor+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-		mu = DX[:,NEW_K_cdf]
-		sigma = DX_disp_final[:,NEW_K_cdf]
-		# start = time.time()
-		cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
-		# cdf = norm.cdf( (disp_space_edges[NEW_J_cdf] - mu) / (sigma*math.sqrt(2.)) )
-		# end = time.time()
-		# self.f.write("cdf time: " + str(end-start) + "\n")
+		mu = x_grism[:,:,np.newaxis]
+		# print('mu shape: ', mu.shape)
 
-		# start = time.time()
+		sigma = x_grism_sigma[:,:,np.newaxis]
+
+		cdf = 0.5* (1 + special.erf( (disp_space_edges[np.newaxis,np.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
+
 		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		# gaussian_matrix = norm.pdf((self.disp_space[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)))
-		# end = time.time()
-		# self.f.write("gaussian_matrix time: " + str(end-start) + "\n")
+		# print('gaussian_matrix shape: ', gaussian_matrix.shape)
 
-		# start = time.time()
-		psf_gaussian_matrix = convolve(gaussian_matrix, self.PSF, mode='same')
-		# end = time.time()
-		# self.f.write("convolve time: " + str(end-start) + "\n")
+		cube = F[:,:,None]*gaussian_matrix[:,:, J_min:J_max+1*self.wave_factor]
 
-		# start = time.time()
-		grism_full = jnp.matmul( F[:,None, :] , psf_gaussian_matrix)[:,0,:]  
+		psf_cube = convolve(cube, self.PSF, mode='same')
+
+		grism_full = jnp.sum(psf_cube, axis = 1)
 		# end = time.time()
 		
 		# self.f.write("matmul time: " + str(end-start) + "\n")
