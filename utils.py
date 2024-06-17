@@ -55,7 +55,7 @@ def oversample(image_low_res, factor_y, factor_x, method='nearest'):
     image_high_res = image.resize(image_low_res, (int(
         image_low_res.shape[0]*factor_y), int(image_low_res.shape[1]*factor_x)), method=method)
     
-    # image_high_res /= factor_y*factor_x --> I don't think I need to conserve the flux because the resolution is twice as high...
+    image_high_res /= factor_y*factor_x 
 
     return image_high_res
 
