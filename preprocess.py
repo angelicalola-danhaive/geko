@@ -36,9 +36,18 @@ from astropy.table import Table
 
 from reproject import reproject_adaptive
 from scipy.constants import c
+from numpyro.infer.util import log_likelihood
+
 
 from photutils.segmentation import detect_sources
 from photutils.background import Background2D, MedianBackground
+from photutils.isophote import Ellipse, EllipseGeometry
+from photutils.isophote import build_ellipse_model
+from photutils.aperture import EllipticalAperture
+
+from skimage.morphology import dilation, disk, ellipse, binary_closing, closing
+
+from photutils.segmentation import detect_sources, SourceCatalog, SegmentationImage, deblend_sources
 
 c_m = c*1e-9
 
@@ -991,42 +1000,141 @@ def preprocess_data_ALT_stacked(obj_id, output, line, delta_wave_cutoff = 0.02, 
 
 	return jnp.array(obs_map), jnp.array(obs_error), jnp.array(direct), jnp.array(direct_error), jnp.array(broad_band_mask), xcenter_detector, ycenter_detector, icenter_prior, jcenter_prior,icenter_low, jcenter_low, wave_space, d_wave, index_min, index_max, wavelength, theta
 
-def run_full_preprocessing(output,master_cat, line):
+
+def define_mock_params():
+
+    broad_filter = 'F356W'
+    grism_filter = 'F356W'
+    wavelength = 3.5
+    redshift = 3.0
+    line = 'H_alpha'
+    y_factor = 1
+    flux_threshold = 3
+    factor = 2
+    wave_factor = 10
+    x0 = y0 = 31//2
+    model_name = 'Disk'
+    flux_bounds = None
+    flux_type = 'auto'
+    PA_sigma = None
+    i_bounds = [0,90]
+    Va_bounds = None
+    r_t_bounds = None
+    sigma0_bounds = None #can put similar bounds on this using the Va measured from 1D spectrum
+    num_samples = 1000
+    num_warmup = 1000
+    step_size = 0.001
+    target_accept_prob = 0.8
+
+	
+    return broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
+        wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
+        r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob
+
+def preprocess_mock_data(mock_params):
+
+    obs_map = mock_params['grism_spectrum_noise']
+    obs_error = mock_params['grism_error']
+    direct = mock_params['convolved_noise_image']
+    direct_error = mock_params['image_error']
+    broad_band = mock_params['convolved_noise_image']
+    xcenter_detector = 1024
+    ycenter_detector = 1024
+    icenter = 31//2
+    jcenter = 31//2
+    icenter_low = None
+    jcenter_low = None
+    wave_space = mock_params['wave_space']
+    delta_wave = wave_space[1] - wave_space[0]
+    index_min = mock_params['index_min']
+    index_max = mock_params['index_max']
+    wavelength = mock_params['wavelength']
+    theta = 0
+    grism_object = mock_params['grism_object']
+
+    plt.imshow(obs_map, origin='lower')
+    plt.title('obs_map')
+    plt.colorbar()
+    plt.show()
+
+    plt.imshow(obs_map/obs_error, origin='lower')
+    plt.title('obs map S/N')
+    plt.colorbar()
+    plt.show()
+
+    plt.imshow(direct, origin='lower')
+    plt.title('Direct')
+    plt.colorbar()
+    plt.show()
+
+    plt.imshow(direct/direct_error, origin='lower')
+    plt.title('Direct S/N')
+    plt.colorbar()
+    plt.show()
+
+    plt.close()
+
+	
+    return  obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+	    	    wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object
+
+def run_full_preprocessing(output,master_cat, line, mock_params = None, priors = None):
     """
         Main function that automatically post-processes the inference data and saves all of the relevant plots
     """
     
-    with open('fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
-        input = yaml.load(file, Loader=yaml.FullLoader)
+    if mock_params == None:
+        with open('fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
+            input = yaml.load(file, Loader=yaml.FullLoader)
         print('Read inputs successfully')
-
     #load of all the parameters from the configuration file
-    data, params, inference, ID, broad_filter, med_filter, grism_filter, med_band_path, broad_band_path,broad_band_mask_path, \
-	grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, \
-	wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
-	r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
+        data, params, inference, ID, broad_filter, med_filter, grism_filter, med_band_path, broad_band_path,broad_band_mask_path, \
+		grism_spectrum_path, field, wavelength, redshift, line, y_factor, res, flux_threshold, factor, \
+		wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
+		r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
 
-    #preprocess the images and the grism spectrum
-    if field == 'ALT':
-        obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-		wave_space, delta_wave, index_min, index_max, wavelength, theta = preprocess_data_ALT_stacked(ID, output, line, delta_wave_cutoff, field)
+        #preprocess the images and the grism spectrum
+        if field == 'ALT':
+            obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+            wave_space, delta_wave, index_min, index_max, wavelength, theta = preprocess_data_ALT_stacked(ID, output, line, delta_wave_cutoff, field)
+        else:
+            obs_map, obs_error, direct, direct_error,broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+            wave_space, delta_wave, index_min, index_max, wavelength, theta= preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
     else:
-        obs_map, obs_error, direct, direct_error,broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-		wave_space, delta_wave, index_min, index_max, wavelength, theta= preprocess_data(med_band_path, broad_band_path, broad_band_mask_path, grism_spectrum_path, redshift, line, wavelength, delta_wave_cutoff, field, res)
-
-    PSF = 'gdn_mpsf_' + broad_filter + '_small.fits'
+        broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
+        wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
+        r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob = define_mock_params()
+        obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+	    	    wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object = preprocess_mock_data(mock_params)
+    #load the right resolution too!!!
+    PSF = utils.load_psf(filter = grism_filter, y_factor = y_factor)
 	#run pysersic fit to get morphological parameters
-    inclination, PA_morph, r_eff, x0_vel, y0_vel = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = 'fitting_results/' + output, im = direct, sig = direct_error, psf_path = PSF, type = 'image')
-	#adapt the PA according the rotation of the galaxy to match PA of grism:
-    print('PA_morph before:', PA_morph)
-    PA_morph += theta
-    PA_morph = PA_morph % 180 #put it back in the 0-180 range
-    print('PA_morph after:', PA_morph)
+    if mock_params == None:
+        path_output = 'fitting_results/' + output
+    else: 
+        test = mock_params['test']
+        j = mock_params['j']
+        path_output = 'testing/' + str(test) + '/'
+        ID = j
+	    
+    # inclination, py_PA, phot_PA, r_eff, x0_vel, y0_vel = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = path_output, im = direct, sig = direct_error, psf = PSF, type = 'image', sigma_rms = 3.0)
+    # PA_morph = py_PA
+    PA_morph, inclination, r_eff, x0_vel,y0_vel = utils.fit_grism_parameters(direct, r_eff = None, inclination = None, obs_error= direct_error, sigma_rms = 10) 
+    
+    #take the priors from the truth 
+    PA_morph = priors['PA']
+    inclination = priors['i']
+    r_eff = (1.676/0.4)*priors['r_t']
+
+	# #adapt the PA according the rotation of the galaxy to match PA of grism:
+    # print('PA_morph before:', PA_morph)
+    # PA_morph += theta
+    # PA_morph = PA_morph % 180 #put it back in the 0-180 range
+    # print('PA_morph after:', PA_morph)
     #renormalizing flux prior to EL map
-    direct, direct_error,normalization_factor,mask_grism = renormalize_image(direct, direct_error,obs_map)
-    print('renormalizing factor:', normalization_factor)
-    factor = params['Params']['factor']
-    wave_factor = params['Params']['wave_factor']
+    
+    # direct, direct_error,normalization_factor,mask_grism = renormalize_image(direct, direct_error,obs_map)
+    # print('renormalizing factor:', normalization_factor)
     # rescale the wave_space array and the direct image according to factor and wave_factor
     len_wave = int(
         (wave_space[len(wave_space)-1]-wave_space[0])/(delta_wave/wave_factor))
@@ -1041,18 +1149,21 @@ def run_full_preprocessing(output,master_cat, line):
 
     x0_grism = jcenter
     y0_grism = icenter
+
+    # print(index_min, index_max)
+    # print('wave_space:', wave_space)
     
 
     # direct_low = utils.resample(direct, y_factor, y_factor)
 
-    grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
-                            xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
-                            wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
-                            grism_filter=grism_filter, grism_module='A', grism_pupil='R', PSF = PSF)
+    # grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
+    #                         xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
+    #                         wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
+    #                         grism_filter=grism_filter, grism_module='A', grism_pupil='R', PSF = PSF)
     
-    print('d wave' , delta_wave)
-    direct_image_size = direct.shape
-    S_N_scale = jnp.max(obs_map/obs_error)/jnp.max(direct/direct_error)
+    # print('d wave' , delta_wave)
+    # direct_image_size = direct.shape
+    # S_N_scale = jnp.max(obs_map/obs_error)/jnp.max(direct/direct_error)
 
     # if ID == 33746:
     #     _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma =flux_threshold*S_N_scale/2) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
@@ -1060,23 +1171,99 @@ def run_full_preprocessing(output,master_cat, line):
     #     _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma = 2*flux_threshold*S_N_scale) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
 
 	#make the grism data square for the pysersic fit
-    obs_shape = obs_map.shape[0]
-    square_obs_map = obs_map[:, obs_map.shape[1] // 2 - obs_shape // 2: obs_map.shape[1] // 2 + obs_shape // 2 + 1]
-    square_obs_error = obs_error[:, obs_error.shape[1] // 2 - obs_shape // 2: obs_error.shape[1] // 2 + obs_shape // 2 + 1]
-    inc_grism, PA_grism, r_eff_grism, _, _ = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = 'fitting_results/' + output, im = square_obs_map, sig = square_obs_error, psf_path = PSF, type = 'grism', perform_masking=False)
+    # obs_shape = obs_map.shape[0]
+    # square_obs_map = obs_map[:, obs_map.shape[1] // 2 - obs_shape // 2: obs_map.shape[1] // 2 + obs_shape // 2 + 1]
+    # square_obs_error = obs_error[:, obs_error.shape[1] // 2 - obs_shape // 2: obs_error.shape[1] // 2 + obs_shape // 2 + 1]
+    
+    #fit an ellipse to the masked object
+    PA_grism, inc_grism, r_full_grism, _,_ = utils.fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 1) #low rms bc grism data is noisy
+	
+    # inc_grism, PA_grism, r_eff_grism, _, _ = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = 'fitting_results/' + output, im = square_obs_map, sig = square_obs_error, psf_path = PSF, type = 'grism', perform_masking=False, sigma_rms = 1.0)
 	
     print('PA_grism: ', PA_grism) #already in [0,pi] range + in degrees
     print('inc_grism: ', inc_grism)
-    print('r_eff_grism: ', r_eff_grism)
+    print('r_eff_grism: ', r_full_grism)
 
-    # initialize chosen kinematic model
+    #disperse image with zero velocity field and compare to grism PA
+    
+    oversampled_image = utils.oversample(direct, factor,factor)
+
+    # plt.imshow(oversampled_image, origin='lower', cmap = 'inferno')
+    # plt.title('Oversampled image')
+    # plt.colorbar()
+    # plt.show()
+
+    image_shape = 31
+    print(image_shape//2)
+    x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
+    y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
+    x,y = jnp.meshgrid(x,y)
+    kin_model = models.KinModels()
+    kin_model.compute_factors(jnp.radians((PA_morph)), jnp.radians(60), x,y)
+    V = kin_model.v( x, y, jnp.radians((PA_morph)), jnp.radians(60), 300, 1)
+    D = 100*jnp.ones((31*factor, 31*factor))
+
+    mock_grism_high = grism_object.disperse(oversampled_image, V, D)
+
+    mock_grism = utils.resample(mock_grism_high, y_factor*factor, wave_factor)
+
+    # plt.imshow(mock_grism, origin='lower')
+    # plt.title('Mock grism image')
+    # plt.colorbar()
+    # plt.show()
     if model_name == 'Disk':
         kin_model = models.DiskModel()
     elif model_name == 'Disk_prior':
         kin_model = models.DiskModel_withPrior()
     elif model_name == 'Merger':
         kin_model = models.Merger()
-    kin_model.set_bounds(direct, direct_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_eff_grism, delta_wave, wavelength)
+    kin_model.set_bounds(direct, direct_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism, delta_wave, wavelength)
+
+    # init_vals = {'PA': 1.57, 'i': math.radians(65), 'sigma0': 100, 'Va': 300, 'r_t':1.0, 'unscaled_v0': 0.0,'unscaled_y0_vel': 0.0}
+    # log_l_array = log_likelihood(kin_model.inference_model, init_vals, grism_object = grism_object, obs_map = obs_map, obs_error = obs_error )
+    # L = (np.sum(np.array(log_l_array['obs'])))
+		# print('Log-L of truth:',np.sum(np.array(log_l_array['obs'])))
+
+    chi = (obs_map - mock_grism)/obs_error
+    chi_icenter,chi_jcenter = np.unravel_index(np.argmax(obs_map), obs_map.shape)
+    chi_central_region = chi[chi_icenter-10:chi_icenter+10,chi_jcenter-10:chi_jcenter+10]
+    plt.imshow(chi, origin='lower', cmap = 'coolwarm')
+    plt.title('(obs-mock)/obs_error, Chi = ' + str(round(np.sum(np.abs(chi_central_region))/(chi_central_region.shape[0]*chi_central_region.shape[1]),3)) )
+    # plt.title('L = ' + str(round(L)))
+    plt.colorbar()
+    plt.show()
+
+    PA_mock_grism, _, r_full_mock_grism,_,_ = utils.fit_grism_parameters(mock_grism, r_eff, inclination, obs_error, sigma_rms = 4)
+
+    #cute the S/N to max 20:
+    SN_max = 20
+    obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
+    direct_error = jnp.where(jnp.abs(direct/direct_error) > SN_max, direct/SN_max, direct_error)
+
+    # SN_min = 3
+    # obs_error = jnp.where(jnp.abs(obs_map/obs_error) < SN_min, 10e6, obs_error)
+    # direct_error = jnp.where(jnp.abs(direct/direct_error) < SN_min, 10e6, direct_error)
+
+    # if np.abs(PA_morph) < 5 or np.abs(PA_morph - 180) < 5:
+    #     #if PA parallel to disp dir then define vel field by comparing radii
+    #     if r_full_grism > r_full_mock_grism:
+    #         print('Velocity field -/+')
+    #         PA_morph = PA_morph + 180
+    #     else:
+    #         # print('Velocity field +/-')
+    #         print('Velocity field -/+')
+    #         PA_morph = PA_morph + 180
+    # else:
+    #     if PA_mock_grism > PA_grism: #because PA measured counter-clockwise from positive x-axis
+    #         PA_morph = PA_morph + 180
+    #         print('Velocity field -/+')
+    #     else:
+    #         print('Velocity field +/-')
+
+    #set automatically for mock tests:
+    # PA_morph = PA_morph + 180
+    print('Velocity field -/+')
+    # initialize chosen kinematic model
     
 	# plt.imshow(obs_map, origin='lower')
 	# plt.show()

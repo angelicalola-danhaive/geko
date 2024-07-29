@@ -35,6 +35,10 @@ import numpy as np
 
 import xarray as xr
 
+from scipy import stats as st
+
+import models
+
 
 
 def oversample(image_low_res, factor_y, factor_x, method='nearest'):
@@ -221,7 +225,7 @@ def find_central_object(image,threshold_sigma, npixels = 10):
     if image.shape[0]<62:
         size = 10
     bkg_estimator = MedianBackground()
-    bkg = Background2D(image, (size,size) , filter_size=(5, 5),bkg_estimator = bkg_estimator)
+    bkg = Background2D(image, (size,size) , filter_size=(5, 5),bkg_estimator = bkg_estimator, exclude_percentile=20)
     threshold = threshold_sigma * bkg.background_rms
 
     segment_map = detect_sources(image, threshold, npixels)
@@ -247,13 +251,14 @@ def make_mask(image, n = 1, threshold_sigma = 3):
     segment_map, cat = find_central_object(image, threshold_sigma)
 
     mask_1comp = segment_map.copy()
-    mask_1comp = dilation(mask_1comp.data, disk(3))
-    plt.imshow(segment_map.data, origin='lower')
+    mask_1comp = dilation(mask_1comp.data, disk(6))
+    plt.imshow(mask_1comp, origin='lower')
     plt.scatter(cat.xcentroid, cat.ycentroid, color='red')
+    plt.title('Flux Mask')
     plt.show()
-    plt.imshow(image*segment_map.data, origin='lower')
-    plt.title('Mask of the central source')
-    plt.show()
+    # plt.imshow(image*segment_map.data, origin='lower')
+    # plt.title('Mask of the central source')
+    # plt.show()
 
     #separate two sources if n == 2
     if n == 2:
@@ -374,7 +379,19 @@ def load_psf( filter, y_factor, size = 9, psf_folder = 'mpsf_gds/'):
 
     return psf
 
-def compute_inclination(axis_ratio = None, ellip = None, q0 = 0.2):
+def oversample_PSF(psf, factor):
+    """
+        Oversample the PSF by a factor of 2
+    """
+    psf_high_res = image.resize(psf, (int(psf.shape[0]*factor), int(psf.shape[1]*factor)), method='nearest')
+    psf_high_uneven = np.zeros((psf_high_res.shape[0]- 1, psf_high_res.shape[1]-1))
+    for i in range(psf_high_res.shape[0]-1):
+         for j in range(psf_high_res.shape[1]-1):
+             psf_high_uneven[i,j] = 0.25*(psf_high_res[i,j] + psf_high_res[i+1,j] + psf_high_res[i,j+1] + psf_high_res[i+1,j+1])
+    psf_high_uneven /= psf_high_uneven.sum()
+    return psf_high_uneven
+
+def compute_inclination(axis_ratio = None, ellip = None, q0 = 0.0):
     """
         Compute the inclination of a galaxy given its axis ratio or ellipticity
     """
@@ -383,7 +400,7 @@ def compute_inclination(axis_ratio = None, ellip = None, q0 = 0.2):
     inc = np.arccos(np.sqrt( (axis_ratio**2 - q0**2)/(1 - q0**2) ))*(180/np.pi)
     return inc
 
-def compute_axis_ratio(inc, q0 = 0.2):
+def compute_axis_ratio(inc, q0 = 0.0):
     """
         Compute the axis ratio of a galaxy given its inclination
     """
@@ -391,6 +408,8 @@ def compute_axis_ratio(inc, q0 = 0.2):
     return axis_ratio
 
 def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0):
+    obs_map = np.array(obs_map)
+    obs_error = np.array(obs_error)
     im_conv, segment_map = py.make_mask(im = obs_map, sigma_rms = sigma_rms)
     #create a mask of the grism data based on the segment map
     main_label = segment_map.data[int(0.5*obs_map.shape[0]), int(0.5*obs_map.shape[1])]
@@ -403,14 +422,21 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
     masked_map = np.where(segment_map_closed == 1.0, obs_map, 0.0)
     source = SourceCatalog(masked_map, SegmentationImage(segment_map_closed.astype(int)), convolved_data=im_conv, error=obs_error)
     PA_mask = source.orientation[0].value #orientation is in degrees [-180,180]
-
-    geom = EllipseGeometry(x0 = obs_map.shape[1]//2, y0 = obs_map.shape[0]//2, sma = r_eff, eps = 1 - np.cos(inclination*(np.pi/180)), pa = PA_mask*(np.pi/180))
+    i_mask = np.arccos(1/source.elongation[0].value)* (180/np.pi)
+    r_eff_mask = source.equivalent_radius[0].value/2 #assume smaller rad for fit
+    if r_eff ==None:
+         r_eff = r_eff_mask
+    if inclination == None:
+         inclination = i_mask
+    x0 = source.centroid[0][0]
+    y0 = source.centroid_quad[0][1]
+    geom = EllipseGeometry(x0 = x0, y0 = y0, sma = r_eff, eps = 1 - np.cos(inclination*(np.pi/180)), pa = PA_mask*(np.pi/180))
     ellipse_shape = Ellipse(np.abs(obs_map), geometry = geom, threshold = 0.001)
-    aper = EllipticalAperture((geom.x0, geom.y0), geom.sma,
-	geom.sma * (1 - geom.eps),geom.pa)
-    plt.imshow(obs_map, origin='lower')
-    aper.plot(color='red')
-    plt.show()
+    # print(geom.sma, np.abs(geom.sma))
+    aper = EllipticalAperture((geom.x0, geom.y0), np.abs(geom.sma), np.abs(geom.sma * (1 - geom.eps)),geom.pa)
+    # plt.imshow(obs_map, origin='lower')
+    # aper.plot(color='red')
+    # plt.show()
     isolist = ellipse_shape.fit_image()
     if not isolist:
         print('No isophotes found, using source catalog measurements instead.')
@@ -419,41 +445,46 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
         if angle<0:
                 angle += 180 #convert to [0,180]
         PA_grism = angle
-        inc_grism = jnp.arccos(1/source_cat.elongation[0].value)* (180/jnp.pi)
+        inc_grism = np.arccos(1/source_cat.elongation[0].value)* (180/np.pi)
         # print(source_cat.equivalent_radius[0].value, jnp.cos(PA_grism*(jnp.pi/180)))
-        r_full_grism = source_cat.equivalent_radius[0].value*jnp.abs(jnp.cos(PA_grism*(jnp.pi/180)))
+        r_full_grism = source_cat.equivalent_radius[0].value*np.abs(np.cos(PA_grism*(np.pi/180)))
+        x0_vel = source_cat.centroid[0][0]
+        y0_vel = source_cat.centroid_quad[0][1]
     else:
         # print(isolist.to_table())  
         model_grism = build_ellipse_model(obs_map.shape, isolist)
 		#choose the isophote with the sma closest to morphological radius
-        best_index = np.argmin(np.abs(isolist.sma - 1.5*r_eff)) #the 1.5 is a bit arbitrary ...
+        best_index = np.argmin(np.abs(isolist.sma - r_eff)) #the 1.5 is a bit arbitrary ...
         PA_grism = isolist.pa[best_index]*(180/np.pi) #put in degrees
-        inc_grism =jnp.cos(1-isolist.eps[best_index])*(180/np.pi) #put in degrees
+        inc_grism =np.cos(1-isolist.eps[best_index])*(180/np.pi) #put in degrees
         minor_axis = (1-isolist.eps[best_index])*isolist.sma[best_index]
-        r_full_grism = jnp.maximum(isolist.sma[best_index]*jnp.abs(jnp.cos(PA_grism*(jnp.pi/180))), minor_axis*jnp.abs(jnp.cos((90-PA_grism)*(jnp.pi/180)))) #project onto velocity/x axis
+        r_full_grism = np.maximum(isolist.sma[best_index]*np.abs(np.cos(PA_grism*(np.pi/180))), minor_axis*np.abs(np.cos((90-PA_grism)*(np.pi/180)))) #project onto velocity/x axis
+        #get the centroids
+        x0_vel = isolist.x0[best_index]
+        y0_vel = isolist.y0[best_index]
         residual = obs_map - model_grism
 
-        fig, (ax1, ax2, ax3) = plt.subplots(figsize=(14, 5), nrows=1, ncols=3)
-        fig.subplots_adjust(left=0.04, right=0.98, bottom=0.02, top=0.98)
-        ax1.imshow(obs_map, origin='lower')
-        ax1.set_title('Data')
+        # fig, (ax1, ax2, ax3) = plt.subplots(figsize=(14, 5), nrows=1, ncols=3)
+        # fig.subplots_adjust(left=0.04, right=0.98, bottom=0.02, top=0.98)
+        # ax1.imshow(obs_map, origin='lower')
+        # ax1.set_title('Data')
 
-        sma = isolist.sma[best_index]
-        iso = isolist.get_closest(sma)
-        x, y, = iso.sampled_coordinates()
-        ax1.plot(x, y, color='white')
+        # sma = isolist.sma[best_index]
+        # iso = isolist.get_closest(sma)
+        # x, y, = iso.sampled_coordinates()
+        # ax1.plot(x, y, color='white')
 
-        ax2.imshow(model_grism, origin='lower')
-        ax2.set_title('Ellipse Model')
+        # ax2.imshow(model_grism, origin='lower')
+        # ax2.set_title('Ellipse Model')
 
-        ax3.imshow(residual, origin='lower')
-        ax3.set_title('Residual')
-        plt.show()
+        # ax3.imshow(residual, origin='lower')
+        # ax3.set_title('Residual')
+        # plt.show()
 
         print('Isophote fitting results - ')
-        print('PA: ', PA_grism, 'Inclination: ', inc_grism, 'r_full: ', r_full_grism)
+        print('PA: ', PA_grism, 'Inclination: ', inc_grism, 'r_full: ', r_full_grism, 'x0: ', x0_vel, 'y0: ', y0_vel)
     
-    return PA_grism, inc_grism, r_full_grism
+    return PA_grism, inc_grism, r_full_grism, x0_vel, y0_vel
 
 
 def add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff):
@@ -463,13 +494,51 @@ def add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff):
             x = np.linspace(0 - kin_model.x0_vel, grism_object.direct.shape[1]-1 - kin_model.x0_vel, grism_object.direct.shape[1]*grism_object.factor)
             y = np.linspace(0 - float(inf_data.posterior['y0_vel'][i,int(sample)].values), grism_object.direct.shape[0]-1 - float(inf_data.posterior['y0_vel'][i,int(sample)].values), grism_object.direct.shape[0]*grism_object.factor)
             X, Y = np.meshgrid(x, y)
-            inf_data.posterior['v_re'][i,int(sample)] = kin_model.v_rad(X,Y, np.radians(float(inf_data.posterior['PA'][i,int(sample)].values)), np.radians(float(inf_data.posterior['i'][i,int(sample)].values)), float(inf_data.posterior['Va'][i,int(sample)].values), float(inf_data.posterior['r_t'][i,int(sample)].values), r_eff)
+            inf_data.posterior['v_re'][i,int(sample)] = kin_model.v_rad(X,Y, np.radians(90), np.radians(float(inf_data.posterior['i'][i,int(sample)].values)), float(inf_data.posterior['Va'][i,int(sample)].values), 1, r_eff)
     v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values
     v_re_med =inf_data.posterior['v_re'].quantile(0.50).values
     v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values
     return inf_data, v_re_16, v_re_med, v_re_84
 
 
+def compute_MAP(inf_data, grism_object, image):
+    factor = 2
+    wave_factor = 10
+    PA_post = np.array(inf_data.posterior['PA'].data)
+    vals, counts = np.unique(PA_post, return_counts=True)
+    PA_map = vals[counts == np.max(counts)][0]
+    inc_post = np.array(inf_data.posterior['i'].data)
+    vals, counts = np.unique(inc_post, return_counts=True)
+    inc_map = vals[counts == np.max(counts)][0]
+    Va_post = np.array(inf_data.posterior['Va'].data)
+    vals, counts = np.unique(Va_post, return_counts=True)
+    Va_map = vals[counts == np.max(counts)][0]
+    r_t_post = np.array(inf_data.posterior['r_t'].data)
+    vals, counts = np.unique(r_t_post, return_counts=True)
+    r_t_map = vals[counts == np.max(counts)][0]
+    sigma0_post = np.array(inf_data.posterior['sigma0'].data)
+    vals, counts = np.unique(sigma0_post, return_counts=True)
+    sigma0_map = vals[counts == np.max(counts)][0]
+
+
+
+
+    image_shape = 31
+    print(image_shape//2)
+    x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
+    y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
+    x,y = jnp.meshgrid(x,y)
+    kin_model = models.KinModels()
+    kin_model.compute_factors(jnp.radians((PA_map)), jnp.radians(inc_map), x,y)
+    V = kin_model.v( x, y, jnp.radians((PA_map)), jnp.radians(inc_map), Va_map, r_t_map)
+    D = sigma0_map*jnp.ones((31*factor, 31*factor))
+
+    oversampled_image = oversample(image, factor, factor)
+    mock_grism_high = grism_object.disperse(oversampled_image, V, D)
+
+    grism_MAP = resample(mock_grism_high, 1*factor, wave_factor)
+
+    return grism_MAP, PA_map, inc_map, Va_map, r_t_map, sigma0_map
 
 
 #things to add here

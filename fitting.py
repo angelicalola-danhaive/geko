@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 
 import numpyro
 from numpyro.infer import MCMC, NUTS
-from numpyro.infer.initialization import init_to_median
+from numpyro.infer.initialization import init_to_median, init_to_sample, init_to_uniform, init_to_value
 
 import statistics as st
 import math
@@ -36,7 +36,7 @@ import yaml
 
 jax.config.update('jax_enable_x64', True)
 numpyro.set_host_device_count(2)
-# numpyro.set_platform('gpu')
+numpyro.set_platform('gpu')
 
 # np.set_printoptions(precision=15, floatmode='maxprec')
 # jnp.set_printoptions(precision=15, floatmode='maxprec')
@@ -73,11 +73,11 @@ class Fit_Numpyro():
 		# print all of the attributes of the class
 		return 'Fit_Numpyro Class: \n' + ' - factor = ' + str(self.factor) + '\n - wave_factor = ' + str(self.wave_factor) + '\n grism object = ' + str(grism_object)
 
-	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5):
+	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
 
-		self.nuts_kernel = NUTS(self.kin_model.inference_model, init_strategy=init_to_median(num_samples=1000), step_size=step_size, adapt_step_size=adapt_step_size,
-								target_accept_prob=target_accept_prob, dense_mass=True, max_tree_depth=max_tree_depth, find_heuristic_step_size=True)
-
+		self.nuts_kernel = NUTS(self.kin_model.inference_model, init_strategy=init_to_median(num_samples=2000), step_size=step_size, adapt_step_size=adapt_step_size,
+								target_accept_prob=target_accept_prob, dense_mass=True, max_tree_depth=10, find_heuristic_step_size=True)
+		# init_to_value(values = init_vals)
 		print('max tree: ', max_tree_depth)
 		print('step size: ', step_size)
 		print('warmup: ', num_warmup)
@@ -85,7 +85,7 @@ class Fit_Numpyro():
 
 		self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
 						 num_warmup=num_warmup, num_chains=num_chains)
-		self.rng_key = random.PRNGKey(4)
+		self.rng_key = random.PRNGKey(100)
 		self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, extra_fields=("potential_energy", "accept_prob"))
 
 		print('done')
@@ -142,7 +142,7 @@ if __name__ == "__main__":
 
 	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None)
 
-	rng_key = random.PRNGKey(0)
+	rng_key = random.PRNGKey(4)
 
 	prior_predictive = Predictive(run_fit.kin_model.inference_model, num_samples=num_samples)
 
