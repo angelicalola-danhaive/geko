@@ -21,11 +21,15 @@ from skimage.segmentation import clear_border
 from skimage.morphology import dilation, disk, ellipse, binary_closing
 from skimage.color import label2rgb
 
+from astropy.modeling.models import Sersic2D
+from scipy import stats
 from photutils.segmentation import detect_sources, SourceCatalog, deblend_sources, SegmentationImage
 from photutils.background import Background2D, MedianBackground
 from photutils.aperture import EllipticalAperture
-from photutils.isophote import Ellipse, EllipseGeometry
+from photutils.isophote import Ellipse, EllipseGeometry, Isophote
 from photutils.isophote import build_ellipse_model
+
+from skimage import color, data, restoration
 
 from matplotlib import pyplot as plt
 
@@ -450,20 +454,67 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
         r_full_grism = source_cat.equivalent_radius[0].value*np.abs(np.cos(PA_grism*(np.pi/180)))
         x0_vel = source_cat.centroid[0][0]
         y0_vel = source_cat.centroid_quad[0][1]
+        #find half-light radius by measuring light inside each isophote
+        # Calculate the total flux
+        #find the half-light radius
+        image = obs_map
+        center = (15,15)
+        image = np.where(image < 0.01*image.max(), 0, image)
+        total_flux = image.sum()
+            
+        # Create a grid of x and y coordinates
+        y, x = np.indices(image.shape)
+            
+        # Calculate the radius for each pixel from the center
+        r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+            
+        #put to zero everything below a certain flux threshold
+        plt.imshow(image, origin = 'lower')
+        plt.title('Image to comp half-light radius')
+        plt.show()
+        # Flatten the image and radius arrays
+        r_flat = r.flatten()
+        image_flat = image.flatten()
+            
+        # Sort the pixels by radius
+        sorted_indices = np.argsort(r_flat)
+        sorted_r = r_flat[sorted_indices]
+        sorted_flux = image_flat[sorted_indices]
+            
+        # Compute the cumulative sum of the flux
+        cumulative_flux = np.cumsum(sorted_flux)
+            
+        # Find the radius where the cumulative flux reaches half of the total flux
+        half_light_flux = total_flux / 2
+        half_light_radius_index = np.where(cumulative_flux >= half_light_flux)[0][0]
+        half_light_radius = sorted_r[half_light_radius_index]
+        print('Turn-over rad: ',  0.4*half_light_radius/1.676)
     else:
         # print(isolist.to_table())  
         model_grism = build_ellipse_model(obs_map.shape, isolist)
+
+        #compute the half-light radius
+        image = np.where(obs_map < 0.03*obs_map.max(), 0, obs_map)
+        total_flux = image.sum()
+        index_half_light = np.nanargmin(np.abs(isolist.tflux_e - 0.5*total_flux))
+        half_light_radius = isolist.sma[index_half_light]
+        print('Turn-over rad isophote: ',  0.4*half_light_radius/1.676)
+
+        rad_22 = 2.2*half_light_radius/1.676
 		#choose the isophote with the sma closest to morphological radius
-        best_index = np.argmin(np.abs(isolist.sma - r_eff)) #the 1.5 is a bit arbitrary ...
+        best_index = np.argmin(np.abs(isolist.sma - rad_22)) #the 1.5 is a bit arbitrary ...
         PA_grism = isolist.pa[best_index]*(180/np.pi) #put in degrees
-        inc_grism =np.cos(1-isolist.eps[best_index])*(180/np.pi) #put in degrees
-        minor_axis = (1-isolist.eps[best_index])*isolist.sma[best_index]
-        r_full_grism = np.maximum(isolist.sma[best_index]*np.abs(np.cos(PA_grism*(np.pi/180))), minor_axis*np.abs(np.cos((90-PA_grism)*(np.pi/180)))) #project onto velocity/x axis
+        inc_grism =np.arccos(1-isolist.eps[best_index])*(180/np.pi) #put in degrees
+        r_full_grism = np.maximum(rad_22*np.abs(np.cos(PA_grism*(np.pi/180))), rad_22*np.abs(np.cos((90-PA_grism)*(np.pi/180)))) #project onto velocity/x axis
+        print('r_full: ', r_full_grism)
         #get the centroids
         x0_vel = isolist.x0[best_index]
         y0_vel = isolist.y0[best_index]
         residual = obs_map - model_grism
 
+        
+        # plt.plot(isolist.sma, isolist.tflux_e, '.')   #(np.cos(1-isolist.eps)*(180/np.pi))
+        # plt.show()
         # fig, (ax1, ax2, ax3) = plt.subplots(figsize=(14, 5), nrows=1, ncols=3)
         # fig.subplots_adjust(left=0.04, right=0.98, bottom=0.02, top=0.98)
         # ax1.imshow(obs_map, origin='lower')
@@ -484,7 +535,7 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
         print('Isophote fitting results - ')
         print('PA: ', PA_grism, 'Inclination: ', inc_grism, 'r_full: ', r_full_grism, 'x0: ', x0_vel, 'y0: ', y0_vel)
     
-    return PA_grism, inc_grism, r_full_grism, x0_vel, y0_vel
+    return PA_grism, inc_grism, r_full_grism, x0_vel, y0_vel, half_light_radius
 
 
 def add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff):
@@ -540,6 +591,46 @@ def compute_MAP(inf_data, grism_object, image):
 
     return grism_MAP, PA_map, inc_map, Va_map, r_t_map, sigma0_map
 
+
+def find_PA_morph(img, n_draw = 1e3):
+
+    img = np.where(img < 0, 0, img)
+    prob = img.flatten()
+    prob /= np.sum(prob)
+    img_shape = img.shape
+    x_cont = np.arange(img_shape[0] * img_shape[1]).reshape(img_shape[0], img_shape[1])
+    xy = np.random.choice(x_cont.flatten(), int(n_draw), p=prob)
+
+    x_ind, y_ind = np.unravel_index(xy, img.shape)
+
+
+    plt.plot(x_ind, y_ind, '.')
+    plt.show()
+
+
+    cov = np.cov(x_ind, y_ind)
+    lambda_, v = np.linalg.eig(cov)
+    angle=np.rad2deg(np.arccos(v[0, 0]))
+
+    print('PA: ',(angle))
+
+    return (180-angle)
+
+def deconvolve_PSF_approx(image, psf, PA, niter = 35):
+    limit = 0.12  #will have to play around with this value, seems to work for now
+    deconvolved_image = restoration.richardson_lucy(image, psf, clip= False, filter_epsilon=limit, num_iter=niter)
+
+    #using the deconvolved image, rescale the convolved one
+    mid = image.shape[0]//2
+    factor = float(deconvolved_image[mid,mid]/image[mid,mid])
+    full_factors = np.ones((image.shape[0], image.shape[1]))*factor
+    for i in range(image.shape[0]):
+        for j in range(image.shape[0]):
+            # mean_factor[i,j] = mean_factor[i,j]*(1 - np.abs(j-15)/15)
+            full_factors[i,j] =  full_factors[i,j]*(1 - np.abs(j-15)/(7*np.sin(np.radians(PA)) + 3))*(1 - np.abs(i-15)/(7*np.cos(np.radians(PA)) + 3))
+    renorm_image = image*full_factors
+
+    return deconvolved_image
 
 #things to add here
 #sampling uniform

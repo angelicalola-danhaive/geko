@@ -1119,18 +1119,14 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	    
     # inclination, py_PA, phot_PA, r_eff, x0_vel, y0_vel = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = path_output, im = direct, sig = direct_error, psf = PSF, type = 'image', sigma_rms = 3.0)
     # PA_morph = py_PA
-    PA_morph, inclination, r_eff, x0_vel,y0_vel = utils.fit_grism_parameters(direct, r_eff = None, inclination = None, obs_error= direct_error, sigma_rms = 10) 
+    PA_morph, inclination, r_eff, x0_vel,y0_vel, r_eff = utils.fit_grism_parameters(direct, r_eff = None, inclination = None, obs_error= direct_error, sigma_rms = 10) 
     
     #take the priors from the truth 
-    PA_morph = priors['PA']
-    inclination = priors['i']
-    r_eff = (1.676/0.4)*priors['r_t']
+    # PA_morph = priors['PA']
+    # inclination = priors['i']
+    # r_eff = (1.676/0.4)*priors['r_t']
 
-	# #adapt the PA according the rotation of the galaxy to match PA of grism:
-    # print('PA_morph before:', PA_morph)
-    # PA_morph += theta
-    # PA_morph = PA_morph % 180 #put it back in the 0-180 range
-    # print('PA_morph after:', PA_morph)
+
     #renormalizing flux prior to EL map
     
     # direct, direct_error,normalization_factor,mask_grism = renormalize_image(direct, direct_error,obs_map)
@@ -1150,33 +1146,10 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     x0_grism = jcenter
     y0_grism = icenter
 
-    # print(index_min, index_max)
-    # print('wave_space:', wave_space)
-    
-
-    # direct_low = utils.resample(direct, y_factor, y_factor)
-
-    # grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=y0_grism, jcenter=x0_grism, segmentation=None, factor=factor, y_factor=y_factor,
-    #                         xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
-    #                         wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
-    #                         grism_filter=grism_filter, grism_module='A', grism_pupil='R', PSF = PSF)
-    
-    # print('d wave' , delta_wave)
-    # direct_image_size = direct.shape
-    # S_N_scale = jnp.max(obs_map/obs_error)/jnp.max(direct/direct_error)
-
-    # if ID == 33746:
-    #     _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma =flux_threshold*S_N_scale/2) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
-    # else:
-    #     _, _, _, _, PA_grism, inc_grism,r_eff_grism,_,_ = utils.compute_gal_props(obs_map, n=1,threshold_sigma = 2*flux_threshold*S_N_scale) # 5 flux_threshold/2, /2 bc grism lower s/n than imaging data
-
-	#make the grism data square for the pysersic fit
-    # obs_shape = obs_map.shape[0]
-    # square_obs_map = obs_map[:, obs_map.shape[1] // 2 - obs_shape // 2: obs_map.shape[1] // 2 + obs_shape // 2 + 1]
-    # square_obs_error = obs_error[:, obs_error.shape[1] // 2 - obs_shape // 2: obs_error.shape[1] // 2 + obs_shape // 2 + 1]
     
     #fit an ellipse to the masked object
-    PA_grism, inc_grism, r_full_grism, _,_ = utils.fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 1) #low rms bc grism data is noisy
+    SN_max = np.max(obs_map/obs_error)
+    PA_grism, inc_grism, r_full_grism, _,_,_= utils.fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = SN_max/4) #low rms bc grism data is noisy
 	
     # inc_grism, PA_grism, r_eff_grism, _, _ = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = 'fitting_results/' + output, im = square_obs_map, sig = square_obs_error, psf_path = PSF, type = 'grism', perform_masking=False, sigma_rms = 1.0)
 	
@@ -1184,14 +1157,9 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     print('inc_grism: ', inc_grism)
     print('r_eff_grism: ', r_full_grism)
 
-    #disperse image with zero velocity field and compare to grism PA
+    #----disperse image with zero velocity field and compare to grism PA----------
     
     oversampled_image = utils.oversample(direct, factor,factor)
-
-    # plt.imshow(oversampled_image, origin='lower', cmap = 'inferno')
-    # plt.title('Oversampled image')
-    # plt.colorbar()
-    # plt.show()
 
     image_shape = 31
     print(image_shape//2)
@@ -1200,8 +1168,8 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     x,y = jnp.meshgrid(x,y)
     kin_model = models.KinModels()
     kin_model.compute_factors(jnp.radians((PA_morph)), jnp.radians(60), x,y)
-    V = kin_model.v( x, y, jnp.radians((PA_morph)), jnp.radians(60), 300, 1)
-    D = 100*jnp.ones((31*factor, 31*factor))
+    V = kin_model.v( x, y, jnp.radians((PA_morph)), jnp.radians(60), 0, 1)
+    D = 0*jnp.ones((31*factor, 31*factor))
 
     mock_grism_high = grism_object.disperse(oversampled_image, V, D)
 
@@ -1211,64 +1179,56 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     # plt.title('Mock grism image')
     # plt.colorbar()
     # plt.show()
+    
+
+    PA_mock_grism, _, r_full_mock_grism,_,_, _ = utils.fit_grism_parameters(mock_grism, r_eff, inclination, obs_error, sigma_rms = 4)
+
+    #cute the S/N to max 20:
+    # SN_max = 20
+    # obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
+    # direct_error = jnp.where(jnp.abs(direct/direct_error) > SN_max, direct/SN_max, direct_error)
+
+    # SN_min = 3
+    # obs_error = jnp.where(jnp.abs(obs_map/obs_error) < SN_min, 10e6, obs_error)
+    # direct_error = jnp.where(jnp.abs(direct/direct_error) < SN_min, 10e6, direct_error)
+
+    # PA_morph = utils.find_PA_morph(direct)
+    PA_grism = utils.find_PA_morph(obs_map)
+    PA_mock_grism = utils.find_PA_morph(mock_grism)
+
+    if np.abs(PA_morph - 180) < 10 or np.abs(PA_morph) < 10:
+        #if PA parallel to disp dir then define vel field by comparing radii
+        if r_full_grism > r_full_mock_grism:
+            print('Radiis: Velocity field -/+')
+        else:
+            # print('Velocity field +/-')
+            print('Radiis: Velocity field +/-')
+            PA_morph = PA_morph + 180
+    else:
+        if PA_mock_grism > PA_grism: #because PA measured counter-clockwise from positive x-axis
+            print('PAs: Velocity field -/+')
+        else:
+            PA_morph = PA_morph + 180
+            print('PAs: Velocity field +/-')
+    if np.abs(PA_morph - 180) < 5:
+	    PA_morph = 0
+    PA_morph = 90 - PA_morph
+    print('PA_morph final (degrees): ', PA_morph)
     if model_name == 'Disk':
         kin_model = models.DiskModel()
     elif model_name == 'Disk_prior':
         kin_model = models.DiskModel_withPrior()
     elif model_name == 'Merger':
         kin_model = models.Merger()
+	
+    #deconvolve the image for a better prior:
+    # direct = utils.deconvolve_PSF_approx(direct, PSF,PA_morph)
+    # plt.imshow(direct, origin='lower')
+    # plt.title('Deconvolved image')
+    # plt.colorbar()
+    # plt.show()
+    #multiply errors by 2 to account for uncertainties
+    direct_error = 2*direct_error
     kin_model.set_bounds(direct, direct_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism, delta_wave, wavelength)
-
-    # init_vals = {'PA': 1.57, 'i': math.radians(65), 'sigma0': 100, 'Va': 300, 'r_t':1.0, 'unscaled_v0': 0.0,'unscaled_y0_vel': 0.0}
-    # log_l_array = log_likelihood(kin_model.inference_model, init_vals, grism_object = grism_object, obs_map = obs_map, obs_error = obs_error )
-    # L = (np.sum(np.array(log_l_array['obs'])))
-		# print('Log-L of truth:',np.sum(np.array(log_l_array['obs'])))
-
-    chi = (obs_map - mock_grism)/obs_error
-    chi_icenter,chi_jcenter = np.unravel_index(np.argmax(obs_map), obs_map.shape)
-    chi_central_region = chi[chi_icenter-10:chi_icenter+10,chi_jcenter-10:chi_jcenter+10]
-    plt.imshow(chi, origin='lower', cmap = 'coolwarm')
-    plt.title('(obs-mock)/obs_error, Chi = ' + str(round(np.sum(np.abs(chi_central_region))/(chi_central_region.shape[0]*chi_central_region.shape[1]),3)) )
-    # plt.title('L = ' + str(round(L)))
-    plt.colorbar()
-    plt.show()
-
-    PA_mock_grism, _, r_full_mock_grism,_,_ = utils.fit_grism_parameters(mock_grism, r_eff, inclination, obs_error, sigma_rms = 4)
-
-    #cute the S/N to max 20:
-    SN_max = 20
-    obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
-    direct_error = jnp.where(jnp.abs(direct/direct_error) > SN_max, direct/SN_max, direct_error)
-
-    # SN_min = 3
-    # obs_error = jnp.where(jnp.abs(obs_map/obs_error) < SN_min, 10e6, obs_error)
-    # direct_error = jnp.where(jnp.abs(direct/direct_error) < SN_min, 10e6, direct_error)
-
-    # if np.abs(PA_morph) < 5 or np.abs(PA_morph - 180) < 5:
-    #     #if PA parallel to disp dir then define vel field by comparing radii
-    #     if r_full_grism > r_full_mock_grism:
-    #         print('Velocity field -/+')
-    #         PA_morph = PA_morph + 180
-    #     else:
-    #         # print('Velocity field +/-')
-    #         print('Velocity field -/+')
-    #         PA_morph = PA_morph + 180
-    # else:
-    #     if PA_mock_grism > PA_grism: #because PA measured counter-clockwise from positive x-axis
-    #         PA_morph = PA_morph + 180
-    #         print('Velocity field -/+')
-    #     else:
-    #         print('Velocity field +/-')
-
-    #set automatically for mock tests:
-    # PA_morph = PA_morph + 180
-    print('Velocity field -/+')
-    # initialize chosen kinematic model
-    
-	# plt.imshow(obs_map, origin='lower')
-	# plt.show()
-
-	# plt.imshow(direct, origin='lower')
-	# plt.show()
     
     return direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism,x0_grism, num_samples, num_warmup, step_size, target_accept_prob, wave_space, delta_wave, index_min, index_max, factor
