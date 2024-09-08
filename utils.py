@@ -88,7 +88,6 @@ def resample(image_high_res, factor_y, factor_x):
     image_low_res = jnp.sum(blocks, axis=(1, 3))
     return image_low_res
 
-
 def scale_distribution(distribution, mu, sigma, max, min):
     '''
         Rescale a base distribution to its target distribution. 
@@ -469,9 +468,9 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
         r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
             
         #put to zero everything below a certain flux threshold
-        plt.imshow(image, origin = 'lower')
-        plt.title('Image to comp half-light radius')
-        plt.show()
+        # plt.imshow(image, origin = 'lower')
+        # plt.title('Image to comp half-light radius')
+        # plt.show()
         # Flatten the image and radius arrays
         r_flat = r.flatten()
         image_flat = image.flatten()
@@ -520,8 +519,8 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
         # ax1.imshow(obs_map, origin='lower')
         # ax1.set_title('Data')
 
-        # sma = isolist.sma[best_index]
-        # iso = isolist.get_closest(sma)
+        sma = isolist.sma[best_index]
+        iso = isolist.get_closest(sma)
         # x, y, = iso.sampled_coordinates()
         # ax1.plot(x, y, color='white')
 
@@ -543,12 +542,13 @@ def add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff):
     for i in [0,1]:
         for sample in range(num_samples-1):
             x = np.linspace(0 - kin_model.x0_vel, grism_object.direct.shape[1]-1 - kin_model.x0_vel, grism_object.direct.shape[1]*grism_object.factor)
-            y = np.linspace(0 - float(inf_data.posterior['y0_vel'][i,int(sample)].values), grism_object.direct.shape[0]-1 - float(inf_data.posterior['y0_vel'][i,int(sample)].values), grism_object.direct.shape[0]*grism_object.factor)
+            y = np.linspace(0 - 15, grism_object.direct.shape[0]-1 - 15, grism_object.direct.shape[0]*grism_object.factor)
             X, Y = np.meshgrid(x, y)
-            inf_data.posterior['v_re'][i,int(sample)] = kin_model.v_rad(X,Y, np.radians(90), np.radians(float(inf_data.posterior['i'][i,int(sample)].values)), float(inf_data.posterior['Va'][i,int(sample)].values), 1, r_eff)
-    v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values
-    v_re_med =inf_data.posterior['v_re'].quantile(0.50).values
-    v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values
+            inf_data.posterior['v_re'][i,int(sample)] = kin_model.v_rad(X,Y, np.radians( float(inf_data.posterior['PA'][i,int(sample)].values)), np.radians(60), float(inf_data.posterior['Va'][i,int(sample)].values),  float(inf_data.posterior['r_t'][i,int(sample)].values), r_eff) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
+    # i_med = inf_data.posterior['i'].quantile(0.50).values
+    v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values/np.sin(np.radians(60))
+    v_re_med =inf_data.posterior['v_re'].quantile(0.50).values/np.sin(np.radians(60))
+    v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values/np.sin(np.radians(60))
     return inf_data, v_re_16, v_re_med, v_re_84
 
 
@@ -604,8 +604,8 @@ def find_PA_morph(img, n_draw = 1e3):
     x_ind, y_ind = np.unravel_index(xy, img.shape)
 
 
-    plt.plot(x_ind, y_ind, '.')
-    plt.show()
+    # plt.plot(x_ind, y_ind, '.')
+    # plt.show()
 
 
     cov = np.cov(x_ind, y_ind)
@@ -649,10 +649,10 @@ def deconvolve_PSF_approx(image, psf, PA, niter = 35):
 #     return oversampled_errors
 
 
-# def resample_errors(error_map, factor, wave_factor):
+def resample_errors(error_map, factor, wave_factor):
 
-#     blocks = error_map.reshape(
-#         (int(error_map.shape[0]/(factor)), factor, int(error_map.shape[1]/wave_factor), wave_factor))
-#     # resampled_errors = jnp.sqrt(jnp.sum(blocks**2, axis=(1,3)))
-#     resampled_errors = jnp.linalg.norm(blocks, axis=(1, 3))
-#     return resampled_errors
+    blocks = error_map.reshape(
+        (int(error_map.shape[0]/(factor)), factor, int(error_map.shape[1]/wave_factor), wave_factor))
+    # resampled_errors = jnp.sqrt(jnp.sum(blocks**2, axis=(1,3)))
+    resampled_errors = jnp.linalg.norm(blocks, axis=(1, 3))
+    return resampled_errors

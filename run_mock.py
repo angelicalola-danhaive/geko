@@ -36,6 +36,8 @@ from jax.scipy.signal import convolve
 import numpyro
 numpyro.set_platform('gpu')
 numpyro.set_host_device_count(2)
+numpyro.enable_validation()
+jax.config.update('jax_enable_x64', True)
 
 
 
@@ -66,12 +68,15 @@ def make_image(PA_image, i, r_t, SN_image, psf, image_shape):
     # from inclination infer the ellipticity
     axis_ratio = utils.compute_axis_ratio(i, q0 = 0.0)
     ellip = 1 - axis_ratio
+    print('Ellipticity: ' + str(ellip) + ', inclination: ' + str(i))
     #infer r_eff from the turnaround radius
     r_eff = (1.676/0.4)*r_t
+    print('Reff: ', r_eff)
     galaxy_model = Sersic2D(amplitude=1, r_eff = r_eff, n =1, x_0 = image_shape//2, y_0 = image_shape//2, ellip = ellip, theta=(90 - PA_image)*np.pi/180) #function takes theta in rads
     ny = nx = image_shape
     y, x = np.mgrid[0:ny, 0:nx]
     image = jnp.array(galaxy_model(x, y))
+    # image = image.at[15,15].set(4)
     max_image = jnp.max(image)
     print('SN image: ' + str(SN_image) + ', max image: ' + str(max_image) + ', max_image/sn: ' + str(max_image/SN_image))
     # noise = max_image/SN_image*np.random.normal(0,1, (image_shape, image_shape))
@@ -106,7 +111,7 @@ def make_image(PA_image, i, r_t, SN_image, psf, image_shape):
 
 def initialize_grism(image, psf, image_shape):
     #create wave space
-	wave_factor = 10
+	wave_factor = 2
 	delta_wave = 0.001
 	wavelength = 3.5
 	delta_wave_cutoff = 0.02
@@ -139,13 +144,29 @@ def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, factor =2):
 	'''
 		Make velocity and velocity dispersion fields from inputs
 	'''
-	x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
-	y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
+	x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor*1)
+	y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor*1)
 	x,y = jnp.meshgrid(x,y)
+	# print(image_shape//2)
 	kin_model = models.KinModels()
-	kin_model.compute_factors(jnp.radians(PA_grism), jnp.radians(i), x,y)
-	V = kin_model.v( x, y, jnp.radians(PA_grism), jnp.radians(i), Va, r_t)
-	D = sigma0*jnp.ones((image_shape*factor, image_shape*factor))
+	# kin_model.compute_factors(jnp.radians(PA_grism), jnp.radians(i), x,y)
+	V = kin_model.v( x, y, PA_grism, i, Va, r_t)
+	D = sigma0*jnp.ones_like(V)
+
+	x_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor*10)
+	y_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor*10)
+	x_10,y_10 = jnp.meshgrid(x_10,y_10)
+
+	V_10 = kin_model.v( x_10, y_10, PA_grism, i, Va, r_t)
+	D_10 = sigma0*jnp.ones_like(V_10)
+
+	V_10 = utils.resample(V_10, 10, 10)/10**2
+	D_10 = utils.resample(D_10, 10, 10)/10**2
+
+	plt.imshow(V, origin='lower')
+	plt.colorbar()
+	plt.title('Mock Velocity Field')
+	plt.show()
 
 	return V, D
 
@@ -164,7 +185,8 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, p
 	# V,D = make_vel_fields((180-PA_grism)-180, i, Va, r_t, sigma0, image_shape)
 	V,D = make_vel_fields(PA_grism, i, Va, r_t, sigma0, image_shape)
 
-	# V = np.ones((image_shape*factor, image_shape*factor))
+
+	# V = 200*np.ones((image_shape*factor, image_shape*factor))
 	# D = 5*jnp.ones((image_shape*factor, image_shape*factor))
 
 	# plt.imshow(V, origin='lower')
@@ -204,18 +226,21 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, p
 
 	max_grism = jnp.max(grism_spectrum)
 	#add noise to the grism spectrum
-	grism_noise = make_noise_image((grism_spectrum.shape[0], grism_spectrum.shape[1]), distribution='gaussian', mean=0, stddev=max_grism/SN_grism)
+	grism_noise = make_noise_image((grism_spectrum.shape[0], grism_spectrum.shape[1]), distribution='gaussian', mean=0, stddev=max_grism/SN_grism) 
 	grism_spectrum_noise = grism_spectrum + grism_noise
 	grism_error = (max_grism/SN_grism)*jnp.ones((grism_spectrum.shape[0], grism_spectrum.shape[1]))
 
-	plt.imshow(grism_spectrum_noise, origin='lower', cmap = 'PuRd')
+	mask = jnp.where(grism_spectrum_noise/grism_error < 5.0, 0, 1)
+	print(grism_spectrum_noise[mask.astype(bool)].sum())
+	print((grism_spectrum_noise*mask).sum())
+	plt.imshow(grism_spectrum*mask, origin='lower', cmap = 'PuRd')
 	plt.title('Mock 2D Grism Spectrum with Noise')
 	plt.xlabel('Wavelength')
 	plt.ylabel('Spatial Position')
 	plt.colorbar()
 	plt.show()
 
-	return noise_image, image_error, grism_spectrum_noise, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
+	return image, image_error, image, grism_spectrum, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
 
 def run_fit(mock_params, priors):
 	'''
@@ -228,7 +253,7 @@ def run_fit(mock_params, priors):
 	num_samples, num_warmup, step_size, target_accept_prob, \
 	wave_space, delta_wave, index_min, index_max, factor = pre.run_full_preprocessing(None, None, line, mock_params, priors)
 	
-
+	mask = (jnp.where(obs_map/obs_error < 5.0, 0, 1)).astype(bool)
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
 
 	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None)
@@ -239,7 +264,7 @@ def run_fit(mock_params, priors):
 
 	prior_predictive = Predictive(run_fit.kin_model.inference_model, num_samples=num_samples)
 
-	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error)
+	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, mask = mask)
 
 
 	# total_L = []
@@ -342,8 +367,11 @@ def run_fit(mock_params, priors):
 	# plt.title('Obs Map')
 	# plt.show()
 
+	# run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
+	# 	                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2, init_vals = None)
+	
 	run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
-		                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2, init_vals = init_vals)
+		                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2, init_vals = None)
 
 	#get highest likelihood sample and compute liklihood
 
@@ -458,11 +486,13 @@ if __name__ == "__main__":
 
 
 	for j in range(len(PA_image)) : #range(len(PA_image))
+		# PA_grism[j] = 0
+		# PA_image[j] = 0	
 		print('Running test ' + str(test) + ' iteration ' + str(j))
 		print('Parameters: PA_image = ' + str(PA_image[j]) + ', PA_grism = ' + str(PA_grism[j]) + ', i = ' + str(i[j]) + ', Va = ' + str(Va[j]) + ', r_t = ' + str(r_t[j]) + ', sigma0 = ' + str(sigma0[j]) + ', SN_image = ' + str(SN_image[j]) + ', SN_grism = ' + str(SN_grism[j]))
-		convolved_noise_image, image_error, grism_spectrum_noise, grism_error, wave_space, \
+		convolved_noise_image, image_error, intrinsic_image, grism_spectrum_noise, grism_error, wave_space, \
 		wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object \
-		= make_mock_data(PA_image[j], PA_grism[j], i[j], Va[j], r_t[j], sigma0[j],SN_image[j], SN_grism[j], psf)
+		= make_mock_data(PA_image[j], PA_grism[j], i[j], Va[j], r_t[j], sigma0[j],SN_image[j], SN_grism[j], psf, image_shape= 31)
 		#summarize ouputs in one mock_params dictionary
 		print('Convolved mock image max pixel: ' + str(jnp.max(convolved_noise_image)))
 		mock_params = {'test': test, 'j': j ,'convolved_noise_image': convolved_noise_image, 'image_error': image_error, 'grism_spectrum_noise': grism_spectrum_noise, 'grism_error': grism_error, 'wave_space': wave_space, 'wavelength': wavelength, 'delta_wave_cutoff': delta_wave_cutoff, 'y_factor': y_factor, 'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min, 'grism_object': grism_object}
@@ -482,10 +512,11 @@ if __name__ == "__main__":
 		hdul.append(mask_hdu)
 		hdul.writeto('testing/' + str(test) + '/' + str(j)+ '_masks', overwrite=True)	
 		#save everything
-		v_re_med, v_re_truth , kin_model= save_results(config_path, inf_data, test, j, r_t[j], kin_model, grism_object, num_samples)
 		plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = str(test), name = str(j) + '_cornerplot_real', PA = PA_grism[j], i = i[j], Va = Va[j], r_t = r_t[j], sigma0 = sigma0[j])
+
+		v_re_med, v_re_truth , kin_model= save_results(config_path, inf_data, test, j, r_t[j], kin_model, grism_object, num_samples)
     	#plot the posteriors of the tuning parameters
-		plotting.plot_tuning_parameters(inf_data, model = 'Disk', save_to_folder = str(test), name = str(j) + '_tuning_parameters', scaling = False, error_scaling = False, errors = False, reg = False)
+		# plotting.plot_tuning_parameters(inf_data, model = 'Disk', save_to_folder = str(test), name = str(j) + '_tuning_parameters', scaling = False, error_scaling = False, errors = False, reg = False)
 
 		az.plot_trace(inf_data, var_names =['PA', 'i', 'Va','r_t', 'sigma0'], divergences = True)
 		plt.savefig('testing/' + str(test) + '/' + str(j)+ '_chains.png', dpi=500)
@@ -496,7 +527,7 @@ if __name__ == "__main__":
 		#plot and save delta map of the fluxes
 		plt.close('all')
 		median = np.where(kin_model.mask == 1, kin_model.fluxes_mean, 0.0)
-		truth = np.where(kin_model.mask == 1, kin_model.flux_prior, 0.0)
+		truth = np.where(kin_model.mask == 1, intrinsic_image, 0.0)
 		chi = (median - truth)/kin_model.flux_error
 		plt.imshow(chi, origin = 'lower', cmap = 'coolwarm',  vmin = -1, vmax = 1)
 		plt.colorbar()

@@ -18,8 +18,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 import numpyro
-from numpyro.infer import MCMC, NUTS
-from numpyro.infer.initialization import init_to_median, init_to_sample, init_to_uniform, init_to_value
+from numpyro.infer import MCMC, NUTS, BarkerMH, SA
+# from numpyro.contrib.nested_sampling import NestedSampler
+from numpyro.infer.initialization import init_to_median, init_to_sample, init_to_uniform, init_to_value, init_to_feasible
 
 import statistics as st
 import math
@@ -36,6 +37,7 @@ import yaml
 
 jax.config.update('jax_enable_x64', True)
 numpyro.set_host_device_count(2)
+numpyro.enable_validation()
 numpyro.set_platform('gpu')
 
 # np.set_printoptions(precision=15, floatmode='maxprec')
@@ -63,6 +65,9 @@ class Fit_Numpyro():
 		self.obs_map = obs_map
 		self.obs_error = obs_error
 
+		self.mask = (jnp.where(obs_map/obs_error < 5.0, 0, 1)).astype(bool)
+
+
 		self.grism_object = grism_object
 
 		self.kin_model = kin_model
@@ -75,22 +80,44 @@ class Fit_Numpyro():
 
 	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
 
-		self.nuts_kernel = NUTS(self.kin_model.inference_model, init_strategy=init_to_median(num_samples=2000), step_size=step_size, adapt_step_size=adapt_step_size,
-								target_accept_prob=target_accept_prob, dense_mass=True, max_tree_depth=10, find_heuristic_step_size=True)
+		# self.nuts_kernel = BarkerMH(self.kin_model.inference_model,  step_size=step_size, adapt_step_size=adapt_step_size,
+		# 						target_accept_prob=target_accept_prob)  #find_heuristic_step_size=True, #max_tree_depth=10 dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')]
+		self.nuts_kernel = SA(self.kin_model.inference_model, dense_mass=False) #, init_strategy=init_to_median(num_samples=2000))  #find_heuristic_step_size=True, #max_tree_depth=10 dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')]
 		# init_to_value(values = init_vals)
 		print('max tree: ', max_tree_depth)
 		print('step size: ', step_size)
 		print('warmup: ', num_warmup)
 		print('samples: ', num_samples)
 
+
 		self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
 						 num_warmup=num_warmup, num_chains=num_chains)
 		self.rng_key = random.PRNGKey(100)
-		self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, extra_fields=("potential_energy", "accept_prob"))
+		#find valid initial params
+
+		init_params_info = numpyro.infer.util.find_valid_initial_params(self.rng_key, self.kin_model.inference_model, model_args = (self.grism_object, self.obs_map, self.obs_error, self.mask), init_strategy=init_to_median)
+
+		print(init_params_info)
+
+		with numpyro.validation_enabled():
+			self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =self.mask) #, extra_fields=("potential_energy", "accept_prob"))
 
 		print('done')
 
 		self.mcmc.print_summary()
+	
+	def run_inference_ns(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
+
+		constructor_kwargs = {"max_samples": 1000}
+		self.ns = NestedSampler(model = self.kin_model.inference_model, constructor_kwargs= constructor_kwargs)
+
+		self.ns.run(random.PRNGKey(0), grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =self.mask)
+		self.ns.print_summary()
+
+		ns_samples = self.ns.get_samples(random.PRNGKey(1), num_samples=num_samples)
+		print(ns_samples)
+
+		print('done')
 
 	def diverging_parameters(self, chain_number, divergence_number):
 		divergences = az.convert_to_dataset(

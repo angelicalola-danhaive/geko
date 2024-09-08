@@ -239,7 +239,7 @@ def plot_summary(image, image_model, image_error, map, map_model, map_error, x0,
 	plt.close()
 	
 
-def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None):
+def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None):
 	fig = plt.figure( constrained_layout=True)
 	fig.set_size_inches(11, 6)
 	# spec = gridspec.GridSpec(ncols=3, nrows=3,
@@ -283,7 +283,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	chi_icenter,chi_jcenter = np.unravel_index(np.argmax(obs_map), obs_map.shape)
 	chi_central_region = chi[chi_icenter-10:chi_icenter+10,chi_jcenter-10:chi_jcenter+10]
 	ax_residuals = fig.add_subplot(gs00[2,0])
-	cp = ax_residuals.pcolormesh(X, Y, chi, shading='nearest', vmin = -3, vmax = 3)  # RdBu
+	cp = ax_residuals.pcolormesh(X, Y, chi, shading='nearest') #, vmin = -3, vmax = 3)  # RdBu
 	ax_residuals.set_xlabel(r'wavelength $[\mu m]$', fontsize=5)
 	ax_residuals.set_ylabel(r'$\Delta$ DEC ["]', fontsize=5)
 	ax_residuals.tick_params(axis='both', which='major', labelsize=5)
@@ -313,7 +313,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	cbar = plt.colorbar(cp, ax = vel_map_ax)
 	cbar.ax.set_ylabel('velocity [km/s]', fontsize = 5)
 	cbar.ax.tick_params(labelsize = 5)
-	vel_map_ax.set_title(r'Velocity map, $v_{rot} = $' + str(round(v_rot)) + ' km/s', fontsize=10)
+	vel_map_ax.set_title(r'Velocity map, $v_{rot} = $' + str(np.round(v_rot)) + ' km/s', fontsize=10)
 
 
 	vel_map_ax.plot((center[1]-x0)*0.0629/factor, (center[0]-y0)*0.0629/factor, '+', markersize=10, label = 'velocity centroid', color = 'black')
@@ -357,12 +357,13 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=True,
-		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]' ],
-		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$'],
+		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]'],
+		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$f_{scale}$'],
 		max_n_ticks=3,
 		divergences=False)
-
-	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'],
+	truths = { 'PA': PA, 'i': i, 'Va': Va,
+						  'r_t': r_t, 'sigma0': sigma0 } #, 'fluxes_scaling': None}
+	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'],truths = truths, truth_color='blue',
 						color='crimson', **CORNER_KWARGS)
 	CORNER_KWARGS = dict(
 		smooth=2,
@@ -389,7 +390,10 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	fig.suptitle(str(save_to_folder), fontsize=10, fontweight='bold')
 
 	if save_to_folder != None:
-		fig.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=500)
+		if name == 'summary':
+			fig.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=500)
+		else:
+			fig.savefig('testing/' + save_to_folder + '/' + name + '.png', dpi=500)
 		# fig.savefig('summary_plots/CONGRESS/' + save_to_folder.split('/')[0] + '_' + name + '.png', dpi=500)
 	plt.show()
 	plt.close()
@@ -525,6 +529,7 @@ def plot_merger_summary(obs_map, model_map, obs_error, model_velocities, v_rot, 
 
 	if save_to_folder != None:
 		fig.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=500)
+		
 	plt.show()
 	plt.close()
 
@@ -579,17 +584,20 @@ def plot_pp_cornerplot(data, kin_model, choice='real', PA=None, i=None, Va=None,
 
 	if choice == 'real':
 
+		truths = { 'PA': PA, 'i': i, 'Va': Va,
+						  'r_t': r_t, 'sigma0': sigma0}
+		CORNER_KWARGS = define_corner_args(divergences = div, var_names = ['sigma0', 'unscaled_sigma0'], labels = ['sigma0', 'unscaled_sigma0'])
 
-		CORNER_KWARGS = define_corner_args(divergences = div, var_names = kin_model.var_names, labels = kin_model.labels)
-
-		fig = corner.corner(data, group='posterior',color='crimson', **CORNER_KWARGS)
+		fig = corner.corner(data, group='posterior',color='crimson', **CORNER_KWARGS, truths = None,truth_color='blue' )
 				
-		CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False,var_names = kin_model.var_names, labels= kin_model.labels, show_labels = False)
+		CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False,var_names = ['sigma0', 'unscaled_sigma0'], labels= ['sigma0', 'unscaled_sigma0'], show_labels = False)
 
 		fig = corner.corner(data, group='prior',fig=fig,color='thistle', **CORNER_KWARGS)
 
-		if save_to_folder != None:
-				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+		if name == 'summary':
+			plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=500)
+		else:
+			plt.savefig('testing/' + save_to_folder + '/' + name + '.png', dpi=500)
 		plt.show()
 		plt.close()
 
@@ -641,7 +649,10 @@ def plot_tuning_parameters(data, model = 'one_component_model', rotation = True,
 		fig = corner.corner(data, group='prior', fig=fig, color='lightgray', **CORNER_KWARGS)
 			
 		if save_to_folder != None:
-			plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=300)
+			if name == 'summary':
+				plt.savefig('fitting_results/' + save_to_folder + '/' + name + '.png', dpi=500)
+			else:
+				plt.savefig('testing/' + save_to_folder + '/' + name + '.png', dpi=500)
 		plt.show()
 		plt.close()
 
