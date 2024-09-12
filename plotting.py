@@ -586,11 +586,11 @@ def plot_pp_cornerplot(data, kin_model, choice='real', PA=None, i=None, Va=None,
 
 		truths = { 'PA': PA, 'i': i, 'Va': Va,
 						  'r_t': r_t, 'sigma0': sigma0}
-		CORNER_KWARGS = define_corner_args(divergences = div, var_names = ['sigma0', 'unscaled_sigma0'], labels = ['sigma0', 'unscaled_sigma0'])
+		CORNER_KWARGS = define_corner_args(divergences = div, var_names = ['amplitude', 'r_eff', 'n','ellip','PA_morph'], labels = ['amplitude', 'r_eff', 'n','ellip','PA_morph'])
 
 		fig = corner.corner(data, group='posterior',color='crimson', **CORNER_KWARGS, truths = None,truth_color='blue' )
 				
-		CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False,var_names = ['sigma0', 'unscaled_sigma0'], labels= ['sigma0', 'unscaled_sigma0'], show_labels = False)
+		CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False,var_names = ['amplitude', 'r_eff', 'n','ellip','PA_morph'], labels= ['amplitude', 'r_eff', 'n','ellip','PA_morph'], show_labels = False)
 
 		fig = corner.corner(data, group='prior',fig=fig,color='thistle', **CORNER_KWARGS)
 

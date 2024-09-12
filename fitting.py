@@ -38,7 +38,7 @@ import yaml
 jax.config.update('jax_enable_x64', True)
 numpyro.set_host_device_count(2)
 numpyro.enable_validation()
-numpyro.set_platform('gpu')
+# numpyro.set_platform('gpu')
 
 # np.set_printoptions(precision=15, floatmode='maxprec')
 # jnp.set_printoptions(precision=15, floatmode='maxprec')
@@ -80,9 +80,9 @@ class Fit_Numpyro():
 
 	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
 
-		# self.nuts_kernel = BarkerMH(self.kin_model.inference_model,  step_size=step_size, adapt_step_size=adapt_step_size,
-		# 						target_accept_prob=target_accept_prob)  #find_heuristic_step_size=True, #max_tree_depth=10 dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')]
-		self.nuts_kernel = SA(self.kin_model.inference_model, dense_mass=False) #, init_strategy=init_to_median(num_samples=2000))  #find_heuristic_step_size=True, #max_tree_depth=10 dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')]
+		self.nuts_kernel = NUTS(self.kin_model.inference_model,  step_size=step_size, adapt_step_size=adapt_step_size, init_strategy=init_to_value(values = {'unscaled_PA': 0.0, 'unscaled_i': 0.0, 'unscaled_Va': 0.2, 'unscaled_r_t': 0.25, 'unscaled_sigma0': 0.2}),
+								target_accept_prob=target_accept_prob,find_heuristic_step_size=True, max_tree_depth=10, dense_mass=False, adapt_mass_matrix=True) #dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')])
+		# self.nuts_kernel = SA(self.kin_model.inference_model, dense_mass=False) #, init_strategy=init_to_median(num_samples=2000))  #find_heuristic_step_size=True, #max_tree_depth=10 dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')]
 		# init_to_value(values = init_vals)
 		print('max tree: ', max_tree_depth)
 		print('step size: ', step_size)
@@ -97,7 +97,7 @@ class Fit_Numpyro():
 
 		init_params_info = numpyro.infer.util.find_valid_initial_params(self.rng_key, self.kin_model.inference_model, model_args = (self.grism_object, self.obs_map, self.obs_error, self.mask), init_strategy=init_to_median)
 
-		print(init_params_info)
+		# print(init_params_info)
 
 		with numpyro.validation_enabled():
 			self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =self.mask) #, extra_fields=("potential_energy", "accept_prob"))

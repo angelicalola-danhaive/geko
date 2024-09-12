@@ -1024,8 +1024,8 @@ def define_mock_params():
     line = 'H_alpha'
     y_factor = 1
     flux_threshold = 3
-    factor = 2
-    wave_factor = 2
+    factor = 5
+    wave_factor = 9
     x0 = y0 = 31//2
     model_name = 'Disk'
     flux_bounds = None
@@ -1035,9 +1035,9 @@ def define_mock_params():
     Va_bounds = None
     r_t_bounds = None
     sigma0_bounds = None #can put similar bounds on this using the Va measured from 1D spectrum
-    num_samples = 10000
-    num_warmup = 10000
-    step_size = 0.001
+    num_samples = 300
+    num_warmup = 300
+    step_size =1
     target_accept_prob = 0.8
 
 	
@@ -1200,8 +1200,8 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     x,y = jnp.meshgrid(x,y)
     kin_model = models.KinModels()
     # kin_model.compute_factors(jnp.radians((90)), jnp.radians(60), x,y)
-    V = kin_model.v( x, y, 90, 80, 420, 3.5)
-    D = 320*jnp.ones((image_shape*factor, image_shape*factor))
+    V = kin_model.v( x, y, 90, 60, 127, 1.69)
+    D = 239*jnp.ones((image_shape*factor, image_shape*factor))
 
     mock_grism_high = grism_object.disperse(oversampled_image, V, D)
 

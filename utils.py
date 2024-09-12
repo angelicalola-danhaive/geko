@@ -23,6 +23,7 @@ from skimage.color import label2rgb
 
 from astropy.modeling.models import Sersic2D
 from scipy import stats
+from scipy.ndimage import zoom
 from photutils.segmentation import detect_sources, SourceCatalog, deblend_sources, SegmentationImage
 from photutils.background import Background2D, MedianBackground
 from photutils.aperture import EllipticalAperture
@@ -66,6 +67,28 @@ def oversample(image_low_res, factor_y, factor_x, method='nearest'):
     image_high_res /= factor_y*factor_x 
 
     return image_high_res
+
+# def oversample(image_low_res, factor, method='nearest'):
+#     if factor>1:
+#         # interpolate onto finer grid and trim the edges to avoid extrapolation issues
+#         new_arr = zoom(image_low_res,factor,order=1,mode='nearest',grid_mode=True) #[factor:-factor,factor:-factor] 
+
+#     else: 
+#         new_arr = image_low_res[1:-1,1:-1]
+#     new_arr /= factor**2
+#     return new_arr
+
+# def resample(image_high_res, factor, method='nearest'):
+#     func = np.sum
+#     # reshape and then sum every N pixels along an axis
+#     reshaped_arr = image_high_res.reshape((image_high_res.shape[0],image_high_res.shape[1]//factor,factor))
+#     comb_arr = func(reshaped_arr,-1)
+
+#     # now repeat for the other axis
+#     reshaped_arr = comb_arr.reshape(image_high_res.shape[0]//factor,factor,image_high_res.shape[1]//factor)
+#     downsampled_arr = func(reshaped_arr,1)
+#     return downsampled_arr
+
 
 
 def resample(image_high_res, factor_y, factor_x):
@@ -400,7 +423,7 @@ def compute_inclination(axis_ratio = None, ellip = None, q0 = 0.0):
     """
     if axis_ratio == None:
         axis_ratio = 1 - ellip
-    inc = np.arccos(np.sqrt( (axis_ratio**2 - q0**2)/(1 - q0**2) ))*(180/np.pi)
+    inc = jnp.arccos(jnp.sqrt( (axis_ratio**2 - q0**2)/(1 - q0**2) ))*(180/jnp.pi)
     return inc
 
 def compute_axis_ratio(inc, q0 = 0.0):
@@ -544,11 +567,14 @@ def add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff):
             x = np.linspace(0 - kin_model.x0_vel, grism_object.direct.shape[1]-1 - kin_model.x0_vel, grism_object.direct.shape[1]*grism_object.factor)
             y = np.linspace(0 - 15, grism_object.direct.shape[0]-1 - 15, grism_object.direct.shape[0]*grism_object.factor)
             X, Y = np.meshgrid(x, y)
-            inf_data.posterior['v_re'][i,int(sample)] = kin_model.v_rad(X,Y, np.radians( float(inf_data.posterior['PA'][i,int(sample)].values)), np.radians(60), float(inf_data.posterior['Va'][i,int(sample)].values),  float(inf_data.posterior['r_t'][i,int(sample)].values), r_eff) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
-    # i_med = inf_data.posterior['i'].quantile(0.50).values
-    v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values/np.sin(np.radians(60))
-    v_re_med =inf_data.posterior['v_re'].quantile(0.50).values/np.sin(np.radians(60))
-    v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values/np.sin(np.radians(60))
+            inf_data.posterior['v_re'][i,int(sample)] = kin_model.v_rad(X,Y, np.radians( float(inf_data.posterior['PA'][i,int(sample)].values)), np.radians(float(inf_data.posterior['i'][i,int(sample)].values)), float(inf_data.posterior['Va'][i,int(sample)].values),  float(inf_data.posterior['r_t'][i,int(sample)].values), r_eff) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
+    i_med = inf_data.posterior['i'].quantile(0.50).values
+    i_16 = inf_data.posterior['i'].quantile(0.16).values
+    i_84 = inf_data.posterior['i'].quantile(0.84).values
+
+    v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values/np.sin(np.radians(i_16))
+    v_re_med =inf_data.posterior['v_re'].quantile(0.50).values/np.sin(np.radians(i_med))
+    v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values/np.sin(np.radians(i_84))
     return inf_data, v_re_16, v_re_med, v_re_84
 
 
@@ -656,3 +682,90 @@ def resample_errors(error_map, factor, wave_factor):
     # resampled_errors = jnp.sqrt(jnp.sum(blocks**2, axis=(1,3)))
     resampled_errors = jnp.linalg.norm(blocks, axis=(1, 3))
     return resampled_errors
+
+
+def bn_approx(n):
+    n_safe = jnp.where(n!=0, n, 0.00001)
+    bn_value = 2 * n_safe - 1 / 3 + 4 / (405 * n_safe) + 46 / (25515 * n_safe**2) + 131 / (1148175 * n_safe**3) - 2194697 / (30690717750 * n_safe**4)
+        
+    return jnp.where(n != 0, bn_value, 0.0)  # Still use jnp.where to return 0 for n=0
+
+
+def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
+        
+    # import tensorflow_probability as tfp
+    n_safe = jnp.where(n>0, n, 0.00001)
+    bn = bn_approx(n) #tfp.math.igammainv(jnp.array(2.0 * n), 0.5)
+    cos_theta = jnp.cos(theta)
+    sin_theta = jnp.sin(theta)
+    x_maj = jnp.abs((x - x_0) * cos_theta + (y - y_0) * sin_theta)
+    x_min = jnp.abs(-(x - x_0) * sin_theta + (y - y_0) * cos_theta)
+
+    ellip_safe = jnp.where(ellip < 1, ellip, 0.9)
+    r_eff_safe = jnp.where(r_eff > 0, r_eff, 0.01)
+        # r_eff_safe = 4
+
+    # b = (1 - ellip_safe) * r_eff_safe
+        # b_safe = jnp.where((ellip!=1) & (r_eff!=0) , jnp.where((ellip!=1) & (r_eff!=0),b,0.00001), 0.000001)
+    b_safe = jnp.where(ellip<1 ,(1 - ellip_safe) * r_eff_safe, 0.00001)
+
+    expon = 2.0 #+ c
+    inv_expon = 1.0 / expon
+    squared = jnp.where(((x_maj>0) | (x_min>0)) & (b_safe!=0) & (r_eff>0), ((x_maj / r_eff_safe) ** expon + (x_min / b_safe) ** expon), 1e-5)
+    z = jnp.where(((x_maj>0) | (x_min>0)) & (b_safe!=0) & (r_eff>0), jnp.where(squared>0,jnp.sqrt(squared), 0.0), 1e-5)
+        
+    return jnp.where((n_safe>0) & ((x_maj>0) | (x_min>0)) & (b_safe!=0) & (r_eff>0), amplitude * jnp.exp(-bn * (z ** (1 / n_safe) - 1.0)), amplitude * jnp.exp(bn))
+
+
+# import time
+
+# def sersic_profile(x, y, amplitude, r_eff, n, x_0, y_0, ellip, theta, c=0):
+#     start_time = time.time()
+    
+#     # 1. Safe n and bn approximation
+#     n_safe = jnp.where(n > 0, n, 0.00001)
+#     bn = bn_approx(n)
+#     print(f"bn_approx computation time: {time.time() - start_time:.6f} seconds")
+    
+#     # 2. Cosine and sine of theta
+#     cos_start = time.time()
+#     cos_theta = jnp.cos(theta)
+#     sin_theta = jnp.sin(theta)
+#     print(f"cos_theta and sin_theta computation time: {time.time() - cos_start:.6f} seconds")
+    
+#     # 3. Calculate x_maj and x_min
+#     x_maj_start = time.time()
+#     x_maj = jnp.abs((x - x_0) * cos_theta + (y - y_0) * sin_theta)
+#     x_min = jnp.abs(-(x - x_0) * sin_theta + (y - y_0) * cos_theta)
+#     print(f"x_maj and x_min computation time: {time.time() - x_maj_start:.6f} seconds")
+    
+#     # 4. Safe ellip and r_eff
+#     ellip_safe_start = time.time()
+#     ellip_safe = jnp.where(ellip < 1, ellip, 0.9)
+#     r_eff_safe = jnp.where(r_eff > 0, r_eff, 0.01)
+#     print(f"ellip_safe and r_eff_safe computation time: {time.time() - ellip_safe_start:.6f} seconds")
+    
+#     # 5. Compute b_safe
+#     b_safe_start = time.time()
+#     b_safe = jnp.where(ellip < 1, (1 - ellip_safe) * r_eff_safe, 0.00001)
+#     print(f"b_safe computation time: {time.time() - b_safe_start:.6f} seconds")
+    
+#     # 6. Exponentiation
+#     expon_start = time.time()
+#     expon = 2.0
+#     inv_expon = 1.0 / expon
+#     squared = jnp.where((x_maj >= 0) & (x_min >= 0) & (ellip < 1) & (r_eff_safe > 0), 
+#                         ((x_maj / r_eff_safe) ** expon + (x_min / b_safe) ** expon), 0.0)
+#     z = jnp.where((x_maj >= 0) & (x_min >= 0) & (ellip < 1) & (r_eff_safe > 0), squared ** inv_expon, 1.0)
+#     print(f"Exponentiation computation time: {time.time() - expon_start:.6f} seconds")
+    
+#     # 7. Final Sersic profile
+#     final_start = time.time()
+#     result = jnp.where((x_maj >= 0) & (x_min >= 0) & (n_safe > 0) & (ellip < 1) & (r_eff_safe > 0), 
+#                        amplitude * jnp.exp(-bn * (z ** (1 / n_safe) - 1.0)), 0.0)
+#     print(f"Final Sersic profile computation time: {time.time() - final_start:.6f} seconds")
+    
+#     total_time = time.time() - start_time
+#     print(f"Total sersic_profile computation time: {total_time:.6f} seconds")
+    
+#     return result
