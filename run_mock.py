@@ -82,11 +82,11 @@ def make_image(PA_image, i, r_t, SN_image, psf, image_shape):
     r_eff = (1.676/0.4)*r_t
     print('Reff: ', r_eff)
     time_start = time.time()
-    galaxy_model = Sersic2D(amplitude=1, r_eff = r_eff*27, n =1, x_0 = image_shape//2*27 + 13 , y_0 = image_shape//2*27 +13, ellip = ellip, theta=(90 - PA_image)*np.pi/180) #function takes theta in rads
+    galaxy_model = Sersic2D(amplitude=1/27**2, r_eff = r_eff*27, n =1, x_0 = image_shape//2*27 + 13 , y_0 = image_shape//2*27 +13, ellip = ellip, theta=(90 - PA_image)*np.pi/180) #function takes theta in rads
     ny = nx = image_shape
     y, x = np.mgrid[0:ny*27, 0:nx*27]
     image = jnp.array(galaxy_model(x, y))
-    image = utils.resample(image, 27, 27)/27**2
+    image = utils.resample(image, 27, 27)
     time_end = time.time()
     # image = image.at[15,15].set(4)
     max_image = jnp.max(image)
@@ -284,7 +284,7 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, p
 
 	return convolved_noise_image, image_error, image, grism_spectrum_noise, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
 
-def run_fit(mock_params, priors):
+def run_fit(mock_params, priors,parametric = False):
 	'''
 		Run the fitting code
 	'''
@@ -298,13 +298,16 @@ def run_fit(mock_params, priors):
 	mask = (jnp.where(obs_map/obs_error < 5.0, 0, 1)).astype(bool)
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
 
-	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None)
+	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric = parametric)
 
 	rng_key = random.PRNGKey(4)
 
 	#check truth likelihood
-
-	prior_predictive = Predictive(run_fit.kin_model.inference_model, num_samples=num_samples)
+	if parametric:
+		inference_model = run_fit.kin_model.inference_model_parametric
+	else:
+		inference_model = run_fit.kin_model.inference_model
+	prior_predictive = Predictive(inference_model, num_samples=num_samples)
 
 	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, mask = mask)
 
@@ -432,7 +435,7 @@ def run_fit(mock_params, priors):
 	return inf_data, kin_model, grism_object, num_samples
 
 
-def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, num_samples):
+def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, num_samples, parametric):
 	'''
         Save every result in a table so I can easily read it into a file to make all of the plots
         Save the output file + summary ONLY for each mock run, all in the same folder where the mock
@@ -443,7 +446,7 @@ def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, n
 	#save the output file
 	inf_data.to_netcdf('testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_'+ 'output')
 	#post process results
-	model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object)
+	inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object,parametric)
 	#load results table
 	config_table = Table.read(config_path, format='ascii')
 	config_table_test = config_table[config_table['test'] == test]
@@ -497,6 +500,8 @@ parser.add_argument('--config', type=str, default='testing/mock_results',
                     help='config table path') #config table name
 parser.add_argument('--test', type=str, default='',
                     help='name of the test running') #test name
+parser.add_argument('--parametric', type=int, default=0,
+		    		help='parametric or non-parametric flux model') #parametric or non-parametric model	
 # parser.add_argument('--psf_path', type=str, default='gdn_mpsf_F356W_small.fits',
 #                     help='psf file path') #psf file path --> add the default here
 
@@ -505,7 +510,13 @@ if __name__ == "__main__":
 	args = parser.parse_args()
 	config_path = args.config
 	test = args.test
+	parametric = bool(args.parametric)
 	# psf_path = args.psf_path
+
+	if parametric:	
+		print('Running parametric model')
+	else:
+		print('Running non-parametric model')
 
 	PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism = read_config_table(config_path, test)
 	psf = utils.load_psf(filter = 'F356W', y_factor = 1, size = 9)
@@ -546,9 +557,10 @@ if __name__ == "__main__":
 		mock_params = {'test': test, 'j': j ,'convolved_noise_image': convolved_noise_image, 'image_error': image_error, 'grism_spectrum_noise': grism_spectrum_noise, 'grism_error': grism_error, 'wave_space': wave_space, 'wavelength': wavelength, 'delta_wave_cutoff': delta_wave_cutoff, 'y_factor': y_factor, 'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min, 'grism_object': grism_object}
 		priors = {'PA': PA_image[j], 'i': i[j], 'Va': Va[j], 'r_t': r_t[j], 'sigma0': sigma0[j]}
 		#run fitting
-		inf_data, kin_model, grism_object, num_samples  = run_fit(mock_params,priors)
+		inf_data, kin_model, grism_object, num_samples  = run_fit(mock_params,priors, parametric = parametric)
 		#post process inference data
-		# model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object)	
+
+		inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object, parametric = parametric)	
 		#save the masks in a fit file
 		#create list 
 		hdul = fits.HDUList()
@@ -560,9 +572,10 @@ if __name__ == "__main__":
 		hdul.append(mask_hdu)
 		hdul.writeto('testing/' + str(test) + '/' + str(j)+ '_masks', overwrite=True)	
 		#save everything
-		plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = str(test), name = str(j) + '_cornerplot_real', PA = PA_grism[j], i = i[j], Va = Va[j], r_t = r_t[j], sigma0 = sigma0[j])
+		if parametric:
+			plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = str(test), name = str(j) + '_cornerplot_real', PA = PA_grism[j], i = i[j], Va = Va[j], r_t = r_t[j], sigma0 = sigma0[j])
 
-		v_re_med, v_re_truth , kin_model= save_results(config_path, inf_data, test, j, r_t[j], kin_model, grism_object, num_samples)
+		v_re_med, v_re_truth , kin_model= save_results(config_path, inf_data, test, j, r_t[j], kin_model, grism_object, num_samples,parametric)
     	#plot the posteriors of the tuning parameters
 		# plotting.plot_tuning_parameters(inf_data, model = 'Disk', save_to_folder = str(test), name = str(j) + '_tuning_parameters', scaling = False, error_scaling = False, errors = False, reg = False)
 

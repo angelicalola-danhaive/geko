@@ -52,7 +52,7 @@ XLA_FLAGS = "--xla_gpu_force_compilation_parallelism=1"
 
 
 class Fit_Numpyro():
-	def __init__(self, obs_map, obs_error, grism_object, kin_model, inference_data):
+	def __init__(self, obs_map, obs_error, grism_object, kin_model, inference_data, parametric):
 		""" Class to fit model to data
 
 						Parameters
@@ -74,16 +74,23 @@ class Fit_Numpyro():
 
 		self.inference_data = inference_data
 
+		self.parametric = parametric
+
 	def __str__(self):
 		# print all of the attributes of the class
 		return 'Fit_Numpyro Class: \n' + ' - factor = ' + str(self.factor) + '\n - wave_factor = ' + str(self.wave_factor) + '\n grism object = ' + str(grism_object)
 
 	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
 
-		self.nuts_kernel = NUTS(self.kin_model.inference_model,  step_size=step_size, adapt_step_size=adapt_step_size, init_strategy=init_to_value(values = {'unscaled_PA': 0.0, 'unscaled_i': 0.0, 'unscaled_Va': 0.2, 'unscaled_r_t': 0.25, 'unscaled_sigma0': 0.2}),
+		if self.parametric:
+			inference_model = self.kin_model.inference_model_parametric
+		else:
+			inference_model = self.kin_model.inference_model
+		self.nuts_kernel = NUTS(inference_model,  step_size=step_size, adapt_step_size=adapt_step_size, init_strategy=init_to_median(num_samples=2000),
 								target_accept_prob=target_accept_prob,find_heuristic_step_size=True, max_tree_depth=10, dense_mass=False, adapt_mass_matrix=True) #dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')])
 		# self.nuts_kernel = SA(self.kin_model.inference_model, dense_mass=False) #, init_strategy=init_to_median(num_samples=2000))  #find_heuristic_step_size=True, #max_tree_depth=10 dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')]
 		# init_to_value(values = init_vals)
+		# init_to_value(values = {'unscaled_PA': 0.0, 'unscaled_i': 0.0, 'unscaled_Va': 0.2, 'unscaled_r_t': 0.25, 'unscaled_sigma0': 0.2})
 		print('max tree: ', max_tree_depth)
 		print('step size: ', step_size)
 		print('warmup: ', num_warmup)
@@ -95,7 +102,7 @@ class Fit_Numpyro():
 		self.rng_key = random.PRNGKey(100)
 		#find valid initial params
 
-		init_params_info = numpyro.infer.util.find_valid_initial_params(self.rng_key, self.kin_model.inference_model, model_args = (self.grism_object, self.obs_map, self.obs_error, self.mask), init_strategy=init_to_median)
+		# init_params_info = numpyro.infer.util.find_valid_initial_params(self.rng_key, self.kin_model.inference_model, model_args = (self.grism_object, self.obs_map, self.obs_error, self.mask), init_strategy=init_to_median)
 
 		# print(init_params_info)
 
@@ -148,7 +155,9 @@ parser.add_argument('--output', type=str, default='',
 parser.add_argument('--line', type=str, default='H_alpha',
 		    		help='line to fit')
 parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_catalog.cat',
-		    		help='master catalog file name')			
+		    		help='master catalog file name')	
+parser.add_argument('--parametric', type=bool, default=False,
+		    		help='parametric flux model or not')		
 
 if __name__ == "__main__":
 
@@ -157,6 +166,7 @@ if __name__ == "__main__":
 	output = args.output + '/'
 	master_cat = args.master_cat
 	line = args.line
+	parametric = args.parametric
 
 	print('Running the real data')
 
@@ -167,11 +177,14 @@ if __name__ == "__main__":
 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
 
-	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None)
+	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric=parametric)
 
 	rng_key = random.PRNGKey(4)
-
-	prior_predictive = Predictive(run_fit.kin_model.inference_model, num_samples=num_samples)
+	if parametric:
+		inference_model = run_fit.kin_model.inference_model_parametric
+	else:
+		inference_model = run_fit.kin_model.inference_model
+	prior_predictive = Predictive(inference_model, num_samples=num_samples)
 
 	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error)
 

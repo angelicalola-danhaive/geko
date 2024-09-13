@@ -43,7 +43,7 @@ import time
 from scipy.constants import c
 
 import math
-
+import xarray as xr
 jax.config.update('jax_enable_x64', True)
 numpyro.enable_validation()
 
@@ -401,9 +401,12 @@ class Disk():
 
         PA_morph_mu = self.mu_PA
         PA_morph_std = 5.0
-        unscaled_PA_morph = numpyro.sample('unscaled_PA_morph', dist.TruncatedNormal(low = (0.0 - PA_morph_mu)/PA_morph_std))
-        PA_morph = numpyro.deterministic('PA_morph', unscaled_PA_morph*PA_morph_std + PA_morph_mu)
 
+        low_PA = (-10 - PA_morph_mu)/(PA_morph_std)
+        high_PA = ( 100- PA_morph_mu)/(PA_morph_std)
+        unscaled_PA_morph = numpyro.sample('unscaled_PA_morph' + self.number, dist.TruncatedNormal(low = low_PA, high = high_PA)) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
+        # unscaled_PA = numpyro.sample('unscaled_PA' + self.number, dist.Normal()) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
+        PA_morph = numpyro.deterministic('PA_morph', unscaled_PA_morph*PA_morph_std + PA_morph_mu)
         # r_eff = numpyro.sample('r_eff', dist.TruncatedNormal(self.r_eff, 0.5, low = 0.0))
         # n = numpyro.sample('n', dist.TruncatedNormal(1.0, 0.5, low = 0.36))
         # ellip = (numpyro.sample('ellip', dist.TruncatedNormal(0.5, 0.1, low = 0.0)))
@@ -417,7 +420,7 @@ class Disk():
         y, x = jnp.mgrid[0:ny*5, 0:nx*5]
 
         # image = jnp.array(galaxy_model(x, y))
-        image = utils.sersic_profile(x, y, amplitude, r_eff*5, n, self.direct_shape[0]//2*5 + 2, self.direct_shape[0]//2*5 + 2, ellip, (90 - PA_morph)*jnp.pi/180)
+        image = utils.sersic_profile(x, y, amplitude/5**2, r_eff*5, n, self.direct_shape[0]//2*5 + 2, self.direct_shape[0]//2*5 + 2, ellip, (90 - PA_morph)*jnp.pi/180)
         # image = utils.resample(image, 5, 5)/5**2
 
         return image, r_eff, ellip
@@ -433,7 +436,7 @@ class Disk():
 
     #     return fluxes
 
-    def sample_params(self,r_eff = 0.0):
+    def sample_params(self):
         """
             Sample all of the parameters needed to model a disk velocity field
         """
@@ -601,7 +604,46 @@ class Disk():
         # f.write('v0 sampling time: '+ str(end-start)+ '\n')
 
         return Pa, i, Va, r_t,sigma0, y0_vel, x0_vel, v0
-        # return Pa, i, Va, r_t,sigma0_max, sigma0_scale, sigma0_const, y0_vel, v0, 
+
+
+    def sample_params_parametric(self,r_eff = 0.0):
+        """
+            Sample all of the parameters needed to model a disk velocity field
+        """
+
+        low_PA = (-10 - self.mu_PA)/(self.sigma_PA)
+        high_PA = ( 100- self.mu_PA)/(self.sigma_PA)
+        unscaled_PA = numpyro.sample('unscaled_PA' + self.number, dist.TruncatedNormal(low = low_PA, high = high_PA)) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
+        Pa = numpyro.deterministic('PA' + self.number, unscaled_PA*self.sigma_PA + self.mu_PA)
+
+        unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())  #* (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
+        Va = numpyro.deterministic('Va', unscaled_Va*(self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0])
+
+        r_t_sigma = self.r_t_bounds[1]/2
+        r_t_mu = self.r_t_bounds[1]
+        r_t_max = self.r_t_bounds[2]
+        r_t_high = (r_t_max - r_t_mu)/r_t_sigma
+        r_t_low = (0.0 - r_t_mu)/r_t_sigma
+
+        unscaled_r_t = numpyro.sample('unscaled_r_t', dist.Uniform())
+        r_t = numpyro.deterministic('r_t', unscaled_r_t*r_eff)
+    
+
+        unscaled_sigma0 = numpyro.sample('unscaled_sigma0'+ self.number, dist.Uniform())
+        sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*(600-self.sigma0_bounds[0]) + self.sigma0_bounds[0])
+
+        unscaled_y0_vel = numpyro.sample('unscaled_y0_vel'+ self.number, dist.Normal())
+        y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.y0_std + self.mu_y0_vel)
+        
+        unscaled_x0_vel = numpyro.sample('unscaled_x0_vel'+ self.number, dist.Normal())
+        x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.y0_std + self.mu_y0_vel)
+
+        # unscaled_v0 = numpyro.sample('unscaled_v0'+ self.number, dist.Normal())
+        # v0 = numpyro.deterministic('v0', unscaled_v0*100)
+        v0 = 0
+
+
+        return Pa, Va, r_t,sigma0, y0_vel, x0_vel, v0
     
     def compute_posterior_means(self, inference_data):
         """
@@ -679,7 +721,22 @@ class Disk():
         return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
         # return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean,  self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean, self.y0_vel_mean, self.v0_mean
 
-    def compute_flux_posterior(self, inference_data, flux_type):
+    def compute_posterior_means_parametric(self, inference_data):
+        """
+            Retreive the best sample from the MCMC chains for the main disk variables
+        """
+
+        self.PA_mean = jnp.array(inference_data.posterior['PA'+ self.number].median(dim=["chain", "draw"]))
+        self.y0_vel_mean = jnp.array(inference_data.posterior['y0_vel'+ self.number].median(dim=["chain", "draw"]))
+        self.x0_vel_mean = jnp.array(inference_data.posterior['x0_vel'+ self.number].median(dim=["chain", "draw"]))
+        self.v0_mean = 0 #jnp.array(inference_data.posterior['v0'+ self.number].median(dim=["chain", "draw"]))
+        self.r_t_mean = jnp.array(inference_data.posterior['r_t'+ self.number].median(dim=["chain", "draw"]))
+        self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'+ self.number].median(dim=["chain", "draw"]))
+        self.Va_mean = jnp.array(inference_data.posterior['Va'+ self.number].median(dim=["chain", "draw"]))
+
+        return  self.PA_mean,self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
+
+    def compute_flux_posterior(self, inference_data, flux_type = 'auto'):
 
         # best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
         # ), inference_data['sample_stats']['lp'].shape)
@@ -715,13 +772,22 @@ class Disk():
         self.n_mean = jnp.array(inference_data.posterior['n'].median(dim=["chain", "draw"]))
         self.ellip_mean = jnp.array(inference_data.posterior['ellip'].median(dim=["chain", "draw"]))
         self.PA_morph_mean = jnp.array(inference_data.posterior['PA_morph'].median(dim=["chain", "draw"]))
+        #compute the inclination prior posterior and median from the ellipticity
+        num_samples = 10
 
+        inference_data.posterior['i'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
+        inference_data.prior['i'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
+        for i in [0,1]:
+            for sample in range(num_samples-1):
+                inference_data.posterior['i'][i,int(sample)] = utils.compute_inclination(ellip = float(inference_data.posterior['ellip'][i,int(sample)].values))
+                inference_data.prior['i'][0,int(sample)] = utils.compute_inclination(ellip = float(inference_data.prior['ellip'][0,int(sample)].values))
+        self.i_mean = jnp.array(inference_data.posterior['i'].median(dim=["chain", "draw"]))
         #compute the fluxes for the parametric model
         y, x = np.mgrid[0:self.direct_shape[0]*27, 0:self.direct_shape[1]*27]
-        fluxes_mean_high = utils.sersic_profile(x,y,amplitude=self.amplitude_mean, r_eff = self.r_eff_mean*27, n = self.n_mean, x_0 = self.direct_shape[0]//2*27 + 13 , y_0 = self.direct_shape[0]//2*27 +13, ellip = self.ellip_mean, theta=(90 - self.PA_morph_mean)*np.pi/180) #function takes theta in rads
-        self.fluxes_mean = utils.resample(fluxes_mean_high, 27,27)/27**2
+        fluxes_mean_high = utils.sersic_profile(x,y,amplitude=self.amplitude_mean/27**2, r_eff = self.r_eff_mean*27, n = self.n_mean, x_0 = self.direct_shape[0]//2*27 + 13 , y_0 = self.direct_shape[0]//2*27 +13, ellip = self.ellip_mean, theta=(90 - self.PA_morph_mean)*np.pi/180) #function takes theta in rads
+        self.fluxes_mean = utils.resample(fluxes_mean_high, 27,27)
 
-        return self.fluxes_mean, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean
+        return inference_data, self.fluxes_mean, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean
     
     def v_rot(self, fluxes_mean, model_velocities, i_mean,factor):
         """
@@ -1173,10 +1239,10 @@ class DiskModel(KinModels):
         # f.write("Time to sample params: " + str(end-start) + "\n")
 
 
-        # fluxes = self.disk.sample_fluxes()
-        fluxes,r_eff, ellip = self.disk.sample_fluxes_parametric() 
-        Pa, i, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params(r_eff=r_eff)      
-        i = utils.compute_inclination(ellip = ellip)
+        fluxes = self.disk.sample_fluxes()
+        # fluxes,r_eff, ellip = self.disk.sample_fluxes_parametric() 
+        Pa, i, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params()      
+
         # sample_fluxes_reparam = numpyro.handlers.reparam(self.disk.sample_fluxes, config={'fluxes': LocScaleReparam(centered = 0)})
         # fluxes = sample_fluxes_reparam()
         # end =  time.time()
@@ -1184,7 +1250,7 @@ class DiskModel(KinModels):
 
         # oversample the fluxes to match the grism object
         # start = time.time()
-        fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'nearest')
+        fluxes_high = utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'nearest')
         # end =  time.time()
         # f.write("Time to oversample fluxes: " + str(end-start) + "\n")
 
@@ -1303,122 +1369,31 @@ class DiskModel(KinModels):
         model used for the inference
 
         """
-        # f = open("timing_total.txt", "a")
-        # sample the fluxes within the mask from a truncated normal distribution
-        # start = time.time()
-        
-        # end =  time.time()
-        # Pa, i, Va, r_t, sigma0_max, sigma0_scale, sigma0_const, y0_vel, v0 = self.disk.sample_params()
-        # f.write("Time to sample params: " + str(end-start) + "\n")
-
-
         # fluxes = self.disk.sample_fluxes()
         fluxes,r_eff, ellip = self.disk.sample_fluxes_parametric() 
-        Pa, i, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params(r_eff=r_eff)      
+        Pa, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params_parametric(r_eff=r_eff)      
         i = utils.compute_inclination(ellip = ellip) 
-        # sample_fluxes_reparam = numpyro.handlers.reparam(self.disk.sample_fluxes, config={'fluxes': LocScaleReparam(centered = 0)})
-        # fluxes = sample_fluxes_reparam()
-        # end =  time.time()
-        # f.write("Time to sample fluxes: " + str(end-start) + "\n")
 
-        # oversample the fluxes to match the grism object
-        # start = time.time()
         fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'nearest')
-        # end =  time.time()
-        # f.write("Time to oversample fluxes: " + str(end-start) + "\n")
 
-        # create new grid centered on those centroids
-        # x = jnp.linspace(0 - self.x0_vel, self.flux_prior.shape[1]-1 - self.x0_vel, self.flux_prior.shape[1]*grism_object.factor)
-        # y = jnp.linspace(0 - 15, self.flux_prior.shape[0]-1 -15, self.flux_prior.shape[0]*grism_object.factor)
-        # X, Y = jnp.meshgrid(x, y)
-        # x_10 = jnp.linspace(0 - 15, self.flux_prior.shape[1]-1 - 15, self.flux_prior.shape[1]*grism_object.factor*1)
-        # y_10 = jnp.linspace(0 - 15, self.flux_prior.shape[0]-1 -15, self.flux_prior.shape[0]*grism_object.factor*1)
         image_shape = self.flux_prior.shape[0]
         # print(image_shape//2)
         x_10 = jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape*grism_object.factor)
         y_10 = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape*grism_object.factor)
         X_10, Y_10 = jnp.meshgrid(x_10,y_10)
-        # sample for a shift in the y velocity centroid (since the x vel centroid is degenerate with the delta V that is sampled below)
 
-        # start  = time.time()
-        
-        # self.compute_factors(Pa, i,X_10, Y_10)
         velocities = jnp.asarray(self.v(X_10, Y_10, Pa, i, Va, r_t))
-        # velocities = velocities.at[15,15].set(3e-14)
-        # velocities = utils.resample(velocities, 10, 10)/10**2
-        # end =  time.time()
-        # f.write("Time to compute velocities: " + str(end-start) + "\n")
-
-        # velocities = jnp.array(v(self.x, self.y, jnp.radians(Pa),jnp.radians(i), Va, r_t))
-        # velocities = image.resize(velocities, (int(velocities.shape[0]/10), int(velocities.shape[1]/10)), method='nearest')
 
         velocities_scaled = velocities + v0
 
         dispersions = sigma0*jnp.ones_like(velocities_scaled)
-        # dispersions = self.sigma_disk(sigma0_max, sigma0_scale, sigma0_const, fluxes)
 
-        
-        # #make a data cube with the 'spectra' in each pixel
-        # broadcast_velocity_space = grism_object.velocity_space
-        # cube = fluxes*norm.pdf(broadcast_velocity_space, velocities, dispersions)
-
-        # #the PSF is already oversampled here and in 3D form
-        # PSF_kernel = grism_object.PSF
-
-        # convolved_cube = convolve(cube, PSF_kernel, mode='same')
-
-        # convolved_fluxes = jnp.sum(convolved_cube, axis=0)
-
-        # convolved_velocities = jnp.mean(convolved_cube, axis = 2)
-        # convolved_dispersions = jnp.std(convolved_cube, axis = 2)
-
-        # start = time.time()
         self.model_map = grism_object.disperse(fluxes_high, velocities_scaled, dispersions)
-        # end =  time.time()
-        # f.write("Time to disperse: " + str(end-start) + "\n")
-        # self.model_map = grism_object.disperse(convolved_fluxes, convolved_velocities, convolved_dispersions)
 
-        # start = time.time()
         self.model_map = utils.resample(self.model_map, grism_object.y_factor*grism_object.factor, grism_object.wave_factor)
-        # end = time.time()
-        # f.write("Time to resample: " + str(end-start) + "\n")
+
 
         self.error_scaling = 1 #numpyro.sample('error_scaling', dist.Uniform(0, 1))*5
-        #regularize the fluxes
-        
-        # reg_strength = numpyro.sample('regularization_strength', dist.Uniform()) #*(1-0.00001) + 0.00001
-
-        # laplace_fluxes = convolve(fluxes, self.Laplace_kernel, mode='same')
-        # sum and renormalize regularization term
-        # threshold_grism = 0.2*obs_map.max()
-        # sum_reg = jnp.sum(jnp.abs(laplace_fluxes))
-        # #use a cut to be consistent  with grism/direct renormalization + avoid negative pixels
-        # sum_reg_norm = sum_reg/jnp.sum(jnp.where(obs_map>threshold_grism,obs_map, 0.0)) #*self.model_map.shape[0]*self.model_map.shape[1]
-        # error_reg = jnp.sqrt(jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0)**2))/jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0))
-        # # error_reg_norm = error_reg*self.model_map.shape[0]*self.model_map.shape[1]/self.model_map.sum()
-
-        #new renormalization of reg term
-
-        # sum_reg = jnp.sum(jnp.abs(laplace_fluxes))/jnp.sum(jnp.abs(fluxes))
-        # sum_reg_norm = sum_reg*jnp.max(obs_map)
-
-        # error_reg = obs_error[jnp.unravel_index(jnp.argmax(obs_map), (obs_map.shape[0], obs_map.shape[1]))]
-
-
-        # laplace_fluxes_r = jnp.reshape(sum_reg_norm, (1,1))
-        # laplace_fluxes_err_r = jnp.reshape(error_reg, (1,1))
-
-        # reshaping the grism items to add the regularization term
-        # model_map_r = jnp.reshape(self.model_map, (1,self.model_map.shape[0]*self.model_map.shape[1]))
-        # obs_error_r = jnp.reshape(obs_error, (1,obs_error.shape[0]*obs_error.shape[1]))
-        # obs_map_r = jnp.reshape(obs_map, (1,obs_map.shape[0]*obs_map.shape[1]))
-
-        # self.error_scaling = 1
-        # start = time.time()
-        #make a mask to only fit high sn regions in the grism
-
-
-        # numpyro.sample('obs', dist.Normal(self.model_map[:,self.model_map.shape[1]//2-fluxes.shape[1]//2], self.error_scaling*obs_error[:,self.model_map.shape[1]//2-fluxes.shape[1]//2]), obs=obs_map[:,self.model_map.shape[1]//2-fluxes.shape[1]//2])
         mask = jnp.where(obs_map/obs_error < 5, 0, 1)
         model_masked = jnp.where(mask == 1, self.model_map, 0)
         obs_masked = jnp.where(mask == 1, obs_map, 0)
@@ -1426,46 +1401,25 @@ class DiskModel(KinModels):
 
         numpyro.sample('obs', dist.Normal(model_masked, self.error_scaling*obs_error_masked), obs=obs_masked)
 
-        # numpyro.sample('obs', dist.Normal(jnp.concatenate((model_map_r,reg_strength*laplace_fluxes_r), axis = 1),
-        #             jnp.concatenate((self.error_scaling*obs_error_r, laplace_fluxes_err_r), axis = 1)), 
-        #             obs=jnp.concatenate((obs_map_r, jnp.zeros_like(laplace_fluxes_r)), axis = 1))
-
-        # end = time.time()
-        # f.write("Time to sample obs: " + str(end-start) + "\n")
-        # end_all = time.time()
-        # f.write("Total time: " + str(end_all-start_all) + "\n")
-
-    def compute_model(self, inference_data, grism_object):
+    def compute_model_nonparam(self, inference_data, grism_object):
         """
 
         Function used to post-process the MCMC samples and plot results from the model
 
         """
 
-        self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean,self.x0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
-        # self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean,self.y0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
+        self.PA_mean,self.Va_mean, self.i_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean,self.x0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
 
-        # self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
-        self.fluxes_mean, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
-        self.i_mean = utils.compute_inclination(ellip = self.ellip_mean)
-        # self.fluxes_mean/= self.fluxes_scaling_mean
-        # self.fluxes_mean *= 0.6
-        # self.fluxes_mean = jnp.where(fluxes_mean<1e-5, 0, fluxes_mean)
+        self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
+
         self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor, method= 'bicubic')
 
-        self.x0_vel_mean = self.x0_vel #change this later to put the vel offset into the x0_vel_mean
 
-        # x = jnp.linspace(
-        #     0 - self.x0_vel_mean, self.flux_prior.shape[1] - 1 - self.x0_vel_mean, self.flux_prior.shape[1]*grism_object.factor)
-        # y = jnp.linspace(
-        #     0 - self.y0_vel_mean, self.flux_prior.shape[0] - 1 - self.y0_vel_mean, self.flux_prior.shape[0]*grism_object.factor)
-        # X, Y = jnp.meshgrid(x, y)
         image_shape =  self.flux_prior.shape[0]
-        x_10 = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape*grism_object.factor*1)
-        y_10 = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape*grism_object.factor*1)
+        x_10 = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape*grism_object.factor)
+        y_10 = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape*grism_object.factor)
         X, Y = jnp.meshgrid(x_10,y_10)
 
-        # self.compute_factors(math.radians(self.PA_mean), math.radians(self.i_mean),X, Y)
 
         self.model_velocities = jnp.asarray(self.v(X, Y, 
             self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
@@ -1474,43 +1428,6 @@ class DiskModel(KinModels):
         self.model_velocities = self.model_velocities  + self.v0_mean
 
         self.model_dispersions = self.sigma0_mean_model *jnp.ones_like(self.model_velocities) #self.sigma0_mean_model *jnp.ones_like(self.model_velocities)
-        # self.model_dispersions = self.sigma_disk( self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean,self.model_flux)
-
-        # # inference_data.posterior['V_re'].data = self.v(r[0], r[1], inference_data.posterior['PA'].data, inference_data.posterior['i'].data, inference_data.posterior['Va'].data, inference_data.posterior['r_t'].data) + inference_data.posterior['v0'].data
-        # #make a data cube with the 'spectra' in each pixel
-        # broadcast_velocity_space = grism_object.velocity_space
-        # cube = self.model_flux*norm.pdf(broadcast_velocity_space, self.model_velocities, self.model_dispersions)
-
-        # #the PSF is already oversampled here and in 3D form
-        # PSF_kernel = grism_object.PSF
-
-        # convolved_cube = convolve(cube, PSF_kernel, mode='same')
-
-        # self.convolved_fluxes = jnp.sum(convolved_cube, axis=0)
-        # print(convolved_cube[:,1,1])
-        # print(broadcast_velocity_space[:,1,1])
-        # print(jnp.multiply(convolved_cube[:,1,1], broadcast_velocity_space[:,1,1]))
-        # self.convolved_velocities = jnp.mean(jnp.multiply(convolved_cube/convolved_cube.sum(axis = 0),broadcast_velocity_space), axis = 0)
-        # self.convolved_dispersions = jnp.std(jnp.multiply(convolved_cube/convolved_cube.sum(axis = 0),broadcast_velocity_space), axis = 0)
-
-        # plt.imshow(self.model_flux,origin = 'lower')
-        # plt.colorbar()
-        # plt.show()
-        # plt.imshow(self.convolved_fluxes,origin = 'lower')
-        # plt.colorbar()
-        # plt.show()
-        # plt.imshow(self.model_velocities,origin = 'lower')
-        # plt.colorbar()
-        # plt.show()
-        # plt.imshow(self.convolved_velocities,origin = 'lower')
-        # plt.colorbar()
-        # plt.show()
-        # plt.imshow(self.model_dispersions,origin = 'lower')
-        # plt.colorbar()
-        # plt.show()
-        # plt.imshow(self.convolved_dispersions,origin = 'lower')
-        # plt.colorbar()
-        # plt.show()
 
         print(self.model_flux.shape, self.model_velocities.shape, self.model_dispersions.shape)
         self.model_map_high = grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
@@ -1518,13 +1435,63 @@ class DiskModel(KinModels):
 
         self.model_map = utils.resample(self.model_map_high, grism_object.factor*grism_object.y_factor, grism_object.wave_factor)
 
-        self.model_v_rot = self.disk.v_rot(self.fluxes_mean, self.model_velocities, self.i_mean, grism_object.factor)
-
         #compute velocity grid in flux image resolution for plotting velocity maps
         self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='nearest')
         self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='nearest')
 
-        return self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
+        return inference_data, self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
+
+    def compute_model_parametric(self, inference_data, grism_object):
+        """
+
+        Function used to post-process the MCMC samples and plot results from the model
+
+        """
+
+        self.PA_mean,self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean,self.x0_vel_mean, self.v0_mean = self.disk.compute_posterior_means_parametric(inference_data)
+        # self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean,self.y0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
+
+        # self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
+        inference_data,self.fluxes_mean, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
+
+        self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor, method= 'bicubic')
+
+        image_shape =  self.flux_prior.shape[0]
+        x_10 = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape*grism_object.factor)
+        y_10 = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape*grism_object.factor)
+        X, Y = jnp.meshgrid(x_10,y_10)
+
+
+        self.model_velocities = jnp.asarray(self.v(X, Y, 
+            self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
+        # self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
+
+        self.model_velocities = self.model_velocities  + self.v0_mean
+
+        self.model_dispersions = self.sigma0_mean_model *jnp.ones_like(self.model_velocities) #self.sigma0_mean_model *jnp.ones_like(self.model_velocities)
+
+        self.model_map_high = grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
+        # self.model_map_high = grism_object.disperse(self.convolved_fluxes, self.convolved_velocities, self.convolved_dispersions)
+
+        self.model_map = utils.resample(self.model_map_high, grism_object.factor*grism_object.y_factor, grism_object.wave_factor)
+
+        #compute velocity grid in flux image resolution for plotting velocity maps
+        self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='nearest')
+        self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='nearest')
+        return inference_data, self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
+    
+    def compute_model(self,inference_data, grism_object, parametric = False):
+        """
+
+        Function used to post-process the MCMC samples and plot results from the model
+
+        """
+
+        if parametric:
+            return self.compute_model_parametric(inference_data, grism_object)
+        else:
+            return self.compute_model_nonparam(inference_data, grism_object)
+
     def log_likelihood(self, grism_object, obs_map, obs_error, values = {}):
         Pa = values['PA']
         i = values['i']

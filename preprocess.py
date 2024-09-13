@@ -1035,8 +1035,8 @@ def define_mock_params():
     Va_bounds = None
     r_t_bounds = None
     sigma0_bounds = None #can put similar bounds on this using the Va measured from 1D spectrum
-    num_samples = 300
-    num_warmup = 300
+    num_samples = 10
+    num_warmup = 10
     step_size =1
     target_accept_prob = 0.8
 

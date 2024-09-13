@@ -357,13 +357,13 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=True,
-		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]'],
-		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$f_{scale}$'],
+		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]', r'$x_{0}$ [px]', r'$y_{0}$ [px]'],
+		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$x_{0}$', r'$y_{0}$'],
 		max_n_ticks=3,
 		divergences=False)
 	truths = { 'PA': PA, 'i': i, 'Va': Va,
-						  'r_t': r_t, 'sigma0': sigma0 } #, 'fluxes_scaling': None}
-	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'],truths = truths, truth_color='blue',
+						  'r_t': r_t, 'sigma0': sigma0, 'x0_vel': direct_image_size//2,  'y0_vel': direct_image_size//2} #, 'fluxes_scaling': None}
+	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','x0_vel', 'y0_vel'],truths = truths, truth_color='blue',
 						color='crimson', **CORNER_KWARGS)
 	CORNER_KWARGS = dict(
 		smooth=2,
@@ -373,11 +373,11 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		plot_datapoints=True,
 		fill_contours=False,
 		plot_contours=False,
-		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]' ],
+		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]', r'$x_{0}$ [px]', r'$y_{0}$ [px]'],
 		show_titles=False,
 		max_n_ticks=3)
 
-	figure = corner.corner(inf_data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'], fig=figure,
+	figure = corner.corner(inf_data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0','x0_vel', 'y0_vel'], fig=figure,
 						color='lightgray', **CORNER_KWARGS)
 
 	plt.savefig('cornerplot.png', dpi=300)
