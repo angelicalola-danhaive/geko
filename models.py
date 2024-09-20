@@ -330,7 +330,7 @@ class Disk():
     def sample_fluxes(self):
         # f = open("timing_total.txt", "a")
         #sample the fluxes within the mask
-        fluxes_scaling = 1 #numpyro.sample('fluxes_scaling' + self.number, dist.Uniform())*(2-0.05) + 0.05
+        fluxes_scaling = numpyro.sample('fluxes_scaling' + self.number, dist.Uniform())*(4-0.05) + 0.05
         # unscaled_fluxes_sample = numpyro.sample('unscaled_fluxes'+ self.number, dist.TruncatedNormal(jnp.zeros(int(len(self.masked_indices[0]))),jnp.ones(int(len(self.masked_indices[0]))),low = low, high = high), sample_shape=(int(len(self.masked_indices[0])),))
         # fluxes_sample = numpyro.deterministic('fluxes', unscaled_fluxes_sample*self.std + self.mu*fluxes_scaling)
         # fluxes_sample = numpyro.sample('unscaled_fluxes'+ self.number, dist.Uniform(), sample_shape=(int(len(self.masked_indices[0])),))
@@ -380,27 +380,31 @@ class Disk():
 
         #amplitude
         amplitude_mu= 1.0
-        amplitude_std = 0.5
+        amplitude_std = 0.2
         unscaled_amplitude = numpyro.sample('unscaled_amplitude', dist.TruncatedNormal(low = (0.0 - amplitude_mu)/amplitude_std))
         amplitude = numpyro.deterministic('amplitude', unscaled_amplitude*amplitude_std + amplitude_mu)
+        # amplitude = 1
 
         r_eff_mu = self.r_eff
-        r_eff_std = 0.5
+        r_eff_std = 1
         unscaled_r_eff = numpyro.sample('unscaled_r_eff', dist.TruncatedNormal(low = (0.0 - r_eff_mu)/r_eff_std))
         r_eff = numpyro.deterministic('r_eff', unscaled_r_eff*r_eff_std + r_eff_mu)
+        # r_eff = 4.19
 
         n_mu = 1.0
-        n_std = 0.5
+        n_std = 0.1
         unscaled_n = numpyro.sample('unscaled_n', dist.TruncatedNormal(low = (0.36 - n_mu)/n_std, high = (5.0 - n_mu)/n_std))
         n = numpyro.deterministic('n', unscaled_n*n_std + n_mu)
+        # n = 1
 
         ellip_mu = 0.5
         ellip_std = 0.1
         unscaled_ellip = numpyro.sample('unscaled_ellip', dist.TruncatedNormal(low = (0.0 - ellip_mu)/ellip_std, high = (1.0 - ellip_mu)/ellip_std))
         ellip = numpyro.deterministic('ellip', unscaled_ellip*ellip_std + ellip_mu)
+        # ellip = 0.5
 
         PA_morph_mu = self.mu_PA
-        PA_morph_std = 5.0
+        PA_morph_std = 10
 
         low_PA = (-10 - PA_morph_mu)/(PA_morph_std)
         high_PA = ( 100- PA_morph_mu)/(PA_morph_std)
@@ -414,16 +418,30 @@ class Disk():
 
         #create a mock galaxy using these parameters
         # galaxy_model = GeneralSersic2D(amplitude=amplitude, r_eff =r_eff*27, n = n, x_0 = self.direct_shape[0]//2*27 + 13 , y_0 = self.direct_shape[0]//2*27 +13, ellip = ellip, theta=(90 - PA_morph)*math.pi/180) #function takes theta in rads
-    
-       
-        ny = nx = self.direct_shape[0]
-        y, x = jnp.mgrid[0:ny*5, 0:nx*5]
+
+        factor = 5
+                
+        sersic_factor = 25
+        image_shape = self.direct_shape[0]
+
+        x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
+        y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
+        x,y = jnp.meshgrid(x,y)
+        x_grid = image.resize(x, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
+        y_grid = image.resize(y, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
+        #-------------------------constant oversampling---------------------------------
 
         # image = jnp.array(galaxy_model(x, y))
-        image = utils.sersic_profile(x, y, amplitude/5**2, r_eff*5, n, self.direct_shape[0]//2*5 + 2, self.direct_shape[0]//2*5 + 2, ellip, (90 - PA_morph)*jnp.pi/180)
-        # image = utils.resample(image, 5, 5)/5**2
+        model_image_highres = utils.sersic_profile(x_grid, y_grid, amplitude/(sersic_factor*factor)**2, r_eff, n,0.0,0.0, ellip, (90 - PA_morph)*jnp.pi/180)
+        model_image = utils.resample(model_image_highres, int(sersic_factor), int(sersic_factor))
 
-        return image, r_eff, ellip
+        #-------------------------adaptive oversampling---------------------------------
+        # image = utils.compute_adaptive_sersic_profile(x, y, amplitude/factor**2, r_eff, n, 0.0,0.0, ellip, (90 - PA_morph)*jnp.pi/180)
+        #------------------------------------------------------------------------------
+
+        #the returned image has a shape of image_shape*factor
+
+        return model_image, r_eff, ellip
     # def sample_fluxes(self):
 
     #     fluxes_sample = numpyro.sample("fluxes",dist.TruncatedNormal(self.mu, self.std, low = 0.0))
@@ -741,8 +759,8 @@ class Disk():
         # best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
         # ), inference_data['sample_stats']['lp'].shape)
 
-        # inference_data.posterior['fluxes_scaling'+ self.number].data = inference_data.posterior['fluxes_scaling'+ self.number].data*(2-0.05) + 0.05 #*(1-0.1) + 0.1
-        # inference_data.prior['fluxes_scaling'+ self.number].data = inference_data.prior['fluxes_scaling'+ self.number].data*(2-0.05) + 0.05 #*(1-0.1) + 0.1
+        inference_data.posterior['fluxes_scaling'+ self.number].data = inference_data.posterior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1
+        inference_data.prior['fluxes_scaling'+ self.number].data = inference_data.prior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1
 
         # inference_data.posterior['fluxes_error_scaling'+ self.number].data = inference_data.posterior['fluxes_error_scaling'+ self.number].data*4 + 1
         # inference_data.prior['fluxes_error_scaling'+ self.number].data = inference_data.prior['fluxes_error_scaling'+ self.number].data*4 + 1
@@ -751,9 +769,10 @@ class Disk():
         # inference_data.prior['regularization_strength'+ self.number].data = inference_data.prior['regularization_strength'+ self.number].data*(1-0.01) + 0.01  #*(1-0.1) + 0.1
         #if the fluxes are manually rescaled in the prior, then rescale them
         # self.fluxes_scaling_mean = jnp.array(inference_data.posterior['fluxes_scaling'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-        self.fluxes_scaling_mean = 1 #jnp.array(inference_data.posterior['fluxes_scaling'+ self.number].median(dim=["chain", "draw"]))
+        self.fluxes_scaling_mean = jnp.array(inference_data.posterior['fluxes_scaling'+ self.number].median(dim=["chain", "draw"]))
+        print('Flux scaling mean: ', self.fluxes_scaling_mean)
         self.fluxes_error_scaling_mean = 1 #jnp.array(inference_data.posterior['fluxes_error_scaling'+ self.number].median(dim=["chain", "draw"]))
-        print(flux_type)
+        # print(flux_type)
         if flux_type == 'manual':
             best_flux_sample = utils.find_best_sample(inference_data, ['fluxes'+ self.number], [self.mu*self.fluxes_scaling_mean], [self.std], [self.high], [self.low], best_indices)
 
@@ -773,7 +792,7 @@ class Disk():
         self.ellip_mean = jnp.array(inference_data.posterior['ellip'].median(dim=["chain", "draw"]))
         self.PA_morph_mean = jnp.array(inference_data.posterior['PA_morph'].median(dim=["chain", "draw"]))
         #compute the inclination prior posterior and median from the ellipticity
-        num_samples = 10
+        num_samples = inference_data.posterior['ellip'].shape[1]
 
         inference_data.posterior['i'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
         inference_data.prior['i'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
@@ -782,12 +801,22 @@ class Disk():
                 inference_data.posterior['i'][i,int(sample)] = utils.compute_inclination(ellip = float(inference_data.posterior['ellip'][i,int(sample)].values))
                 inference_data.prior['i'][0,int(sample)] = utils.compute_inclination(ellip = float(inference_data.prior['ellip'][0,int(sample)].values))
         self.i_mean = jnp.array(inference_data.posterior['i'].median(dim=["chain", "draw"]))
-        #compute the fluxes for the parametric model
-        y, x = np.mgrid[0:self.direct_shape[0]*27, 0:self.direct_shape[1]*27]
-        fluxes_mean_high = utils.sersic_profile(x,y,amplitude=self.amplitude_mean/27**2, r_eff = self.r_eff_mean*27, n = self.n_mean, x_0 = self.direct_shape[0]//2*27 + 13 , y_0 = self.direct_shape[0]//2*27 +13, ellip = self.ellip_mean, theta=(90 - self.PA_morph_mean)*np.pi/180) #function takes theta in rads
-        self.fluxes_mean = utils.resample(fluxes_mean_high, 27,27)
 
-        return inference_data, self.fluxes_mean, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean
+        #compute the fluxes for the parametric model
+        # y, x = np.mgrid[0:self.direct_shape[0]*27, 0:self.direct_shape[1]*27]
+        # fluxes_mean_high = utils.sersic_profile(x,y,amplitude=self.amplitude_mean, r_eff = self.r_eff_mean*27, n = self.n_mean, x_0 = self.direct_shape[0]//2*27 + 13 , y_0 = self.direct_shape[0]//2*27 +13, ellip = self.ellip_mean, theta=(90 - self.PA_morph_mean)*np.pi/180)/27**2 #function takes theta in rads
+        # self.fluxes_mean = utils.resample(fluxes_mean_high, 27,27)
+
+        #compute the fluxes in the adaptive sersic way
+        image_shape = self.direct_shape[0]
+        factor = 5
+        x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
+        y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
+        x,y = jnp.meshgrid(x,y)
+        #testing the adaptive oversampling of the sersic profile
+        self.fluxes_mean_high = utils.compute_adaptive_sersic_profile(x, y, self.amplitude_mean/factor**2, self.r_eff_mean, self.n_mean, 0.0,0.0, self.ellip_mean, (90 - self.PA_morph_mean)*jnp.pi/180)
+        self.fluxes_mean = utils.resample(self.fluxes_mean_high, factor, factor)
+        return inference_data, self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean
     
     def v_rot(self, fluxes_mean, model_velocities, i_mean,factor):
         """
@@ -1175,7 +1204,7 @@ class DiskModel(KinModels):
         # old error self.PA_sigma*90 
         # print('PA morph: ', self.PA_morph, 'PA grism: ', self.PA_grism, 'final PA: ', self.mu_PA)
 
-        self.mu_i = self.inclination
+        self.mu_i = 60 #self.inclination
 
 
         self.mask = jnp.asarray(self.mask)
@@ -1250,7 +1279,7 @@ class DiskModel(KinModels):
 
         # oversample the fluxes to match the grism object
         # start = time.time()
-        fluxes_high = utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'nearest')
+        fluxes_high = utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
         # end =  time.time()
         # f.write("Time to oversample fluxes: " + str(end-start) + "\n")
 
@@ -1374,15 +1403,18 @@ class DiskModel(KinModels):
         Pa, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params_parametric(r_eff=r_eff)      
         i = utils.compute_inclination(ellip = ellip) 
 
-        fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'nearest')
+        fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
 
         image_shape = self.flux_prior.shape[0]
         # print(image_shape//2)
-        x_10 = jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape*grism_object.factor)
-        y_10 = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape*grism_object.factor)
-        X_10, Y_10 = jnp.meshgrid(x_10,y_10)
+        x= jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape)
+        y = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape)
+        X, Y = jnp.meshgrid(x,y)
 
-        velocities = jnp.asarray(self.v(X_10, Y_10, Pa, i, Va, r_t))
+        X_grid = image.resize(X, (int(X.shape[0]*grism_object.factor), int(X.shape[1]*grism_object.factor)), method='nearest')
+        Y_grid = image.resize(Y, (int(Y.shape[0]*grism_object.factor), int(Y.shape[1]*grism_object.factor)), method='nearest')
+
+        velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa, i, Va, r_t))
 
         velocities_scaled = velocities + v0
 
@@ -1409,10 +1441,10 @@ class DiskModel(KinModels):
         """
 
         self.PA_mean,self.Va_mean, self.i_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean,self.x0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
-
+        print('posterior means kinematics: ', self.PA_mean,self.Va_mean, self.i_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean,self.x0_vel_mean, self.v0_mean)
         self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
 
-        self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor, method= 'bicubic')
+        self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor, method= 'bilinear')
 
 
         image_shape =  self.flux_prior.shape[0]
@@ -1421,10 +1453,9 @@ class DiskModel(KinModels):
         X, Y = jnp.meshgrid(x_10,y_10)
 
 
-        self.model_velocities = jnp.asarray(self.v(X, Y, 
-            self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
+        self.model_velocities = jnp.asarray(self.v(X, Y, self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
         # self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
-
+        print('posterior velocities: ', self.model_velocities)
         self.model_velocities = self.model_velocities  + self.v0_mean
 
         self.model_dispersions = self.sigma0_mean_model *jnp.ones_like(self.model_velocities) #self.sigma0_mean_model *jnp.ones_like(self.model_velocities)
@@ -1452,9 +1483,10 @@ class DiskModel(KinModels):
         # self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean,self.y0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
 
         # self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
-        inference_data,self.fluxes_mean, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
+        inference_data,self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
 
-        self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor, method= 'bicubic')
+        # self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor, method= 'bicubic')
+        self.model_flux = self.fluxes_mean_high
 
         image_shape =  self.flux_prior.shape[0]
         x_10 = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape*grism_object.factor)
@@ -1462,8 +1494,7 @@ class DiskModel(KinModels):
         X, Y = jnp.meshgrid(x_10,y_10)
 
 
-        self.model_velocities = jnp.asarray(self.v(X, Y, 
-            self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
+        self.model_velocities = jnp.asarray(self.v(X, Y, self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
         # self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
 
         self.model_velocities = self.model_velocities  + self.v0_mean

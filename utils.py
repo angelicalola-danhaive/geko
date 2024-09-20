@@ -606,7 +606,7 @@ def compute_MAP(inf_data, grism_object, image):
     y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor)
     x,y = jnp.meshgrid(x,y)
     kin_model = models.KinModels()
-    kin_model.compute_factors(jnp.radians((PA_map)), jnp.radians(inc_map), x,y)
+    # kin_model.compute_factors(jnp.radians((PA_map)), jnp.radians(inc_map), x,y)
     V = kin_model.v( x, y, jnp.radians((PA_map)), jnp.radians(inc_map), Va_map, r_t_map)
     D = sigma0_map*jnp.ones((31*factor, 31*factor))
 
@@ -716,7 +716,82 @@ def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
         
     return jnp.where((n_safe>0) & ((x_maj>0) | (x_min>0)) & (b_safe!=0) & (r_eff>0), amplitude * jnp.exp(-bn * (z ** (1 / n_safe) - 1.0)), amplitude * jnp.exp(bn))
 
+def compute_adaptive_sersic_profile(x, y, n, r_eff, intensity, x0, y0, ellip, PA_sersic):
+    '''
+        Notes about inputs:
+        -x and y have to be oversampled to the right amount that you want to obtain at the end 
+        -r_eff is given in the original pixel size
+        -if x and y are centered on zero then x0=y0 = 0
 
+    '''
+
+    image_shape = x.shape[0]
+    # Create grids for different oversampling factors
+    oversample_factor_inner = 125
+    oversample_factor_outer = 25
+    boundary_radius = 0.2 * r_eff
+    boundary_half_size = 0.2 * r_eff
+   # Define the inner square region mask
+    inner_region_mask = jnp.array(
+        (jnp.abs(x - x0) <= boundary_half_size) & 
+        (jnp.abs(y - y0) <= boundary_half_size)
+    )
+    x_inner,y_inner = jnp.where(inner_region_mask, x, 0.0), jnp.where(inner_region_mask, y, 0.0)
+    x_min,x_max = jnp.min(x_inner), jnp.max(x_inner)
+    y_min,y_max = jnp.min(y_inner), jnp.max(y_inner)
+    x_size = 9 #jnp.array((x_max-x_min)/(x[0,1]-x[0,0])+1).astype(int)
+    y_size = 9 #jnp.array((y_max-y_min)/(y[1,0]-y[0,0])+1).astype(int)
+
+    #define the 2D arrays of indices of the x and y array corresponding to this mask
+    # dx,dy =  jnp.abs(x[0,1]-x[0,0]), jnp.abs((y[1,0]-y[0,0]))
+    # ind_x_min = ((x_min - x[0,0])/dx).astype(int)
+    # ind_x_max = ((x_max - x[0,0])/dx).astype(int)
+    # ind_y_min = ((y_min - y[0,0])/dy).astype(int)
+    # ind_y_max = ((y_max - y[0,0])/dy).astype(int)
+
+    
+    # Outer region mask is the complement of the inner region mask
+    outer_region_mask = ~inner_region_mask
+    # print('zoomed: ', zoom(x, 25, mode = 'nearest'))
+    
+    # Inner region (oversampled by 125)
+    x_inner_grid_low,y_inner_grid_low = jnp.meshgrid(jnp.linspace(x_min, x_max, x_size), jnp.linspace(y_min, y_max, y_size ))
+
+    x_inner_grid = image.resize(x_inner_grid_low, ((oversample_factor_inner*x_size), (oversample_factor_inner*y_size)), method='linear')
+    y_inner_grid = image.resize(y_inner_grid_low, ((oversample_factor_inner*x_size), (oversample_factor_inner*y_size)), method='linear')
+
+    galaxy_model_inner = sersic_profile(
+            x_inner_grid, y_inner_grid, n, r_eff, intensity,
+            x0, y0, ellip, PA_sersic
+        )/oversample_factor_inner**2
+
+    galaxy_model_inner_resampled = resample(galaxy_model_inner, oversample_factor_inner, oversample_factor_inner)
+
+
+    galaxy_model_inner_resampled_full = jnp.zeros((image_shape, image_shape))
+    galaxy_model_inner_resampled_full = galaxy_model_inner_resampled_full.at[int(image_shape//2 - x_size//2):int(image_shape//2 + x_size//2+1), int(image_shape//2 - y_size//2):int(image_shape//2 + y_size//2+1)].set(galaxy_model_inner_resampled)
+
+    
+
+    x_outer_grid = image.resize(x, (int(oversample_factor_outer*image_shape), int(oversample_factor_outer*image_shape)), method='linear')
+    y_outer_grid = image.resize(y, (int(oversample_factor_outer*image_shape), int(oversample_factor_outer*image_shape)), method='linear')
+
+    galaxy_model_outer = sersic_profile(
+            x_outer_grid, y_outer_grid, n, r_eff, intensity,
+            x0, y0, ellip,
+            PA_sersic
+        )/oversample_factor_outer**2
+
+
+        # Resample to original grid
+    galaxy_model_outer_resampled = resample(galaxy_model_outer, oversample_factor_outer, oversample_factor_outer)
+
+
+    #print the shapes
+    galaxy_model = jnp.where(inner_region_mask, galaxy_model_inner_resampled_full, galaxy_model_outer_resampled)
+    
+    #the returned image has the shape of the input x and y arrays
+    return galaxy_model
 # import time
 
 # def sersic_profile(x, y, amplitude, r_eff, n, x_0, y_0, ellip, theta, c=0):
