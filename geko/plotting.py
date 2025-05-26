@@ -4,7 +4,7 @@ All the plotting related functions for the post-processing
 	
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
-
+__all__ = ['plot_disk_summary', 'plot_pp_cornerplot']
 
 
 import matplotlib.pyplot as plt
@@ -18,6 +18,9 @@ from photutils.segmentation import detect_sources, deblend_sources, make_2dgauss
 from photutils.background import Background2D
 from astropy.convolution import convolve
 from astropy.table import Table
+from scipy.special import gammainc, gamma
+from scipy.optimize import root_scalar
+
 
 
 def plot_image(image, x0, y0, direct_size, limits = None, save_to_folder = None, name = None):
@@ -296,9 +299,6 @@ def make_mask(im, sigma_rms, save_to_folder):
     # plt.close()
     return im_conv, segment_map, bbox
 
-
-from scipy.special import gammainc, gamma
-from scipy.optimize import root_scalar
 
 def sersic_radius_fraction(r_frac, n, r_eff, frac=0.9):
     """Solve for r_frac such that it encloses the given light fraction."""

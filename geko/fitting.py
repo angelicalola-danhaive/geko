@@ -1,3 +1,5 @@
+__all__ = ["Fit_Numpyro"]
+
 # imports
 
 # importing my own modules

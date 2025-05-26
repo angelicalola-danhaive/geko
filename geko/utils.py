@@ -5,6 +5,7 @@
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
+__all__ = []
 # geko imports
 import run_pysersic as py
 

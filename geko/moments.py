@@ -1,3 +1,6 @@
+#probably need to delete this model! or check what I need it for in the run_mock
+
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt

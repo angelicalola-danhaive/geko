@@ -4,7 +4,7 @@
 
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
-
+__all__ = ["KinModels"]
 
 # imports
 import numpy as np

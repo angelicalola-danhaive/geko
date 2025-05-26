@@ -6,6 +6,8 @@ Eventually should also add here scripts to automatically create folders for sour
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
+__all__ = ['run_full_preprocessing']
+
 #imports
 import utils
 import grism

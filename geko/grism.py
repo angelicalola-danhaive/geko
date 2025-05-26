@@ -18,6 +18,8 @@
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
+__all__ = ["Grism"]
+
 import utils
 
 import numpy as np

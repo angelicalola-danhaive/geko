@@ -4,6 +4,8 @@ Put all of the necessary post-processing functions here
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
+__all__ = ['process_results']
+
 # imports
 import preprocess as pre
 import fitting as fit
