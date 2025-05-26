@@ -31,12 +31,17 @@ from astropy.table import Table
 from astropy.io import fits
 from astropy.modeling.models import Gaussian2D, Sersic2D
 
+from photutils.segmentation import detect_sources, deblend_sources, make_2dgaussian_kernel, SourceCatalog
+from photutils.background import Background2D
+from astropy.convolution import convolve as convolve_astropy
+
 from photutils.datasets import make_noise_image
 
 from numpyro.infer.util import log_likelihood
 
 from jax.scipy.signal import convolve
 import numpyro
+from astropy.cosmology import Planck18 as cosmo
 
 if 'gpu' in jax.devices():
 	print('Using GPU')
@@ -47,6 +52,8 @@ jax.config.update('jax_enable_x64', True)
 
 # import faulthandler
 # faulthandler.enable()
+
+import smplotlib
 
 
 from jax import config
@@ -71,19 +78,20 @@ def read_config_table(config_path, test):
     sigma0 = np.array(config_test['sigma0'])
     SN_image = np.array(config_test['SN_image'])
     SN_grism = np.array(config_test['SN_grism'])
+    n = np.array(config_test['n'])
 
-    return PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism
+    return PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 
-def make_image(PA_image, i, r_t, SN_image, psf, image_shape):
+def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape):
     '''
         Make mock image from inputs
     '''
     # from inclination infer the ellipticity
-    axis_ratio = utils.compute_axis_ratio(i, q0 = 0.0)
+    axis_ratio = utils.compute_axis_ratio(i, q0 = 0.2)
     ellip = 1 - axis_ratio
     print('Ellipticity: ' + str(ellip) + ', inclination: ' + str(i))
     #infer r_eff from the turnaround radius
-    r_eff = (1.676/0.4)*r_t
+    r_eff = (1.676/0.4)*1 #*r_t
     print('Reff: ', r_eff)
     time_start = time.time()
     # galaxy_model = Sersic2D(amplitude=1/27**2, r_eff = r_eff*27, n =1, x_0 = image_shape//2*27 + 13 , y_0 = image_shape//2*27 +13, ellip = ellip, theta=(90 - PA_image)*np.pi/180) #function takes theta in rads
@@ -97,88 +105,91 @@ def make_image(PA_image, i, r_t, SN_image, psf, image_shape):
     x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
     y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
     x,y = jnp.meshgrid(x,y)
-    x_grid = image.resize(x, (image_shape*5*25, image_shape*5*25), method='linear')
-    y_grid = image.resize(y, (image_shape*5*25, image_shape*5*25), method='linear')
+    # x_grid = image.resize(x, (image_shape*5*25, image_shape*5*25), method='linear')
+    # y_grid = image.resize(y, (image_shape*5*25, image_shape*5*25), method='linear')
     
-    mock_image_superhigh = utils.sersic_profile(x_grid,y_grid,1/(25*5)**2, r_eff, 1, 0, 0, ellip, (90 - PA_image)*np.pi/180)
-    mock_image_highres = utils.resample(mock_image_superhigh, 25, 25)
-    mock_image = utils.resample(mock_image_superhigh, 5*25, 5*25)
-    time_end = time.time()
+    # mock_image_superhigh = utils.sersic_profile(x_grid,y_grid,1/(25*5)**2, r_eff, 1, 0, 0, ellip, (90 - PA_image)*np.pi/180)
+    # mock_image_highres = utils.resample(mock_image_superhigh, 25, 25)
+    # mock_image = utils.resample(mock_image_superhigh, 5*25, 5*25)
+
+    x_grid = image.resize(x, (image_shape*5, image_shape*5), method='linear')
+    y_grid = image.resize(y, (image_shape*5, image_shape*5), method='linear')
+
+    Ie = utils.flux_to_Ie(200,1,r_eff, ellip)
+	#need to replace with n!!! but running prior test now
+    mock_image_highres = utils.compute_adaptive_sersic_profile(x_grid, y_grid, Ie/(5)**2, r_eff,1, 0, 0, ellip, (90 - PA_image)*np.pi/180)
+    mock_image = utils.resample(mock_image_highres, 5, 5)
+
     # image = image.at[15,15].set(4)
     max_image = jnp.max(mock_image)
     print('SN image: ' + str(SN_image) + ', max image: ' + str(max_image) + ', max_image/sn: ' + str(max_image/SN_image))
     # noise = max_image/SN_image*np.random.normal(0,1, (image_shape, image_shape))
     noise = make_noise_image((mock_image.shape[0], mock_image.shape[1]), distribution='gaussian', mean=0, stddev=max_image/SN_image)
     
-    plt.imshow(mock_image,origin='lower', cmap='PuRd')
-    plt.title('Mock Image')
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.colorbar()
-    plt.show()
-    
-    # ny = nx = image_shape
-    # y, x = np.mgrid[0:ny*27, 0:nx*27]
-    # time_start_manual = time.time()
-    # galaxy_model_manual = utils.sersic_profile(x,y,1/27**2, r_eff*27, 1, image_shape//2*27 + 13, image_shape//2*27 + 13, ellip, (90 - PA_image)*np.pi/180)
-    # galaxy_model_manual = utils.resample(galaxy_model_manual, 27, 27)
-    # time_end_manual = time.time()
-    
-    # print('Time for model: ', time_end - time_start)
-    # print('Time for manual model: ', time_end_manual - time_start_manual)
-    
-    # plt.imshow(galaxy_model_manual,origin='lower', cmap='PuRd')
-    # plt.title('Manual Sersic Model')
-    # plt.xlabel('x')
-    # plt.ylabel('y')
-    # plt.colorbar()
-    # plt.show()
-
-    # plt.imshow(mock_image-galaxy_model_manual,origin='lower')
-    # plt.colorbar()
-    # plt.title('Difference between two sersic functions')
-    # plt.show()
-    
-    # print(utils.bn_approx(0.3), utils.bn_approx(5))
-    
-    # image = galaxy_model_manual
     noise_image = mock_image + noise
     convolved_image = convolve(mock_image, psf, mode='same')
     convolved_noise_image = convolve(mock_image, psf, mode='same') + noise
-    plt.imshow(convolved_image,origin='lower', cmap='PuRd')
-    plt.colorbar()
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.title('Convolved Mock Image')
-    plt.show()
     
-    plt.imshow(convolved_noise_image,origin='lower', cmap='PuRd')
-    plt.colorbar()
-    plt.xlabel('x')
-    plt.ylabel('y')
-    plt.title('Convolved Mock Image with Noise')
+    # Define X and Y axes based on the image shape
+    nx, ny = mock_image.shape
+    x = np.linspace(0 - nx//2, nx - 1 - nx//2, nx)*0.06  # X-axis
+    y = np.linspace(0 - nx//2, ny - 1 - nx//2, ny)*0.06  # Y-axis
+    X, Y = np.meshgrid(x, y)  # Create meshgrid for plotting
+
+    fig, axs = plt.subplots(3, 1, figsize=(4, 7))  # Create a figure with 3 vertical subplots
+
+    # First plot: Mock Image
+    pc1 = axs[0].pcolormesh(X, Y, mock_image, cmap='PuBu', shading='auto')
+    # axs[0].set_title('Mock Image')
+    axs[0].text(0.5, 0.85, r'Sersic profile', transform=axs[0].transAxes, ha='center', fontsize=15, fontweight='bold')
+    # axs[0].set_xlabel(r'$\Delta $RA [arcsec]' )
+    axs[0].set_ylabel(r'$\Delta $DEC [arcsec]')
+    fig.colorbar(pc1, ax=axs[0], orientation='vertical',  label = r'Flux [a.u.]')  # Add colorbar to the first subplot
+
+    # Second plot: Convolved Mock Image
+    pc2 = axs[1].pcolormesh(X, Y, convolved_image, cmap='PuBu', shading='auto')
+    # axs[1].set_title('Convolved Mock Image')
+    axs[1].text(0.5, 0.85, r'$+$ PSF convolution', transform=axs[1].transAxes, ha='center', fontsize=15, fontweight='bold')
+
+    # axs[1].set_xlabel(r'$\Delta $RA [arcsec]' )
+    axs[1].set_ylabel(r'$\Delta $DEC [arcsec]')
+    fig.colorbar(pc2, ax=axs[1], orientation='vertical', label = r'Flux [a.u.]')  # Add colorbar to the second subplot
+
+    # Third plot: Convolved Mock Image with Noise
+    pc3 = axs[2].pcolormesh(X, Y, convolved_noise_image, cmap='PuBu', shading='auto')
+    # axs[2].set_title('Convolved Mock Image with Noise')
+    axs[2].text(0.5, 0.85, r'$+$ Gaussian noise', transform=axs[2].transAxes, ha='center', fontsize=15, fontweight='bold')
+
+    axs[2].set_xlabel(r'$\Delta $RA [arcsec]' )
+    axs[2].set_ylabel(r'$\Delta $DEC [arcsec]')
+    fig.colorbar(pc3, ax=axs[2], orientation='vertical', label = r'Flux [a.u.]')  # Add colorbar to the third subplot
+
+    # Adjust layout to prevent overlap
+    plt.tight_layout()
     plt.show()
+
+
 
     return mock_image, mock_image_highres, convolved_image, noise_image, convolved_noise_image
 
 def initialize_grism(mock_image, psf, image_shape):
     #create wave space
-	wave_factor = 9
+	wave_factor = 5
 	delta_wave = 0.001
-	wavelength = 3.5
-	delta_wave_cutoff = 0.02
-	wave_space = jnp.linspace(3.0, 4.0, int(1/delta_wave)+1)
+	wavelength = 4.5
+	delta_wave_cutoff = 0.04
+	wave_space = jnp.linspace(4.0, 5.0, int(1/delta_wave)+1)
 	# wave_space= jnp.arange(3.0, 4.0, delta_wave)
-	print(wave_space)
+	# print(wave_space)
 	wave_min = wavelength - delta_wave_cutoff 
 	wave_max = wavelength + delta_wave_cutoff 
 
 	# print(wave_min, wave_max)
 
-	index_min = round((wave_min - 3.0)/delta_wave) #+10
-	index_max = round((wave_max - 3.0)/delta_wave) #-10
+	index_min = round((wave_min - 4.0)/delta_wave) #+10
+	index_max = round((wave_max - 4.0)/delta_wave) #-10
 	# print(index_min, index_max)
-	index_wave = round((wavelength - 3.0)/delta_wave)
+	index_wave = round((wavelength - 4.0)/delta_wave)
     #set other free parameters
 	y_factor = 1
 	factor = 5
@@ -225,7 +236,7 @@ def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, factor =5):
 	# V_10 = utils.resample(V_10, 10, 10)/10**2
 	# D_10 = utils.resample(D_10, 10, 10)/10**2
 
-	print(jnp.argwhere(V==0))
+	# print(jnp.argwhere(V==0))
 
 	plt.imshow(V, origin='lower')
 	plt.colorbar()
@@ -234,12 +245,12 @@ def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, factor =5):
 
 	return V, D
 
-def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, psf,image_shape = 31, factor = 5):
+def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf,image_shape = 31, factor = 5):
 	'''
         Make mock images and grism spectra from inputs
 	'''
     #make direct image
-	image, image_highres, convolved_image, noise_image, convolved_noise_image = make_image(PA_image, i, r_t, SN_image, psf, image_shape)	
+	image, image_highres, convolved_image, noise_image, convolved_noise_image = make_image(PA_image, i, r_t, SN_image, n, psf, image_shape)	
 	max_image = jnp.max(image)
 	image_error = (max_image/SN_image)*jnp.ones((image_shape, image_shape))
     #make grism object
@@ -281,12 +292,6 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, p
 	# plt.colorbar()
 	# plt.show()
 
-	plt.imshow(grism_spectrum, origin='lower', cmap = 'PuRd')
-	plt.title('Mock 2D Grism Spectrum')
-	plt.xlabel('Wavelength')
-	plt.ylabel('Spatial Position')
-	plt.colorbar()
-	plt.show()
 
 	max_grism = jnp.max(grism_spectrum)
 	#add noise to the grism spectrum
@@ -294,17 +299,125 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, p
 	grism_spectrum_noise = grism_spectrum + grism_noise
 	grism_error = (max_grism/SN_grism)*jnp.ones((grism_spectrum.shape[0], grism_spectrum.shape[1]))
 
-	mask = jnp.where(grism_spectrum_noise/grism_error < 5, 0, 1)
-	print(grism_spectrum_noise[mask.astype(bool)].sum())
-	print((grism_spectrum_noise*mask).sum())
-	plt.imshow(grism_spectrum*mask, origin='lower', cmap = 'PuRd')
-	plt.title('Mock 2D Grism Spectrum with Noise')
+	mask = jnp.where(grism_spectrum_noise/grism_error < 1, 0, 1)
+	# print(grism_spectrum_noise[mask.astype(bool)].sum())
+	# print((grism_spectrum_noise*mask).sum())
+
+
+	fig, axs = plt.subplots(2, 1, figsize=(5, 6))
+
+	# Define the X and Y axes
+	X = np.linspace(3.5 - delta_wave_cutoff, 3.5 + delta_wave_cutoff, grism_spectrum.shape[1] + 1)
+	Y = np.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape + 1)*0.06
+
+	# First subplot: Mock 2D Grism Spectrum
+	pc1 = axs[0].pcolormesh(X, Y, grism_spectrum, cmap='PuBu', shading='auto')
+	# axs[0].set_title('Mock 2D Grism Spectrum')
+	axs[0].text(0.5, 0.85, r'Dispersed image', transform=axs[0].transAxes, ha='center', fontsize=15, fontweight='bold')
+	# axs[0].set_xlabel(r'$\lambda$ [microns]') #r'$$\lambda$$ [microns]
+	axs[0].set_ylabel(r'$\Delta $DEC [arcsec]')
+	fig.colorbar(pc1, ax=axs[0], orientation='vertical', label = r'Flux [a.u.]')
+
+	# Second subplot: Mock 2D Grism Spectrum with Noise
+	pc2 = axs[1].pcolormesh(X, Y, grism_spectrum_noise, cmap='PuBu', shading='auto')
+	# axs[1].set_title('Mock 2D Grism Spectrum with Noise')
+	# axs[1].text(0.5, 0.85, r'$+$ Gaussian noise', transform=axs[1].transAxes, ha='center', fontsize=15, fontweight='bold')
+	axs[1].set_xlabel(r'$\lambda$ [microns]')
+	axs[1].set_ylabel(r'$\Delta $DEC [arcsec]')
+	fig.colorbar(pc2, ax=axs[1], orientation='vertical', label = r'Flux [a.u.]')
+
+	plt.tight_layout()
+	plt.show()
+
+	#compute the integrated SN of the grism spectrum
+	#sum in quadrature the SN in each pixel
+	#make a mask for the high SN pixels
+	mask = jnp.where(grism_spectrum_noise/grism_error < 1, 0, 1)
+	int_sn = np.sqrt(jnp.where(grism_spectrum_noise/grism_error < 1, 0.0, (grism_spectrum_noise/grism_error)**2).sum())
+	print('Integrated SN of the grism spectrum: ' + str(int_sn))
+		
+
+
+	# Define the boxcar height and center the extraction region
+	ny, nx = grism_spectrum_noise.shape
+	center_y = ny // 2
+	box_height = 5
+	y_min = max(0, center_y - box_height // 2)
+	y_max = min(ny, center_y + box_height // 2)
+		
+    # Perform boxcar extraction
+	extracted_1d = np.sum(grism_spectrum_noise[y_min:y_max, :], axis=0)
+	noise_1d = np.sqrt(np.sum(grism_error[y_min:y_max, :]**2, axis=0))  # Combine noise quadratically
+    
+    # Compute the integrated S/N
+	integrated_signal = np.sum(extracted_1d)
+	integrated_noise = np.sqrt(np.sum(noise_1d**2))
+	integrated_sn = integrated_signal / integrated_noise
+    
+	# Print the integrated S/N
+	print('Integrated S/N:', integrated_sn)
+
+	#plot the 1D spectrum
+	x_axis = np.linspace(3.5 - delta_wave_cutoff, 3.5 + delta_wave_cutoff, grism_spectrum.shape[1])
+	fig, ax = plt.subplots(1, 1, figsize=(5, 3))
+	ax.plot(x_axis, extracted_1d, label='Extracted 1D Spectrum')
+	ax.plot(x_axis, noise_1d, label='Noise 1D Spectrum')
+	ax.set_xlabel(r'$\lambda$ [microns]')
+	ax.set_ylabel('Flux [a.u.]')
+	ax.legend()
+	plt.show()
+		
+	size = grism_spectrum_noise.shape[0]
+	grism_spectrum_noise_square = grism_spectrum_noise #[:, grism_spectrum_noise.shape[1]//2 - size//2: grism_spectrum_noise.shape[1]//2 + size//2 + 1]
+	grism_error_square = grism_error# [:, grism_error.shape[1]//2 - size//2: grism_error.shape[1]//2 + size//2 + 1]
+
+	plt.imshow(grism_spectrum_noise_square)
+	plt.show()
+	sigma_rms = jnp.minimum((grism_spectrum_noise/grism_error).max(),5)
+	im_conv = convolve_astropy(grism_spectrum_noise_square, make_2dgaussian_kernel(3.0, size=5))
+
+	plt.imshow(im_conv)
+	plt.show()
+	# print('pre-bckg')
+	bkg = Background2D(grism_spectrum_noise_square, (15, 15), filter_size=(5, 5), exclude_percentile=99.0)
+	print('bckg:', bkg.background_median)
+	# print('threshold:', sigma_rms*bkg.background_rms[10])
+	# print('grism:',  grism_spectrum_noise_square[10])
+	segment_map = detect_sources(im_conv, sigma_rms*np.abs(bkg.background_median), npixels=10)
+	# segm_deblend = deblend_sources(im_conv, segment_map, npixels=10, nlevels=32, contrast=1, progress_bar=False)
+	source_cat = SourceCatalog(grism_spectrum_noise_square, segment_map, convolved_data=im_conv, error=grism_error_square)
+	source_tbl = source_cat.to_table()
+	# print(source_tbl)
+
+	plt.imshow(segment_map)
+	plt.show()
+
+	# identify main label
+	main_label = segment_map.data[int(0.5*grism_spectrum_noise_square.shape[0]), int(0.5*grism_spectrum_noise_square.shape[1])]
+	# snr = source_tbl['segment_flux']/source_tbl['segment_fluxerr']
+	# idx_signifcant = (snr > 10.0) | (source_tbl['label']==main_label)
+	
+	print(main_label)
+
+	# construct mask
+	mask = segment_map.data
+	new_mask = np.zeros_like(mask)
+	new_mask[mask == main_label] = 1.0
+	# mask[mask > 0] = 0.0
+
+	# print(np.array(mask.shape))
+	grism_spectrum_noise_square_masked = jnp.where(new_mask == 1, grism_spectrum_noise_square, np.nan)
+	#set to zero the masked_rows in the grism spectrum
+	plt.imshow(grism_spectrum_noise_square_masked, origin='lower', cmap = 'PuRd')
+	plt.title('Inference model mask')
 	plt.xlabel('Wavelength')
 	plt.ylabel('Spatial Position')
 	plt.colorbar()
 	plt.show()
+	
 
-	return convolved_noise_image, image_error, image, grism_spectrum_noise, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
+	# return image, image_error, image, grism_spectrum, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
+	return convolved_image, image_error, image, grism_spectrum_noise, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
 
 def run_fit(mock_params, priors,parametric = False):
 	'''
@@ -313,13 +426,13 @@ def run_fit(mock_params, priors,parametric = False):
 
 	line = 'H_alpha'
 	#need to make a preprocessing function just for the mock data, probably add an entry to run_full_pre that defaults to none
-	direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
+	redshift, wavelength, direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
 	num_samples, num_warmup, step_size, target_accept_prob, \
 	wave_space, delta_wave, index_min, index_max, factor = pre.run_full_preprocessing(None, None, line, mock_params, priors)
 	
 	mask = (jnp.where(obs_map/obs_error < 5.0, 0, 1)).astype(bool)
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
-
+	kin_model.disk.set_parametric_priors_test(priors)
 	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric = parametric)
 
 	rng_key = random.PRNGKey(4)
@@ -333,11 +446,11 @@ def run_fit(mock_params, priors,parametric = False):
 
 	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, mask = mask)
 
-	log_l = run_fit.kin_model.log_posterior(grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, values = {'PA':90, 'i':60, 'sigma0':80, 'Va':200, 'r_t':1, 'fluxes':direct, 'fluxes_error':direct_error})
-	log_l_max = run_fit.kin_model.log_posterior(grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, values = {'PA':90, 'i':57, 'sigma0':176, 'Va':143, 'r_t':0.83, 'fluxes':direct, 'fluxes_error':direct_error})
+	# log_l = run_fit.kin_model.log_posterior(grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, values = {'PA':90, 'i':60, 'sigma0':80, 'Va':200, 'r_t':1, 'fluxes':direct, 'fluxes_error':direct_error})
+	# log_l_max = run_fit.kin_model.log_posterior(grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, values = {'PA':90, 'i':57, 'sigma0':176, 'Va':143, 'r_t':0.83, 'fluxes':direct, 'fluxes_error':direct_error})
 
-	print('Log-L of truth:',log_l)
-	print('Log-L of max:',log_l_max)
+	# print('Log-L of truth:',log_l)
+	# print('Log-L of max:',log_l_max)
 	# total_L = []
 	# Va_vals = np.linspace(0, 1, 100)
 	# PA = 0.5
@@ -483,8 +596,8 @@ def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, n
 	params = [ 'PA', 'i', 'Va', 'r_t' ,'sigma0', 'v_re']
 	quantiles = [0.16, 0.50, 0.84]
 		#compute the azimuthally average velocity at the effective radius
-	r_eff = kin_model.r_eff
-	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff)
+	# r_eff = kin_model.r_eff_mean
+	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
 
 	for ii_p in params_single:
 		res[ii_p + "_q16"] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 16)
@@ -502,7 +615,7 @@ def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, n
 	# res_test['v_re_84'][j] = v_re_84
 	#add the truth v_re
 	#read truth values from the config table
-	PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism = read_config_table(config_path, test)
+	PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n = read_config_table(config_path, test)
 	#initialize kin_model with the truth values
 	PA = np.radians(PA_image[j])
 	i = np.radians(i[j])
@@ -512,7 +625,7 @@ def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, n
 	y = np.linspace(0 - 31//2, 31 - 31//2 - 1, 31*grism_object.factor)
 	x,y = np.meshgrid(x,y)
 	r_eff = (1.676/0.4)*r_t
-	v_re_truth = kin_model.v_rad(x,y, PA, i, Va, r_t, r_eff)
+	v_re_truth = kin_model.v_rad(x,y, PA, i, Va, r_t, r_eff)/np.sin(i)
 	res['v_re'] = v_re_truth
 	res.write('testing/' + str(test) + '/' + 'results_' + str(j), format='ascii', overwrite=True)
 	return v_re_med, v_re_truth, kin_model
@@ -540,11 +653,11 @@ if __name__ == "__main__":
 	else:
 		print('Running non-parametric model')
 
-	PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism = read_config_table(config_path, test)
+	PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism,n = read_config_table(config_path, test)
 	psf = utils.load_psf(filter = 'F356W', y_factor = 1, size = 9)
 
-	PA_image = np.array([90, 70,45,20,0])
-	PA_grism = np.array([90, 70,45,20,0])
+	# PA_image = np.array([90, 70,45,20,0])
+	# PA_grism = np.array([90, 70,45,20,0])
 	# PA_image = np.array([90, 80, 70,45,30,20,0])
 	# PA_grism = np.array([90, 80,70, 45,30,20,0])
 
@@ -567,20 +680,24 @@ if __name__ == "__main__":
 
 
 	for j in range(len(PA_image)) : #range(len(PA_image))
-		# PA_grism[j] = 50
-		# PA_image[j] = 50
-		# SN_grism[j] = 20 
-		# sigma0[j] = 80
+		# PA_grism[j] = 45
+		# PA_image[j] = 45
+		# SN_grism[j] = 40
+		# sigma0[j] = 100
 		# Va[j] = 200
 		print('Running test ' + str(test) + ' iteration ' + str(j))
 		print('Parameters: PA_image = ' + str(PA_image[j]) + ', PA_grism = ' + str(PA_grism[j]) + ', i = ' + str(i[j]) + ', Va = ' + str(Va[j]) + ', r_t = ' + str(r_t[j]) + ', sigma0 = ' + str(sigma0[j]) + ', SN_image = ' + str(SN_image[j]) + ', SN_grism = ' + str(SN_grism[j]))
+
+		if n[j] is None:
+			n = 1
+
 		convolved_noise_image, image_error, intrinsic_image, grism_spectrum_noise, grism_error, wave_space, \
 		wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object \
-		= make_mock_data(PA_image[j], PA_grism[j], i[j], Va[j], r_t[j], sigma0[j],SN_image[j], SN_grism[j], psf, image_shape= 31)
+		= make_mock_data(PA_image[j], PA_grism[j], i[j], Va[j], r_t[j], sigma0[j],SN_image[j], SN_grism[j], n[j], psf, image_shape= 31)
 		#summarize ouputs in one mock_params dictionary
 		print('Convolved mock image max pixel: ' + str(jnp.max(convolved_noise_image)))
 		mock_params = {'test': test, 'j': j ,'convolved_noise_image': convolved_noise_image, 'image_error': image_error, 'grism_spectrum_noise': grism_spectrum_noise, 'grism_error': grism_error, 'wave_space': wave_space, 'wavelength': wavelength, 'delta_wave_cutoff': delta_wave_cutoff, 'y_factor': y_factor, 'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min, 'grism_object': grism_object}
-		priors = {'PA': PA_image[j], 'i': i[j], 'Va': Va[j], 'r_t': r_t[j], 'sigma0': sigma0[j]}
+		priors = {'PA': PA_image[j], 'i': i[j], 'Va': Va[j], 'r_t': r_t[j], 'sigma0': sigma0[j], 'n': n[j]}
 		#run fitting
 		inf_data, kin_model, grism_object, num_samples  = run_fit(mock_params,priors, parametric = parametric)
 		#post process inference data
@@ -603,7 +720,23 @@ if __name__ == "__main__":
 		v_re_med, v_re_truth , kin_model= save_results(config_path, inf_data, test, j, r_t[j], kin_model, grism_object, num_samples,parametric)
     	#plot the posteriors of the tuning parameters
 		# plotting.plot_tuning_parameters(inf_data, model = 'Disk', save_to_folder = str(test), name = str(j) + '_tuning_parameters', scaling = False, error_scaling = False, errors = False, reg = False)
-
+		inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0']
+		inf_data.prior['v_sigma'] = inf_data.prior['v_re'] / inf_data.prior['sigma0']
+	#compute Mdyn posterior and quantiles
+		pressure_cor = 3.35 #= 2*re/rd
+		inf_data.posterior['v_circ2'] = inf_data.posterior['v_re']**2 + inf_data.posterior['sigma0']**2*pressure_cor
+		inf_data.prior['v_circ2'] = inf_data.prior['v_re']**2 + inf_data.prior['sigma0']**2*pressure_cor
+		inf_data.posterior['v_circ'] = np.sqrt(inf_data.posterior['v_circ2'])
+		inf_data.prior['v_circ'] = np.sqrt(inf_data.prior['v_circ2'])
+		ktot = 1.8 #for q0 = 0.2
+		G = 4.3009172706e-3 #gravitational constant in pc*M_sun^-1*(km/s)^2
+		DA = cosmo.angular_diameter_distance(3.0).to('m')
+		meters_to_pc = 3.086e16
+		# Convert arcseconds to radians and calculate the physical size
+		inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*DA.value/meters_to_pc
+		inf_data.prior['r_eff_pc'] = np.deg2rad(inf_data.prior['r_eff']*0.06/3600)*DA.value/meters_to_pc
+		inf_data.posterior['M_dyn'] = np.log10(ktot*inf_data.posterior['v_circ2']*inf_data.posterior['r_eff_pc']/G)
+		inf_data.prior['M_dyn'] = np.log10(ktot*inf_data.prior['v_circ2']*inf_data.prior['r_eff_pc']/G)
 		az.plot_trace(inf_data, var_names =['PA', 'i', 'Va','r_t', 'sigma0'], divergences = True)
 		plt.savefig('testing/' + str(test) + '/' + str(j)+ '_chains.png', dpi=500)
 		plt.show()
@@ -646,8 +779,7 @@ if __name__ == "__main__":
 		params = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re']
 		quantiles = [0.16, 0.50, 0.84]
 		#compute the azimuthally average velocity at the effective radius
-		r_eff = kin_model.r_eff
-		inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff)
+		inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
 
 		for ii_p in params_single:
 			res[ii_p + "_q16"][j] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 16)

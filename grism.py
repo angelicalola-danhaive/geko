@@ -40,6 +40,7 @@ from scipy import signal
 from scipy import ndimage
 
 import jax.numpy as jnp
+from jax import image
 
 from reproject import reproject_adaptive
 from photutils.centroids import centroid_1dg
@@ -169,7 +170,6 @@ class Grism:
 
 		self.detector_xmin = self.xcenter_detector - self.jcenter/y_factor
 		self.detector_xmax = self.xcenter_detector + (self.direct.shape[0]-1-self.jcenter)/y_factor
-
 		detector_x_space_low = jnp.linspace(self.detector_xmin, self.detector_xmax, direct.shape[0])
 		spacing = detector_x_space_low[1] - detector_x_space_low[0]
 		# print(detector_x_space_low)
@@ -183,7 +183,10 @@ class Grism:
 		# else:
 		# 	self.detector_x_space = detector_x_space_high
 
-		self.detector_x_space = jnp.linspace(self.detector_xmin, self.detector_xmax, self.sh_high[0])
+		# self.detector_x_space = jnp.linspace(self.detector_xmin, self.detector_xmax, self.sh_high[0])
+		detector_x_space_low_2d = jnp.reshape(detector_x_space_low, (1, direct.shape[0]))
+
+		self.detector_x_space = image.resize(detector_x_space_low_2d, (1,self.sh_high[0]), method = 'linear')[0]
 
 		# print('det x space: ', self.detector_x_space)
 
@@ -210,7 +213,8 @@ class Grism:
 		self.redshift = redshift
 
 		self.filter = grism_filter
-		self.module = grism_module
+		self.module = 'A' 
+		self.module_lsf = grism_module
 		self.pupil = grism_pupil
 
 		self.load_coefficients()
@@ -231,7 +235,7 @@ class Grism:
 
 		# self.dx_to_wave = interpolate.UnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], self.wave_space[jnp.argsort(self.disp_space)], s = 0, k = 1)
 
-		self.compute_lsf()
+		self.compute_lsf_new()
 		# print(self.sigma_v_lsf)
 
 		self.set_sensitivity()
@@ -476,11 +480,28 @@ class Grism:
 
 		#the 0.5 in front is bc I think I am over-estimating LSF
 		self.sigma_lsf = (1/2.36)*self.wavelength/R #0.5*
-		print('LSF: ', self.sigma_lsf)
+		# print('LSF: ', self.sigma_lsf)
 		self.sigma_v_lsf = (1/2.36)*(c/1000)/R #put c in km/s #0.5*
-		print('LSF vel: ', self.sigma_v_lsf)
+		# print('LSF vel: ', self.sigma_v_lsf)
 
 		# print(0.001*(c/1000)/4.2)
+
+	def compute_lsf_new(self):
+		'''
+			New LSF computed by Fengwu from new data - sum of two Gaussians
+		'''
+		if self.module_lsf == 'A':
+			frac_1 = 0.679*jnp.log(self.wavelength/4) + 0.604
+			fwhm_1 = 2.23*jnp.log(self.wavelength/4) + 2.22
+			fwhm_2 = 8.75*jnp.log(self.wavelength/4) + 5.97
+		else:
+			frac_1 = 1.584*jnp.log(self.wavelength/4) + 0.557
+			fwhm_1 = 3.5*jnp.log(self.wavelength/4) + 2.22
+			fwhm_2 = 11.27*jnp.log(self.wavelength/4) + 5.78
+
+		self.sigma_lsf = math.sqrt(1/(8*math.log(2))*(frac_1*fwhm_1**2+(1-frac_1)*fwhm_2**2))
+		self.sigma_v_lsf = self.sigma_lsf/(self.wavelength/(c/1000))
+		# print('LSF: ', self.sigma_lsf, ' LSF vel: ', self.sigma_v_lsf)
 	
 	def compute_PSF(self, PSF):
 
@@ -489,16 +510,16 @@ class Grism:
 			self.oversampled_PSF = PSF
 		else:
 			# self.oversampled_PSF = utils.oversample_PSF(PSF, self.factor)
-			self.oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method = 'bicubic')
+			self.oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method = 'bilinear')
 			#crop it down to the central 9x9 pixels
 			self.oversampled_PSF = self.oversampled_PSF[self.oversampled_PSF.shape[0]//2 - 5:self.oversampled_PSF.shape[0]//2 + 6, self.oversampled_PSF.shape[1]//2 - 5:self.oversampled_PSF.shape[1]//2 +6]
 			#normalize the PSF to sum = 1
 			self.oversampled_PSF = self.oversampled_PSF/jnp.sum(self.oversampled_PSF)
-		print('oversampled PSF sum = ', jnp.sum(self.oversampled_PSF ))
-		plt.imshow(self.oversampled_PSF)
-		plt.title('PSF')
-		plt.colorbar()
-		plt.show()
+		# print('oversampled PSF sum = ', jnp.sum(self.oversampled_PSF ))
+		# plt.imshow(self.oversampled_PSF)
+		# plt.title('PSF')
+		# plt.colorbar()
+		# plt.show()
 		self.PSF =  self.oversampled_PSF[:,:, jnp.newaxis]
 
 		# velocity_space = jnp.linspace(-1000, 1000, 2001)
@@ -595,6 +616,8 @@ class Grism:
 		# print('wave_sigmas: ', wave_sigmas[0,0])
 		sigma_LSF = self.sigma_lsf
 		# print('sigma_LSF: ', sigma_LSF)
+		# print('wave_sigma: ', wave_sigmas)
+		# print('sigma_LSF: ', sigma_LSF)
 		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) #*(1/2.36)
 		mu = wave_centers[:,:,jnp.newaxis]
 		sigma = wave_sigmas_eff[:,:,jnp.newaxis]
@@ -618,88 +641,6 @@ class Grism:
 		# cube = cube_full[:,:,J_min:J_max+1*self.wave_factor]
 		psf_cube = fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
 
-		# grism_spectra = jnp.zeros((cube.shape[1],cube.shape[0]))
-		# grism_spectra_padded = jnp.pad(grism_spectra, [(0, 0), (cube.shape[2],cube.shape[2])], mode='constant')
-		# # at this stage, we need to use the instrument dispersion function
-
-		# index = jnp.linspace(0, cube.shape[0]-1, cube.shape[0]).astype(int)
-		# x_grism = index + 1
-		# wave_index = J_min + index
-		# y_grism = 31
-		# dim_x = 62 
-		# dim_y = 62 #psf_cube.shape[0]
-		# y_min_spec = 0
-		# y_max_spec = cube.shape[0]
-		# x_min = x_grism-(dim_x//2) + 62
-		# print('x_min: ', x_min.shape)
-		# x_max = x_grism-(dim_x//2)+dim_x + 62
-
-		# im = psf_cube[:,:,index]
-
-		# update = jnp.zeros((cube.shape[0], cube.shape[2], cube.shape[2]))
-		# #fill each 2D spectrum with the image at the wavelength
-		# add = jnp.pad(im, ((jnp.zeros_like(index),jnp.zeros_like(index)), (index,cube.shape[1]-index)), mode='constant')
-		# print(add.shape)
-
-		# grism_spectra_padded = grism_spectra_padded.at[:, x_min:x_max].set(grism_spectra_padded[:, x_min:x_max] + im)
-
-
-		# for i in range(cube.shape[2]):
-		# 	wave = self.wave_space[J_min+i]
-		# 	# print('wave: ', wave)
-		# 	im = psf_cube[:,:,i]
-		# 	# print(cube.shape)
-		# 	# print(im.shape)
-		# 	# disps = jnp.array(self.grism_dispersion(wave) + self.detector_x_space - self.xcenter_detector)[im.shape[0]//2, im.shape[1]//2]
-		# 	x_grism = i + 1 #jnp.argmin(jnp.abs(self.disp_space[J_min:J_max+1*self.wave_factor] - disps))
-		# 	# print(x_grism)
-		# 	y_grism = cube.shape[0]//2
-
-		# 	dim_x = psf_cube.shape[1]
-		# 	# print(dim_x)
-		# 	dim_y = psf_cube.shape[0]
-		# 	# print(dim_y)
-		# 	y_min_spec = 0 #jnp.maximum(0,y_grism-(dim_y//2))
-		# 	y_max_spec = cube.shape[0] # jnp.minimum(cube.shape[0],y_grism-(dim_y//2)+dim_y)
-		# 	x_min = x_grism-(dim_x//2) + cube.shape[0]
-		# 	# x_min = jnp.where(x_grism-(dim_x//2)<0, 0, x_min)
-		# 	x_max = x_grism-(dim_x//2)+dim_x + cube.shape[0]
-		# 	# print('y_min: ', y_min)
-		# 	# print('y_max: ', y_max)
-		# 	# pr/int('x_min: ', x_min)
-		# 	# print('x_max: ', x_max)
-		# 	# if y_min_spec==0:
-		# 	# 	dy_low = im.shape[0] - (y_max_spec-y_min_spec)
-		# 	# else: dy_low = 0
-		# 	# dy_low = jnp.where(y_min_spec==0, im.shape[0] - (y_max_spec-y_min_spec), 0)
-		# 	# # if y_max_spec==cube.shape[0]:
-		# 	# # 	dy_up = (y_max_spec-y_min_spec) - im.shape[0]
-		# 	# # 	if dy_up == 0: dy_up = None
-		# 	# # else: dy_up = None
-		# 	# dy_up = jnp.where(y_max_spec==cube.shape[0], (y_max_spec-y_min_spec) - im.shape[0], cube.shape[0])
-		# 	# dy_up = jnp.where(dy_up == 0, cube.shape[0], dy_up)
-		# 	# # if x_min==0:
-		# 	# # 	dx_low = im.shape[1] - (x_max-x_min)
-		# 	# # else: dx_low = 0
-		# 	# dx_low = jnp.where(x_min==0, im.shape[1] - (x_max-x_min), 0)
-		# 	# # if x_max==cube.shape[2]:
-		# 	# # 	dx_up = (x_max-x_min)-im.shape[1]
-		# 	# # 	if dx_up == 0: dx_up = None
-		# 	# # else: dx_up = None 
-		# 	# dx_up = jnp.where(x_max==cube.shape[2], (x_max-x_min)-im.shape[1], cube.shape[2])
-		# 	# dx_up = jnp.where(dx_up == 0, cube.shape[2], dx_up)
-
-		# 	# print('dy_low: ', dy_low)
-		# 	# print('dy_up: ', dy_up)
-		# 	# print('dx_low: ', dx_low)
-		# 	# print('dx_up: ', dx_up)
-
-		# 	# indices = jnp.argmin(jnp.abs(disps[:,:,jnp.newaxis]-self.disp_space[J_min:J_max+1*self.wave_factor]),axis=2)
-
-		# 	# grism_spectra = grism_spectra.at[y_min_spec:y_max_spec, x_min:x_max].set(grism_spectra[y_min_spec:y_max_spec, x_min:x_max] + im[dy_low:,dx_low:dx_up])
-		# 	grism_spectra_padded = grism_spectra_padded.at[:, x_min:x_max].set(grism_spectra_padded[:, x_min:x_max] + im)
-
-		
 		grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)
 		 #grism_spectra_padded[:, 62:-62]
 		#remove all pixels with flux below 1e-6
@@ -750,83 +691,6 @@ class Grism:
 		# grism_spectra = jnp.zeros((cube.shape[1],cube.shape[0]))
 		# grism_spectra_padded = jnp.pad(grism_spectra, [(0, 0), (cube.shape[2],cube.shape[2])], mode='constant')
 		# # at this stage, we need to use the instrument dispersion function
-
-		# index = jnp.linspace(0, cube.shape[0]-1, cube.shape[0]).astype(int)
-		# x_grism = index + 1
-		# wave_index = J_min + index
-		# y_grism = 31
-		# dim_x = 62 
-		# dim_y = 62 #psf_cube.shape[0]
-		# y_min_spec = 0
-		# y_max_spec = cube.shape[0]
-		# x_min = x_grism-(dim_x//2) + 62
-		# print('x_min: ', x_min.shape)
-		# x_max = x_grism-(dim_x//2)+dim_x + 62
-
-		# im = psf_cube[:,:,index]
-
-		# update = jnp.zeros((cube.shape[0], cube.shape[2], cube.shape[2]))
-		# #fill each 2D spectrum with the image at the wavelength
-		# add = jnp.pad(im, ((jnp.zeros_like(index),jnp.zeros_like(index)), (index,cube.shape[1]-index)), mode='constant')
-		# print(add.shape)
-
-		# grism_spectra_padded = grism_spectra_padded.at[:, x_min:x_max].set(grism_spectra_padded[:, x_min:x_max] + im)
-
-
-		# for i in range(cube.shape[2]):
-		# 	wave = self.wave_space[J_min+i]
-		# 	# print('wave: ', wave)
-		# 	im = psf_cube[:,:,i]
-		# 	# print(cube.shape)
-		# 	# print(im.shape)
-		# 	# disps = jnp.array(self.grism_dispersion(wave) + self.detector_x_space - self.xcenter_detector)[im.shape[0]//2, im.shape[1]//2]
-		# 	x_grism = i + 1 #jnp.argmin(jnp.abs(self.disp_space[J_min:J_max+1*self.wave_factor] - disps))
-		# 	# print(x_grism)
-		# 	y_grism = cube.shape[0]//2
-
-		# 	dim_x = psf_cube.shape[1]
-		# 	# print(dim_x)
-		# 	dim_y = psf_cube.shape[0]
-		# 	# print(dim_y)
-		# 	y_min_spec = 0 #jnp.maximum(0,y_grism-(dim_y//2))
-		# 	y_max_spec = cube.shape[0] # jnp.minimum(cube.shape[0],y_grism-(dim_y//2)+dim_y)
-		# 	x_min = x_grism-(dim_x//2) + cube.shape[0]
-		# 	# x_min = jnp.where(x_grism-(dim_x//2)<0, 0, x_min)
-		# 	x_max = x_grism-(dim_x//2)+dim_x + cube.shape[0]
-		# 	# print('y_min: ', y_min)
-		# 	# print('y_max: ', y_max)
-		# 	# pr/int('x_min: ', x_min)
-		# 	# print('x_max: ', x_max)
-		# 	# if y_min_spec==0:
-		# 	# 	dy_low = im.shape[0] - (y_max_spec-y_min_spec)
-		# 	# else: dy_low = 0
-		# 	# dy_low = jnp.where(y_min_spec==0, im.shape[0] - (y_max_spec-y_min_spec), 0)
-		# 	# # if y_max_spec==cube.shape[0]:
-		# 	# # 	dy_up = (y_max_spec-y_min_spec) - im.shape[0]
-		# 	# # 	if dy_up == 0: dy_up = None
-		# 	# # else: dy_up = None
-		# 	# dy_up = jnp.where(y_max_spec==cube.shape[0], (y_max_spec-y_min_spec) - im.shape[0], cube.shape[0])
-		# 	# dy_up = jnp.where(dy_up == 0, cube.shape[0], dy_up)
-		# 	# # if x_min==0:
-		# 	# # 	dx_low = im.shape[1] - (x_max-x_min)
-		# 	# # else: dx_low = 0
-		# 	# dx_low = jnp.where(x_min==0, im.shape[1] - (x_max-x_min), 0)
-		# 	# # if x_max==cube.shape[2]:
-		# 	# # 	dx_up = (x_max-x_min)-im.shape[1]
-		# 	# # 	if dx_up == 0: dx_up = None
-		# 	# # else: dx_up = None 
-		# 	# dx_up = jnp.where(x_max==cube.shape[2], (x_max-x_min)-im.shape[1], cube.shape[2])
-		# 	# dx_up = jnp.where(dx_up == 0, cube.shape[2], dx_up)
-
-		# 	# print('dy_low: ', dy_low)
-		# 	# print('dy_up: ', dy_up)
-		# 	# print('dx_low: ', dx_low)
-		# 	# print('dx_up: ', dx_up)
-
-		# 	# indices = jnp.argmin(jnp.abs(disps[:,:,jnp.newaxis]-self.disp_space[J_min:J_max+1*self.wave_factor]),axis=2)
-
-		# 	# grism_spectra = grism_spectra.at[y_min_spec:y_max_spec, x_min:x_max].set(grism_spectra[y_min_spec:y_max_spec, x_min:x_max] + im[dy_low:,dx_low:dx_up])
-		# 	grism_spectra_padded = grism_spectra_padded.at[:, x_min:x_max].set(grism_spectra_padded[:, x_min:x_max] + im)
 
 		
 		grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)

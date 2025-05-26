@@ -33,6 +33,15 @@ import arviz as az
 
 import argparse
 import yaml
+import corner
+
+from astropy.table import Table
+
+from photutils.segmentation import detect_sources, deblend_sources, make_2dgaussian_kernel, SourceCatalog
+from photutils.background import Background2D
+from astropy.convolution import convolve as convolve_astropy
+
+from astropy.cosmology import Planck18 as cosmo
 
 
 jax.config.update('jax_enable_x64', True)
@@ -87,10 +96,8 @@ class Fit_Numpyro():
 		else:
 			inference_model = self.kin_model.inference_model
 		self.nuts_kernel = NUTS(inference_model,  step_size=step_size, adapt_step_size=adapt_step_size, init_strategy=init_to_median(num_samples=2000),
-								target_accept_prob=target_accept_prob,find_heuristic_step_size=True, max_tree_depth=10, dense_mass=False, adapt_mass_matrix=True) #dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')])
-		# self.nuts_kernel = SA(self.kin_model.inference_model, dense_mass=False) #, init_strategy=init_to_median(num_samples=2000))  #find_heuristic_step_size=True, #max_tree_depth=10 dense_mass=[('unscaled_PA', 'unscaled_i', 'unscaled_Va', 'unscaled_r_t', 'unscaled_sigma0')]
-		# init_to_value(values = init_vals)
-		# init_to_value(values = {'unscaled_PA': 0.0, 'unscaled_i': 0.0, 'unscaled_Va': 0.2, 'unscaled_r_t': 0.25, 'unscaled_sigma0': 0.2})
+								target_accept_prob=target_accept_prob, find_heuristic_step_size=True, max_tree_depth=10, dense_mass=False, adapt_mass_matrix=True) 
+		
 		print('max tree: ', max_tree_depth)
 		print('step size: ', step_size)
 		print('warmup: ', num_warmup)
@@ -100,14 +107,24 @@ class Fit_Numpyro():
 		self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
 						 num_warmup=num_warmup, num_chains=num_chains)
 		self.rng_key = random.PRNGKey(100)
-		#find valid initial params
 
-		# init_params_info = numpyro.infer.util.find_valid_initial_params(self.rng_key, self.kin_model.inference_model, model_args = (self.grism_object, self.obs_map, self.obs_error, self.mask), init_strategy=init_to_median)
+		sigma_rms = jnp.minimum((self.obs_map/self.obs_error).max(),5)
+		im_conv = convolve_astropy(self.obs_map, make_2dgaussian_kernel(3.0, size=5))
 
-		# print(init_params_info)
+		bkg = Background2D(self.obs_map, (15, 15), filter_size=(5, 5), exclude_percentile=99.0)
+
+
+		segment_map = detect_sources(im_conv, sigma_rms*np.abs(bkg.background_median), npixels=10)
+
+		main_label = segment_map.data[int(0.5*self.obs_map.shape[0]), int(0.5*self.obs_map.shape[1])]
+		
+		# construct mask
+		mask = segment_map.data
+		new_mask = np.zeros_like(mask)
+		new_mask[mask == main_label] = 1.0
 
 		with numpyro.validation_enabled():
-			self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =self.mask) #, extra_fields=("potential_energy", "accept_prob"))
+			self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =new_mask) #, extra_fields=("potential_energy", "accept_prob"))
 
 		print('done')
 
@@ -168,12 +185,27 @@ if __name__ == "__main__":
 	line = args.line
 	parametric = args.parametric
 
-	print('Running the real data')
+	print('Running geko for the galaxy ID: ', output, ' with the line: ', line, ' and the master catalog: ', master_cat, ' and parametric: ', parametric)
 
-	direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
+	z_spec, wavelength, direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
 	num_samples, num_warmup, step_size, target_accept_prob, \
 	wave_space, delta_wave, index_min, index_max, factor = pre.run_full_preprocessing(output, master_cat, line)
 	
+	if parametric:
+		with open('fitting_results/' + output + 'config_real.yaml', 'r') as file:
+			input = yaml.load(file, Loader=yaml.FullLoader)
+		ID = input[0]['Data']['ID']
+		#get the redshift from the master catalog
+		try:
+			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
+		except:
+			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F115W_svi.cat', format='ascii')
+		try:	
+			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F356W_svi.cat', format='ascii')
+		except:
+			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F444W_svi.cat', format='ascii')
+
+		kin_model.disk.set_parametric_priors(pysersic_summary, pysersic_grism_summary, z_spec, wavelength, delta_wave)
 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
 
@@ -197,7 +229,108 @@ if __name__ == "__main__":
 	inf_data.to_netcdf('fitting_results/' + output + 'output')
 
 	#figure out how to make this work well
-	post.process_results(output, master_cat, line)
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric)
+
+	#compute v/sigma posterior and quantiles
+	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0']
+	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
+	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
+	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
+
+	#compute Mdyn posterior and quantiles
+	pressure_cor = 3.35 #= 2*re/rd
+	inf_data.posterior['v_circ2'] = inf_data.posterior['v_re']**2 + inf_data.posterior['sigma0']**2*pressure_cor
+	inf_data.posterior['v_circ'] = np.sqrt(inf_data.posterior['v_circ2'])
+	ktot = 1.8 #for q0 = 0.2
+	G = 4.3009172706e-3 #gravitational constant in pc*M_sun^-1*(km/s)^2
+	DA = cosmo.angular_diameter_distance(z_spec).to('m')
+	meters_to_pc = 3.086e16
+	# Convert arcseconds to radians and calculate the physical size
+	inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*DA.value/meters_to_pc
+	inf_data.posterior['M_dyn'] = np.log10(ktot*inf_data.posterior['v_circ2']*inf_data.posterior['r_eff_pc']/G)
+
+	M_dyn_16 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.16, dim=["chain", "draw"]))
+	M_dyn_med = jnp.array(inf_data.posterior['M_dyn'].median(dim=["chain", "draw"]))
+	M_dyn_84 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.84, dim=["chain", "draw"]))
+
+	v_circ_16 = jnp.array(inf_data.posterior['v_circ'].quantile(0.16, dim=["chain", "draw"]))
+	v_circ_med = jnp.array(inf_data.posterior['v_circ'].median(dim=["chain", "draw"]))
+	v_circ_84 = jnp.array(inf_data.posterior['v_circ'].quantile(0.84, dim=["chain", "draw"]))
+
+	#save results to a file
+	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', 'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', 'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84']
+	t_empty = np.zeros((len(params), 3))
+	res = Table(t_empty.T, names=params)
+	res['ID'] = ID
+	res['PA_50'] = kin_model.PA_mean
+	res['i_50'] = kin_model.i_mean
+	res['Va_50'] = kin_model.Va_mean
+	res['r_t_50'] = kin_model.r_t_mean
+	res['sigma0_50'] = kin_model.sigma0_mean_model
+	res['v_re_50'] = v_re_med
+	res['amplitude_50'] = kin_model.amplitude_mean
+	res['r_eff_50'] = kin_model.r_eff_mean
+	res['n_50'] = kin_model.n_mean
+	res['PA_morph_50'] = kin_model.PA_morph_mean
+	res['v_sigma_50'] = v_sigma_med
+
+	res['PA_16'] = kin_model.PA_16
+	res['i_16'] = kin_model.i_16
+	res['Va_16'] = kin_model.Va_16
+	res['r_t_16'] = kin_model.r_t_16
+	res['sigma0_16'] = kin_model.sigma0_16
+	res['v_re_16'] = v_re_16
+	res['v_sigma_16'] = v_sigma_16
+
+	res['PA_84'] = kin_model.PA_84
+	res['i_84'] = kin_model.i_84
+	res['Va_84'] = kin_model.Va_84
+	res['r_t_84'] = kin_model.r_t_84
+	res['sigma0_84'] = kin_model.sigma0_84
+	res['v_re_84'] = v_re_84
+	res['v_sigma_84'] = v_sigma_84
+
+	res['M_dyn_16'] = M_dyn_16
+	res['M_dyn_50'] = M_dyn_med
+	res['M_dyn_84'] = M_dyn_84
+
+	res['vcirc_16'] = v_circ_16
+	res['vcirc_50'] = v_circ_med
+	res['vcirc_84'] = v_circ_84
+
+	res['r_eff_16'] = kin_model.r_eff_16
+	res['r_eff_84'] = kin_model.r_eff_84
+
+	res['ellip_50'] = kin_model.ellip_mean
+	res['ellip_16'] = kin_model.ellip_16
+	res['ellip_84'] = kin_model.ellip_84
+
+	res.write('fitting_results/' + output + 'results', format='ascii', overwrite=True)
+	
+	#save a cornerplot of the v_sigma and sigma posteriors
+	import smplotlib
+	fig = plt.figure(figsize=(10, 10))
+	CORNER_KWARGS = dict(
+		smooth=4,
+		label_kwargs=dict(fontsize=20),
+		title_kwargs=dict(fontsize=20),
+		quantiles=[0.16, 0.5, 0.84],
+		plot_density=False,
+		plot_datapoints=False,
+		fill_contours=True,
+		plot_contours=True,
+		show_titles=True,
+		labels=[r'$v_{re}/\sigma$', r'$\sigma_0$ [km/s]',  r'$\log ( M_{dyn} [M_{\odot}])$', r'$v_{circ}$ [km/s]'],
+		titles= [r'$v_{re}/\sigma$ ', r'$\sigma_0$', r'$\log M_{dyn}$',r'$v_{circ}$'],
+		max_n_ticks=3,
+		divergences=False)
+
+	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
+						color='dodgerblue', **CORNER_KWARGS)
+	plt.tight_layout()
+	plt.savefig('fitting_results/' + output + 'v_sigma_corner.png', dpi=300)
+    
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, 'H_alpha', parametric = True)
 
 
 #==============================EXTRA STUFF = NEED TO PUT SOMEWHERE ELSE==================================================

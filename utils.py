@@ -12,6 +12,7 @@ import run_pysersic as py
 from jax import image
 import jax.numpy as jnp
 from jax.scipy.stats import norm
+from jax.scipy.special import gamma
 
 
 from skimage.filters import threshold_otsu
@@ -108,8 +109,20 @@ def resample(image_high_res, factor_y, factor_x):
     '''
     blocks = image_high_res.reshape(
         (int(image_high_res.shape[0]/(factor_y)), factor_y, int(image_high_res.shape[1]/factor_x), factor_x))
-    image_low_res = jnp.sum(blocks, axis=(1, 3))
+    image_low_res = np.sum(blocks, axis=(1, 3))
     return image_low_res
+
+def downsample_error(error_array):
+    # Ensure dimensions are even
+    h, w = error_array.shape
+    h2, w2 = h // 2 * 2, w // 2 * 2
+    error_array = error_array[:h2, :w2]  # crop if necessary
+
+    # Reshape and compute RMS of 2x2 blocks (error propagation)
+    reshaped = error_array.reshape(h2//2, 2, w2//2, 2)
+    downsampled = np.sqrt(np.mean(reshaped**2, axis=(1, 3)))
+    return downsampled
+
 
 def scale_distribution(distribution, mu, sigma, max, min):
     '''
@@ -423,14 +436,17 @@ def compute_inclination(axis_ratio = None, ellip = None, q0 = 0.0):
     """
     if axis_ratio == None:
         axis_ratio = 1 - ellip
+    if axis_ratio<q0:
+        axis_ratio = q0
     inc = jnp.arccos(jnp.sqrt( (axis_ratio**2 - q0**2)/(1 - q0**2) ))*(180/jnp.pi)
+    # inc = jnp.arccos(axis_ratio)*(180/jnp.pi)
     return inc
 
 def compute_axis_ratio(inc, q0 = 0.0):
     """
         Compute the axis ratio of a galaxy given its inclination
     """
-    axis_ratio = np.sqrt(np.cos(np.radians(inc))**2*(1-q0**2) + q0**2)
+    axis_ratio = jnp.sqrt(jnp.cos(jnp.radians(inc))**2*(1-q0**2) + q0**2)
     return axis_ratio
 
 def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0):
@@ -560,21 +576,26 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
     return PA_grism, inc_grism, r_full_grism, x0_vel, y0_vel, half_light_radius
 
 
-def add_v_re(inf_data, kin_model, grism_object, num_samples, r_eff):
+def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual = None):
     inf_data.posterior['v_re'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
+    inf_data.prior['v_re'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
+    #make the prior array based on the shape of another prior from inf_data
     for i in [0,1]:
-        for sample in range(num_samples-1):
+        for sample in range(num_samples):
             x = np.linspace(0 - kin_model.x0_vel, grism_object.direct.shape[1]-1 - kin_model.x0_vel, grism_object.direct.shape[1]*grism_object.factor)
             y = np.linspace(0 - 15, grism_object.direct.shape[0]-1 - 15, grism_object.direct.shape[0]*grism_object.factor)
             X, Y = np.meshgrid(x, y)
-            inf_data.posterior['v_re'][i,int(sample)] = kin_model.v_rad(X,Y, np.radians( float(inf_data.posterior['PA'][i,int(sample)].values)), np.radians(float(inf_data.posterior['i'][i,int(sample)].values)), float(inf_data.posterior['Va'][i,int(sample)].values),  float(inf_data.posterior['r_t'][i,int(sample)].values), r_eff) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
-    i_med = inf_data.posterior['i'].quantile(0.50).values
-    i_16 = inf_data.posterior['i'].quantile(0.16).values
-    i_84 = inf_data.posterior['i'].quantile(0.84).values
+            if re_manual is not None:
+                re = re_manual
+            else:
+                re = float(inf_data.posterior['r_eff'][i,int(sample)].values)
+            inf_data.posterior['v_re'][i,int(sample)] = np.abs(kin_model.v_rad(X,Y, np.radians( float(inf_data.posterior['PA'][i,int(sample)].values)), np.radians(float(inf_data.posterior['i'][i,int(sample)].values)), float(inf_data.posterior['Va'][i,int(sample)].values),  float(inf_data.posterior['r_t'][i,int(sample)].values), re)/np.sin(np.radians( float(inf_data.posterior['i'][i,int(sample)].values)))) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
+            if i == 0:
+                inf_data.prior['v_re'][i,int(sample)] = np.abs(kin_model.v_rad(X,Y, np.radians( float(inf_data.prior['PA'][i,int(sample)].values)), np.radians(float(inf_data.prior['i'][i,int(sample)].values)), float(inf_data.prior['Va'][i,int(sample)].values),  float(inf_data.prior['r_t'][i,int(sample)].values), re)/np.sin(np.radians( float(inf_data.prior['i'][i,int(sample)].values)))) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
 
-    v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values/np.sin(np.radians(i_16))
-    v_re_med =inf_data.posterior['v_re'].quantile(0.50).values/np.sin(np.radians(i_med))
-    v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values/np.sin(np.radians(i_84))
+    v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values
+    v_re_med =inf_data.posterior['v_re'].quantile(0.50).values
+    v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values
     return inf_data, v_re_16, v_re_med, v_re_84
 
 
@@ -680,7 +701,7 @@ def resample_errors(error_map, factor, wave_factor):
     blocks = error_map.reshape(
         (int(error_map.shape[0]/(factor)), factor, int(error_map.shape[1]/wave_factor), wave_factor))
     # resampled_errors = jnp.sqrt(jnp.sum(blocks**2, axis=(1,3)))
-    resampled_errors = jnp.linalg.norm(blocks, axis=(1, 3))
+    resampled_errors = np.linalg.norm(blocks, axis=(1, 3))
     return resampled_errors
 
 
@@ -716,7 +737,7 @@ def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
         
     return jnp.where((n_safe>0) & ((x_maj>0) | (x_min>0)) & (b_safe!=0) & (r_eff>0), amplitude * jnp.exp(-bn * (z ** (1 / n_safe) - 1.0)), amplitude * jnp.exp(bn))
 
-def compute_adaptive_sersic_profile(x, y, n, r_eff, intensity, x0, y0, ellip, PA_sersic):
+def compute_adaptive_sersic_profile(x, y,intensity , r_eff, n, x0, y0, ellip, PA_sersic):
     '''
         Notes about inputs:
         -x and y have to be oversampled to the right amount that you want to obtain at the end 
@@ -728,7 +749,7 @@ def compute_adaptive_sersic_profile(x, y, n, r_eff, intensity, x0, y0, ellip, PA
     image_shape = x.shape[0]
     # Create grids for different oversampling factors
     oversample_factor_inner = 125
-    oversample_factor_outer = 25
+    oversample_factor_outer = 5
     boundary_radius = 0.2 * r_eff
     boundary_half_size = 0.2 * r_eff
    # Define the inner square region mask
@@ -761,7 +782,7 @@ def compute_adaptive_sersic_profile(x, y, n, r_eff, intensity, x0, y0, ellip, PA
     y_inner_grid = image.resize(y_inner_grid_low, ((oversample_factor_inner*x_size), (oversample_factor_inner*y_size)), method='linear')
 
     galaxy_model_inner = sersic_profile(
-            x_inner_grid, y_inner_grid, n, r_eff, intensity,
+            x_inner_grid, y_inner_grid, intensity, r_eff,n ,
             x0, y0, ellip, PA_sersic
         )/oversample_factor_inner**2
 
@@ -777,21 +798,41 @@ def compute_adaptive_sersic_profile(x, y, n, r_eff, intensity, x0, y0, ellip, PA
     y_outer_grid = image.resize(y, (int(oversample_factor_outer*image_shape), int(oversample_factor_outer*image_shape)), method='linear')
 
     galaxy_model_outer = sersic_profile(
-            x_outer_grid, y_outer_grid, n, r_eff, intensity,
+            x_outer_grid, y_outer_grid, intensity, r_eff,n ,
             x0, y0, ellip,
-            PA_sersic
-        )/oversample_factor_outer**2
+            PA_sersic)/oversample_factor_outer**2
 
 
-        # Resample to original grid
+    # Resample to original grid
     galaxy_model_outer_resampled = resample(galaxy_model_outer, oversample_factor_outer, oversample_factor_outer)
 
 
-    #print the shapes
     galaxy_model = jnp.where(inner_region_mask, galaxy_model_inner_resampled_full, galaxy_model_outer_resampled)
     
+    # plt.imshow(galaxy_model, origin='lower')
+    # plt.title('Galaxy model')
+    # plt.show()
+
     #the returned image has the shape of the input x and y arrays
     return galaxy_model
+
+
+def flux_to_Ie(flux,n,r_e,ellip):
+    # calculate surface brightness at Re [in arcsec] from total flux [arbitrary flux units]
+    bn = bn_approx(n)
+    G2n = gamma(2*n)
+    q = 1 - ellip
+    Ie = flux / (r_e**2 * q * 2*jnp.pi * n * jnp.exp(bn) * bn**(-2*n) * G2n )
+    return Ie
+
+def Ie_to_flux(Ie,n,r_e,ellip):
+    # calculate surface brightness at Re [in arcsec] from total flux [arbitrary flux units]
+    bn = bn_approx(n)
+    G2n = gamma(2*n)
+    q = 1 - ellip
+    total_flux = Ie* (r_e**2 * q * 2*jnp.pi * n * jnp.exp(bn) * bn**(-2*n) * G2n )
+    return total_flux
+
 # import time
 
 # def sersic_profile(x, y, amplitude, r_eff, n, x_0, y_0, ellip, theta, c=0):
