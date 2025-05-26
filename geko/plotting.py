@@ -315,10 +315,6 @@ def compute_r90(n, r_eff):
     result = root_scalar(sersic_radius_fraction, args=(n, r_eff, 0.9), bracket=[r_eff, 10 * r_eff])
     return result.root if result.converged else None
 
-# r_90 = compute_r90(n_sersic, r_eff)
-# print(f"Radius enclosing 90% of the light: {r_90:.2f} pixels")
-
-# def find_r_obs()
 
 def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
 	# plt.show()
