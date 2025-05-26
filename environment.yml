@@ -1,0 +1,19 @@
+name: geko_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python==3.11.0
+  - astropy
+  - matplotlib
+  - scipy
+  - astropy::reproject
+  - arviz
+  - photutils
+  - pip:
+      - corner==2.2.3
+      - jax==0.6.1
+      - jaxlib==0.6.1
+      - numpyro==0.18.0
+      - scipy==1.15.3
+prefix: /Users/lola/opt_arm/anaconda3/envs/geko_env
