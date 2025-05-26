@@ -27,6 +27,6 @@ jobs:
 
     - name: Run tests with pytest
       run: |
-        conda init
+        source ~/miniconda/etc/profile.d/conda.sh
         conda activate geko_env
         pytest --maxfail=1 --disable-warnings -q
