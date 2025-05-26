@@ -11,7 +11,7 @@ dependencies:
   - arviz
   - photutils
   - pip
-  pytest
+  - pytest
   - pip:
       - corner==2.2.3
       - jax==0.6.1
