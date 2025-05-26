@@ -9,8 +9,8 @@ __all__ = ["KinModels"]
 # imports
 import numpy as np
 # geko related imports
-import utils
-import plotting
+from . import  utils
+from . import  plotting
 
 # jax and its functions
 import jax
@@ -20,7 +20,7 @@ from jax.scipy.signal import convolve
 # from scipy.signal import convolve
 from jax import image
 
-from skimage.morphology import dilation, disk
+# from skimage.morphology import dilation, disk
 
 from astropy.modeling.models import GeneralSersic2D, Sersic2D
 
@@ -903,8 +903,8 @@ class Disk():
 
     def compute_flux_posterior(self, inference_data, flux_type = 'auto'):
 
-        # best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
-        # ), inference_data['sample_stats']['lp'].shape)
+        best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
+        ), inference_data['sample_stats']['lp'].shape)
 
         inference_data.posterior['fluxes_scaling'+ self.number].data = inference_data.posterior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1
         inference_data.prior['fluxes_scaling'+ self.number].data = inference_data.prior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1

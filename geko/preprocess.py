@@ -9,10 +9,10 @@ Eventually should also add here scripts to automatically create folders for sour
 __all__ = ['run_full_preprocessing']
 
 #imports
-import utils
-import grism
-import models
-import run_pysersic as py
+from . import  utils
+from . import  grism
+from . import  models
+# import run_pysersic as py
 
 import numpy as np
 import math
@@ -47,7 +47,7 @@ from photutils.isophote import Ellipse, EllipseGeometry
 from photutils.isophote import build_ellipse_model
 from photutils.aperture import EllipticalAperture
 
-from skimage.morphology import dilation, disk, ellipse, binary_closing, closing
+# from skimage.morphology import dilation, disk, ellipse, binary_closing, closing
 
 from photutils.segmentation import detect_sources, SourceCatalog, SegmentationImage, deblend_sources
 

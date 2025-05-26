@@ -3,12 +3,12 @@ __all__ = ["Fit_Numpyro"]
 # imports
 
 # importing my own modules
-import grism
-import preprocess as pre
-import postprocess as post
-import plotting
-import utils
-import models
+from . import grism
+from . import preprocess as pre
+from . import postprocess as post
+from . import plotting
+from . import utils
+from . import models
 
 import os
 

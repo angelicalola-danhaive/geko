@@ -10,7 +10,8 @@ __all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', '
            'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux']
            
 # geko imports
-import run_pysersic as py
+
+# import run_pysersic as py
 
 #other imports
 from jax import image
@@ -19,12 +20,12 @@ from jax.scipy.stats import norm
 from jax.scipy.special import gamma
 
 
-from skimage.filters import threshold_otsu
-from skimage.morphology import closing
-from skimage.measure import label, regionprops
-from skimage.segmentation import clear_border
-from skimage.morphology import dilation, disk, ellipse, binary_closing
-from skimage.color import label2rgb
+# from skimage.filters import threshold_otsu
+# from skimage.morphology import closing
+# from skimage.measure import label, regionprops
+# from skimage.segmentation import clear_border
+# from skimage.morphology import dilation, disk, ellipse, binary_closing
+# from skimage.color import label2rgb
 
 from astropy.modeling.models import Sersic2D
 from scipy import stats
@@ -47,7 +48,7 @@ import xarray as xr
 
 from scipy import stats as st
 
-import models
+from . import  models
 
 
 

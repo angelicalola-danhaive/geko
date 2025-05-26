@@ -7,12 +7,12 @@ Put all of the necessary post-processing functions here
 __all__ = ['process_results']
 
 # imports
-import preprocess as pre
-import fitting as fit
-import models
-import grism
-import plotting
-import utils
+from . import  preprocess as pre
+from . import  fitting as fit
+from . import  models
+from . import  grism
+from . import  plotting
+from . import  utils
 
 from matplotlib import pyplot as plt
 
