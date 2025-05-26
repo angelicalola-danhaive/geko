@@ -22,15 +22,8 @@ def create_high_res_mask(shape, center, radius, angle_start, angle_end, scale_fa
     # Draw the wedge on the high-resolution mask
     cv2.ellipse(high_res_mask, high_res_center, high_res_axes, angle, startAngle, endAngle, (255,), thickness)
     
-    # plt.imshow(high_res_mask, cmap='gray')
-    # plt.title("High-Resolution Mask (Wedge)")
-    # plt.show()
-
     high_res_mask = high_res_mask.astype(np.float32)/255
 
-    # # Downsample the high-resolution mask to the original image resolution
-    # mask = cv2.resize(high_res_mask, (shape[1], shape[0]), interpolation=cv2.INTER_AREA)
-    # mask = mask.astype(np.float32) / 255  # Normalize to range [0, 1]
     
     return high_res_mask
 
