@@ -13,9 +13,8 @@ dependencies:
   - pip
   - pytest
   - pip:
-      - corner=2.2.3
-      - jax=0.6.1
-      - jaxlib=0.6.1
-      - numpyro=0.18.0
-      - scipy=1.15.3
+      - corner==2.2.3
+      - jax==0.6.1
+      - jaxlib==0.6.1
+      - numpyro==0.18.0
 prefix: /Users/lola/opt_arm/anaconda3/envs/geko_env
