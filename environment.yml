@@ -17,4 +17,3 @@ dependencies:
       - jax==0.6.1
       - jaxlib==0.6.1
       - numpyro==0.18.0
-prefix: /Users/lola/opt_arm/anaconda3/envs/geko_env
