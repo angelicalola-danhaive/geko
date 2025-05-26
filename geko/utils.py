@@ -5,7 +5,10 @@
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
-__all__ = []
+__all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', 'compute_gal_props',
+           'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile', 
+           'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux']
+           
 # geko imports
 import run_pysersic as py
 
@@ -69,28 +72,6 @@ def oversample(image_low_res, factor_y, factor_x, method='nearest'):
     image_high_res /= factor_y*factor_x 
 
     return image_high_res
-
-# def oversample(image_low_res, factor, method='nearest'):
-#     if factor>1:
-#         # interpolate onto finer grid and trim the edges to avoid extrapolation issues
-#         new_arr = zoom(image_low_res,factor,order=1,mode='nearest',grid_mode=True) #[factor:-factor,factor:-factor] 
-
-#     else: 
-#         new_arr = image_low_res[1:-1,1:-1]
-#     new_arr /= factor**2
-#     return new_arr
-
-# def resample(image_high_res, factor, method='nearest'):
-#     func = np.sum
-#     # reshape and then sum every N pixels along an axis
-#     reshaped_arr = image_high_res.reshape((image_high_res.shape[0],image_high_res.shape[1]//factor,factor))
-#     comb_arr = func(reshaped_arr,-1)
-
-#     # now repeat for the other axis
-#     reshaped_arr = comb_arr.reshape(image_high_res.shape[0]//factor,factor,image_high_res.shape[1]//factor)
-#     downsampled_arr = func(reshaped_arr,1)
-#     return downsampled_arr
-
 
 
 def resample(image_high_res, factor_y, factor_x):
