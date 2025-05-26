@@ -19,12 +19,12 @@ from jax.scipy.stats import norm
 from jax.scipy.special import gamma
 
 
-from skimage.filters import threshold_otsu
-from skimage.morphology import closing
-from skimage.measure import label, regionprops
-from skimage.segmentation import clear_border
-from skimage.morphology import dilation, disk, ellipse, binary_closing
-from skimage.color import label2rgb
+# from skimage.filters import threshold_otsu
+# from skimage.morphology import closing
+# from skimage.measure import label, regionprops
+# from skimage.segmentation import clear_border
+# from skimage.morphology import dilation, disk, ellipse, binary_closing
+# from skimage.color import label2rgb
 
 from astropy.modeling.models import Sersic2D
 from scipy import stats

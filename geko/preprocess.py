@@ -47,7 +47,7 @@ from photutils.isophote import Ellipse, EllipseGeometry
 from photutils.isophote import build_ellipse_model
 from photutils.aperture import EllipticalAperture
 
-from skimage.morphology import dilation, disk, ellipse, binary_closing, closing
+# from skimage.morphology import dilation, disk, ellipse, binary_closing, closing
 
 from photutils.segmentation import detect_sources, SourceCatalog, SegmentationImage, deblend_sources
 

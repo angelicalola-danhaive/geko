@@ -20,7 +20,7 @@ from jax.scipy.signal import convolve
 # from scipy.signal import convolve
 from jax import image
 
-from skimage.morphology import dilation, disk
+# from skimage.morphology import dilation, disk
 
 from astropy.modeling.models import GeneralSersic2D, Sersic2D
 
