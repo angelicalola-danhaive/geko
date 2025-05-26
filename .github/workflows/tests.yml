@@ -27,8 +27,5 @@ jobs:
 
     - name: Run tests with pytest
       run: |
-        conda info
-        conda list
-        which python
-        which pytest
+        conda activate geko_env
         pytest --maxfail=1 --disable-warnings -q
