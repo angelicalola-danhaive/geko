@@ -10,7 +10,8 @@ __all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', '
            'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux']
            
 # geko imports
-import run_pysersic as py
+
+# import run_pysersic as py
 
 #other imports
 from jax import image
@@ -47,7 +48,7 @@ import xarray as xr
 
 from scipy import stats as st
 
-import models
+from . import  models
 
 
 

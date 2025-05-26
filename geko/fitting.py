@@ -3,12 +3,12 @@ __all__ = ["Fit_Numpyro"]
 # imports
 
 # importing my own modules
-import grism
-import preprocess as pre
-import postprocess as post
-import plotting
-import utils
-import models
+from . import grism
+from . import preprocess as pre
+from . import postprocess as post
+from . import plotting
+from . import utils
+from . import models
 
 import os
 
@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 import numpyro
 from numpyro.infer import MCMC, NUTS, BarkerMH, SA
-from numpyro.contrib.nested_sampling import NestedSampler
+# from numpyro.contrib.nested_sampling import NestedSampler
 from numpyro.infer.initialization import init_to_median, init_to_sample, init_to_uniform, init_to_value, init_to_feasible
 
 import statistics as st

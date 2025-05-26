@@ -20,7 +20,7 @@
 
 __all__ = ["Grism"]
 
-import utils
+from . import utils
 
 import numpy as np
 from astropy.io import ascii

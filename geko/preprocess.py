@@ -9,10 +9,10 @@ Eventually should also add here scripts to automatically create folders for sour
 __all__ = ['run_full_preprocessing']
 
 #imports
-import utils
-import grism
-import models
-import run_pysersic as py
+from . import  utils
+from . import  grism
+from . import  models
+# import run_pysersic as py
 
 import numpy as np
 import math

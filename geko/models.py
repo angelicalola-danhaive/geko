@@ -9,8 +9,8 @@ __all__ = ["KinModels"]
 # imports
 import numpy as np
 # geko related imports
-import utils
-import plotting
+from . import  utils
+from . import  plotting
 
 # jax and its functions
 import jax

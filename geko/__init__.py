@@ -1,10 +1,10 @@
-from fitting import *
-from grism import *
-from models import *
-from plotting import *
-from postprocess import *
-from preprocess import *
-from utils import *
+from .fitting import *
+from .grism import *
+from .models import *
+from .plotting import *
+from .postprocess import *
+from .preprocess import *
+from .utils import *
 
 
 __all__ = ["Fit_Numpyro", "Grism", "KinModels", 'plot_disk_summary', 'plot_pp_cornerplot', 'process_results', 'run_full_preprocessing',
