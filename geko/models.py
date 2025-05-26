@@ -66,41 +66,6 @@ class KinModels:
     def v_rad(self, x, y, PA, i, Va, r_t, r):
         return (2/pi)*Va*jnp.arctan(r/r_t)*jnp.sin(i)
 
-    # def x_int(self, x, y, PA, i):
-    #     return (x*jnp.cos(PA) - y*jnp.sin(PA))/jnp.cos(i)
-
-    # def y_int(self, x, y, PA, i):
-    #     return (x*jnp.sin(PA) + y*jnp.cos(PA))
-    
-    # def r_int(self, x, y, PA, i):
-    #     return jnp.sqrt(self.x_int(x, y, PA, i)**2 + self.y_int(x, y, PA, i)**2)
-    
-
-    # def v_old(self, x, y, PA, i, Va, r_t):
-    #     cos_phi = jnp.where(self.rad_int != 0, (self.y_int(x, y, PA, i)/self.r_int(x, y, PA, i)), 0.)
-    #     return (2.0/pi)*Va*jnp.arctan(self.r_int(x, y, PA, i)/r_t)*jnp.sin(i)*cos_phi
-    
-    # def v(self,x,y,PA,i,Va,r_t):
-    #     i_rad = i/180*jnp.pi
-    #     PA_rad = PA/180*jnp.pi
-    #     sini = jnp.sin(i_rad)
-    #     cosi = jnp.cos(i_rad)
-    #     cosi2 = 1.0 - sini**2
-    #     x_rot = x*jnp.cos(PA_rad) - y*jnp.sin(PA_rad)
-    #     y_rot = x*jnp.sin(PA_rad) + y*jnp.cos(PA_rad)
-
-    #     i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
-
-    #     r = jnp.array(jnp.where(jnp.cos(i_rad) != 0, jnp.sqrt( x_rot**2/(jnp.cos(i_rad_safe)**2) + y_rot**2), x_rot))
-
-    #     # print('r: ', jnp.where(r != 0, r, 100.0))
-    #     # vel = self.vel1d(r, Va, r_t)
-    #     vel_obs = jnp.where(jnp.cos(i_rad) != 0, self.vel1d(r, Va, r_t)*jnp.sin(i_rad_safe), self.vel1d(x_rot, Va, r_t))
-    #     r_safe = jnp.where(r != 0.0, r, 1.0)
-    #     vel_obs_final = jnp.where(r != 0.0, vel_obs*(y_rot/r_safe), 0.0)
-
-
-    #     return vel_obs_final
 
     def v(self, x, y, PA, i, Va, r_t):
         i_rad = i / 180 * jnp.pi
