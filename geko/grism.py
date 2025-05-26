@@ -29,7 +29,7 @@ from astropy.io import fits
 from scipy import interpolate
 from scipy.constants import c #in m/s
 from astropy.coordinates import SkyCoord
-from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
+# from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 from astropy import units as u
 import astropy
 import math
@@ -371,12 +371,16 @@ class Grism:
 		self.disp_space = jnp.array(self.disp_space)
 		# print('disp space: ', self.disp_space)
 		wave += 3.95
-		self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
+
 		#create a dx space centered on 0 where your pixel is in the direct image, evenly spaced
 		self.dxs = jnp.arange(jnp.min(self.disp_space), jnp.max(self.disp_space), 1/self.wave_factor)  #- self.xcenter_detector
 		# print('dx central pixel: ', self.dxs)
 		#obtain the wavelength corresponding to each of those pixels
-		self.wavs = self.inverse_wave_disp(self.dxs)
+
+		#commenting these 2 out for now because they are not being used and the spline from jax_cosmo gave me trouble in the past I think
+
+		# self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
+		# self.wavs = self.inverse_wave_disp(self.dxs)
 		# print('self.wavs: ', self.wavs)
 		# print('wavelengths: ', np.diff(self.wavs))
 		

@@ -903,8 +903,8 @@ class Disk():
 
     def compute_flux_posterior(self, inference_data, flux_type = 'auto'):
 
-        # best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
-        # ), inference_data['sample_stats']['lp'].shape)
+        best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
+        ), inference_data['sample_stats']['lp'].shape)
 
         inference_data.posterior['fluxes_scaling'+ self.number].data = inference_data.posterior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1
         inference_data.prior['fluxes_scaling'+ self.number].data = inference_data.prior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1

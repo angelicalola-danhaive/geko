@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 import numpyro
 from numpyro.infer import MCMC, NUTS, BarkerMH, SA
-# from numpyro.contrib.nested_sampling import NestedSampler
+from numpyro.contrib.nested_sampling import NestedSampler
 from numpyro.infer.initialization import init_to_median, init_to_sample, init_to_uniform, init_to_value, init_to_feasible
 
 import statistics as st
