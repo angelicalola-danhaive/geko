@@ -15,8 +15,8 @@ def test_oversample():
 def test_compute_inclination_axis_ratio():
     axis_ratio = 0.5
     inclination = compute_inclination(axis_ratio, q0 = 0)
-    assert float(inclination) == 60.0  # cos^-1(0.5) = 60 degrees
+    assert np.isclose(float(inclination), 60.0)  # cos^-1(0.5) = 60 degrees
     new_axis_ratio = compute_axis_ratio(inclination, q0 = 0)
-    assert float(axis_ratio) == new_axis_ratio  # should return to original axis ratio
+    assert np.isclose(float(new_axis_ratio), axis_ratio)  # cos(60 degrees) = 0.5
 
 
