@@ -39,4 +39,5 @@ jobs:
     - name: Run tests with pytest
       shell: bash -l {0}
       run: |
+        shell: bash -l {0}
         pytest --maxfail=1 --disable-warnings -q
