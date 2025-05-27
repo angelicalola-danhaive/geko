@@ -27,6 +27,7 @@ jobs:
       shell: bash -l {0}  # ensure environment is loaded
       run: |
         pip install -r requirements.txt
+        pip install -e .
 
     - name: Debug environment
       shell: bash -l {0}
