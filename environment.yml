@@ -11,4 +11,3 @@ dependencies:
   - arviz
   - photutils
   - conda-forge::pytest
-prefix: /Users/lola/opt_arm/anaconda3/envs/geko_env
