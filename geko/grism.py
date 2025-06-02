@@ -277,23 +277,23 @@ class Grism:
 		if tmp_filter in ['F277W', 'F356W']: disp_filter = 'F322W2'
 		else: disp_filter = tmp_filter
 		#no ../ because the open() function reads from terminal directory (not module directory)
-		tb_order23_fit_AR = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'R'))
+		tb_order23_fit_AR = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'R'))
 		fit_opt_fit_AR, fit_err_fit_AR = tb_order23_fit_AR['col0'].data, tb_order23_fit_AR['col1'].data
-		tb_order23_fit_BR = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'R'))
+		tb_order23_fit_BR = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'R'))
 		fit_opt_fit_BR, fit_err_fit_BR = tb_order23_fit_BR['col0'].data, tb_order23_fit_BR['col1'].data
-		tb_order23_fit_AC = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'C'))
+		tb_order23_fit_AC = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'C'))
 		fit_opt_fit_AC, fit_err_fit_AC = tb_order23_fit_AC['col0'].data, tb_order23_fit_AC['col1'].data
-		tb_order23_fit_BC = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'C'))
+		tb_order23_fit_BC = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'C'))
 		fit_opt_fit_BC, fit_err_fit_BC = tb_order23_fit_BC['col0'].data, tb_order23_fit_BC['col1'].data
 
 		### grism dispersion parameters:
-		tb_fit_displ_AR = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "R"))
+		tb_fit_displ_AR = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "R"))
 		w_opt_AR, w_err_AR = tb_fit_displ_AR['col0'].data, tb_fit_displ_AR['col1'].data
-		tb_fit_displ_BR = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "R"))
+		tb_fit_displ_BR = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "R"))
 		w_opt_BR, w_err_BR = tb_fit_displ_BR['col0'].data, tb_fit_displ_BR['col1'].data
-		tb_fit_displ_AC = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "C"))
+		tb_fit_displ_AC = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "C"))
 		w_opt_AC, w_err_AC = tb_fit_displ_AC['col0'].data, tb_fit_displ_AC['col1'].data
-		tb_fit_displ_BC = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "C"))
+		tb_fit_displ_BC = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "C"))
 		w_opt_BC, w_err_BC = tb_fit_displ_BC['col0'].data, tb_fit_displ_BC['col1'].data
 
 		### list of module/pupil and corresponding tracing/dispersion function:
@@ -302,7 +302,7 @@ class Grism:
 		list_w_opt       = np.array([w_opt_AR, w_opt_BR, w_opt_AC, w_opt_BC])
 
 		### Sensitivity curve:
-		dir_fluxcal = 'nircam_grism/all_wfss_sensitivity/'
+		dir_fluxcal = '../nircam_grism/all_wfss_sensitivity/'
 		tb_sens_AR = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat' % (disp_filter, 'A', 'R'))
 		tb_sens_BR = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat'% (disp_filter, 'B', 'R'))
 		tb_sens_AC = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat' % (disp_filter, 'A', 'C'))
@@ -327,6 +327,7 @@ class Grism:
 		# print(self.xcenter_detector)
 		dispersion_indices += (self.detector_x_space - self.xcenter_detector)
 		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
+		self.wavs = self.wave_space[jnp.argsort(self.wave_space)] #temporary for testing - need to sort this
 		self.wave_array = self.wavs[wave_indices]
 		# print(self.wave_scale*self.direct.shape[0]//2)
 		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
@@ -479,7 +480,7 @@ class Grism:
 
 		#compute the sigma lsf for the wavelength of interest, wavelength must be in MICRONS
 		R = 3.35*self.wavelength**4 - 41.9*self.wavelength**3 + 95.5*self.wavelength**2 + 536*self.wavelength - 240
-		# print(R)
+		print(R)
 		# self.sigma_lsf = 0.5*R
 		# self.sigma_v_lsf = 0.5*(0.001*(c/1000)/self.wavelength)
 
@@ -491,26 +492,33 @@ class Grism:
 		# print('LSF vel: ', self.sigma_v_lsf)
 
 		# print(0.001*(c/1000)/4.2)
+		return R
 
 	def compute_lsf_new(self):
 		'''
 			New LSF computed by Fengwu from new data - sum of two Gaussians
 		'''
 		if self.module_lsf == 'A':
-			frac_1 = 0.679*jnp.log(self.wavelength/4) + 0.604
-			fwhm_1 = 2.23*jnp.log(self.wavelength/4) + 2.22
-			fwhm_2 = 8.75*jnp.log(self.wavelength/4) + 5.97
+			frac_1 = 0.679*jnp.log10(self.wavelength/4) + 0.604
+			fwhm_1 = (2.23*jnp.log10(self.wavelength/4) + 2.22)/1000 #in microns
+			fwhm_2 = (8.75*jnp.log10(self.wavelength/4) + 5.97)/1000 #in microns
 		else:
-			frac_1 = 1.584*jnp.log(self.wavelength/4) + 0.557
-			fwhm_1 = 3.5*jnp.log(self.wavelength/4) + 2.22
-			fwhm_2 = 11.27*jnp.log(self.wavelength/4) + 5.78
-
-		self.sigma_lsf = math.sqrt(1/(8*math.log(2))*(frac_1*fwhm_1**2+(1-frac_1)*fwhm_2**2))
+			frac_1 = 1.584*jnp.log10(self.wavelength/4) + 0.557
+			fwhm_1 = (3.5*jnp.log10(self.wavelength/4) + 2.22)/1000 #in microns
+			fwhm_2 = (11.27*jnp.log10(self.wavelength/4) + 5.78)/1000 #in microns
+		
+		sigma_1 = fwhm_1/(2*math.sqrt(2*math.log(2)))
+		sigma_2 = fwhm_2/(2*math.sqrt(2*math.log(2)))
+		print('LSF fwhm 1: ', fwhm_1, ' sigma 1: ', sigma_1)
+		print('LSF fwhm 2: ', fwhm_2, ' sigma 2: ', sigma_2)
+		self.sigma_lsf = math.sqrt(frac_1*sigma_1**2 + (1-frac_1)*sigma_2**2)*0.617
+		print('LSF sigma: ', self.sigma_lsf)
+		print('R = ', self.wavelength/(self.sigma_lsf*(2*math.sqrt(2*math.log(2)))))
 		self.sigma_v_lsf = self.sigma_lsf/(self.wavelength/(c/1000))
 		# print('LSF: ', self.sigma_lsf, ' LSF vel: ', self.sigma_v_lsf)
 
-		#return the v lsf in order to facilitate testing
-		return self.sigma_v_lsf
+		R =self.wavelength/(self.sigma_lsf*(2*math.sqrt(2*math.log(2))))
+		return R
 	
 	def compute_PSF(self, PSF):
 
