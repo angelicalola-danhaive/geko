@@ -29,7 +29,7 @@ from astropy.io import fits
 from scipy import interpolate
 from scipy.constants import c #in m/s
 from astropy.coordinates import SkyCoord
-from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
+# from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 from astropy import units as u
 import astropy
 import math
@@ -58,81 +58,8 @@ jax.config.update('jax_enable_x64', True)
 
 
 class Grism:
-	def __init__(self, direct = None, direct_scale = 0.03, factor = 1, y_factor = 1, icenter = 5, jcenter = 5, segmentation = None, xcenter_detector = 1024, ycenter_detector = 1024, 
-		wavelength = 4.2 , redshift = 7.2, wave_space = None, wave_factor = 1, wave_scale = 0.001, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', higher_res = False, PSF = None):
-		"""Object for computing dispersed model spectra (emission line)
+	def __init__(self, direct = None, direct_scale = 0.03, factor = 1, y_factor = 1, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, wave_factor = 1, wave_scale = 0.001, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
 
-		Parameters
-		----------
-		id : int
-			Only consider pixels in the segmentation image with value `id`.
-			Default of zero to match the default empty segmentation image.
-
-		direct : `~numpy.ndarray`
-			Direct image cutout in f_lambda units (i.e., e-/s times PHOTFLAM).
-			Default is a trivial zeros array.
-
-		segmentation : `~numpy.ndarray` (float32) or None
-			Segmentation image.  If None, create a zeros array with the same
-			shape as `direct`.
-
-		origin : [int, int]
-			`origin` defines the lower left pixel index (y,x) of the `direct`
-			cutout from a larger detector-frame image
-
-		xcenter, ycenter : float, float
-			Sub-pixel centering of the exact center of the object, relative
-			to the center of the thumbnail.  Needed for getting exact
-			wavelength grid correct for the extracted 2D spectra.
-
-
-		conf : [str, str, str] or `grismconf.aXeConf` object.
-			Pre-loaded aXe-format configuration file object or if list of
-			strings determine the appropriate configuration filename with
-			`grismconf.get_config_filename` and load it.
-
-		scale : float
-			Multiplicative factor to apply to the modeled spectrum from
-			`compute_model`.
-
-		yoffset : float
-			Cross-dispersion offset to apply to the trace
-		
-		xoffset : float
-			Dispersion offset to apply to the trace
-			
-		Attributes
-		----------
-		sh : 2-tuple
-			shape of the direct array
-
-		sh_beam : 2-tuple
-			computed shape of the 2D spectrum
-
-		seg : `~numpy.array`
-			segmentation array
-
-		lam : `~numpy.array`
-			wavelength along the trace
-
-		ytrace : `~numpy.array`
-			y pixel center of the trace.  Has same dimensions as sh_beam[1].
-
-		sensitivity : `~numpy.array`
-			conversion factor from native e/s to f_lambda flux densities
-
-		modelf, model : `~numpy.array`, `~numpy.ndarray`
-			2D model spectrum.  `model` is linked to `modelf` with "reshape",
-			the later which is a flattened 1D array where the fast
-			calculations are actually performed.
-
-		model : `~numpy.ndarray`
-			2D model spectrum linked to `modelf` with reshape.
-
-		total_flux : float
-			Total f_lambda flux in the thumbail within the segmentation
-			region.
-		"""
 
 		#direct is the image getting dispersed
 		self.direct = jnp.array(direct) # initiliazed with the real image (not the high res model image)
@@ -212,7 +139,6 @@ class Grism:
 		self.index_min = index_min
 		self.index_max = index_max
 		self.wavelength = wavelength
-		self.redshift = redshift
 
 		self.filter = grism_filter
 		self.module = 'A' 
@@ -327,7 +253,7 @@ class Grism:
 		# print(self.xcenter_detector)
 		dispersion_indices += (self.detector_x_space - self.xcenter_detector)
 		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
-		self.wavs = self.wave_space[jnp.argsort(self.wave_space)] #temporary for testing - need to sort this
+		# self.wavs = self.wave_space[jnp.argsort(self.wave_space)] #temporary for testing - need to sort this
 		self.wave_array = self.wavs[wave_indices]
 		# print(self.wave_scale*self.direct.shape[0]//2)
 		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
@@ -380,8 +306,8 @@ class Grism:
 
 		#commenting these 2 out for now because they are not being used and the spline from jax_cosmo gave me trouble in the past I think
 
-		# self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
-		# self.wavs = self.inverse_wave_disp(self.dxs)
+		self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
+		self.wavs = self.inverse_wave_disp(self.dxs)
 		# print('self.wavs: ', self.wavs)
 		# print('wavelengths: ', np.diff(self.wavs))
 		
@@ -545,72 +471,6 @@ class Grism:
 		# self.full_kernel = np.array(self.PSF) * np.broadcast_to(np.array(LSF)[:, np.newaxis,np.newaxis],(np.array(LSF).size,np.array(self.PSF).shape[0],np.array(self.PSF).shape[0]))
 		self.full_kernel = jnp.array(self.PSF) * LSF
 
-
-	def disperse_old(self, F, V, D):
-		'''
-			Dispersion function going from flux space F to grism space G
-		'''
-
-		J_min = self.index_min
-		J_max = self.index_max
-
-		DX = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
-		x_grism = DX + self.detector_position
-		# print(DX[15])
-		# print(x_grism)
-
-		#compute the dispersion due to the LSF
-		D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		# print('D_LSF: ', np.unique(D_LSF))
-		# print('D: ', np.unique(D))
-		#add the LSF to the dispersion: 
-		CORR_D = jnp.sqrt( jnp.square(D)+  jnp.square(D_LSF))
-		# CORR_D = D #jnp.where(V>0, D, D)
-		# print('CORR_D: ', CORR_D[0,0])
-		# print(self.wavelength)
-		# print('V: ', V)
-
-		# start = time.time()
-		DX_disp= self.grism_dispersion(self.wavelength*(1  + (CORR_D[0,0])/(c/1000) )) 
-		DX_null = self.grism_dispersion(self.wavelength*(1  + (0.0)/(c/1000) )) 
-		x_grism_sigma = DX_disp - DX_null
-		# print(DX_disp[15])
-		# print(self.detector_position[15])
-		# print(DX[15])
-		# print(x_grism_sigma)
-		
-		grism_space = self.disp_space + 1024
-		grism_space_edges_prov= grism_space[1:] - jnp.diff(grism_space)/2
-		grism_space_edges_prov2 = jnp.insert(grism_space_edges_prov, 0, grism_space_edges_prov[0] - jnp.diff(grism_space)[0])
-		grism_space_edges = jnp.append(grism_space_edges_prov2, grism_space_edges_prov2[-1] + jnp.diff(grism_space)[-1])
-
-
-		mu = x_grism[:,:,jnp.newaxis]
-		# print('mu shape: ', mu.shape)
-
-		sigma = x_grism_sigma[:,:,jnp.newaxis]
-		# print()
-
-		cdf = 0.5* (1 + special.erf( (grism_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
-
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		# print('gaussian_matrix shape: ', gaussian_matrix.shape)
-		# cube = F[:, :, jnp.newaxis]*jnp.exp(-0.5*((grism_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) #*1e-4
-		#crop and renormalize the gaussian so that it sums to 1
-		gaussian_matrix_cut = gaussian_matrix[:,:, J_min:J_max+1*self.wave_factor] #/jnp.sum(gaussian_matrix[:,:, J_min:J_max+1*self.wave_factor], axis = 2)[:,:,jnp.newaxis]
-		# print(gaussian_matrix_cut[1,1].sum())
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
-
-		psf_cube = cube #fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
-
-		grism_full = jnp.sum(psf_cube, axis = 1)
-		# end = time.time()
-		
-		# self.f.write("matmul time: " + str(end-start) + "\n")
-
-		# self.f.close()
-
-		return grism_full
 	
 	def disperse(self, F, V, D):
 		'''
@@ -712,49 +572,7 @@ class Grism:
 		# plt.colorbar()
 		# plt.show()
 		return grism_full
-
-	def disperse_interp(self, F, V, D):
-		'''
-			Dispersion function going from flux space F to grism space G
-		'''
-
-		J_min = 496
-		J_max = 537
-		#get the dispersion of each pixel with its given wavelength
-		disps = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
-		#compute the dx wrt the central pixel
-		dxs= jnp.array(disps + self.detector_position - self.xcenter_detector)
-		#obtain the wave for each of those dxs
-		waves = self.inverse_wave_disp(dxs)
-		# print('waves: ', waves)
-
-
-		#compute the dispersion due to the LSF
-		D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		#add the LSF to the dispersion: 
-		CORR_D = jnp.sqrt( jnp.square(D)+  jnp.square(D_LSF))
-
-		sigma_disps= self.grism_dispersion(self.wavelength*(1  + (V + CORR_D[0,0])/(c/1000) )) 
-		dxs_sigma = jnp.array(sigma_disps + self.detector_position - self.xcenter_detector)
-		waves_sigma = self.inverse_wave_disp(dxs_sigma)
-		# print('waves_sigma: ', waves_sigma)
-		delta_wave_sigma = waves_sigma - waves
-		# print('delta_wave_sigma: ', delta_wave_sigma)
-
-		cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*((self.wavs[jnp.newaxis, jnp.newaxis, J_min:J_max]-waves[:,:, jnp.newaxis])**2/delta_wave_sigma[:,:, jnp.newaxis]**2))/(jnp.sqrt(2.0*jnp.pi)*delta_wave_sigma[:,:, jnp.newaxis])*1e-4
-
-
-		psf_cube = cube #fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
-
-		grism_full = jnp.sum(psf_cube, axis = 1)
-		# end = time.time()
-		
-		# self.f.write("matmul time: " + str(end-start) + "\n")
-
-		# self.f.close()
-
-		return grism_full
-
+	
 	def compute_gaussian(self, V, D):
 		'''
 			Add explanation here
