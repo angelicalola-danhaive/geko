@@ -12,3 +12,11 @@ def test_oversample():
     #check that the total flux is preserved
     assert np.isclose(np.sum(arr), np.sum(oversampled_arr))
 
+def test_compute_inclination_axis_ratio():
+    axis_ratio = 0.5
+    inclination = compute_inclination(axis_ratio, q0 = 0)
+    assert np.isclose(float(inclination), 60.0)  # cos^-1(0.5) = 60 degrees
+    new_axis_ratio = compute_axis_ratio(inclination, q0 = 0)
+    assert np.isclose(float(new_axis_ratio), axis_ratio)  # cos(60 degrees) = 0.5
+
+
