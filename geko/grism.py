@@ -29,7 +29,7 @@ from astropy.io import fits
 from scipy import interpolate
 from scipy.constants import c #in m/s
 from astropy.coordinates import SkyCoord
-# from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
+from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 from astropy import units as u
 import astropy
 import math

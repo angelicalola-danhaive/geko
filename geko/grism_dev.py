@@ -58,8 +58,7 @@ jax.config.update('jax_enable_x64', True)
 
 
 class Grism:
-	def __init__(self, direct = None, direct_scale = 0.03, factor = 1, y_factor = 1, icenter = 5, jcenter = 5, segmentation = None, xcenter_detector = 1024, ycenter_detector = 1024, 
-		wavelength = 4.2 , redshift = 7.2, wave_space = None, wave_factor = 1, wave_scale = 0.001, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', higher_res = False, PSF = None):
+	def __init__(self, direct = None, direct_scale = 0.03, factor = 1, y_factor = 1, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, wave_factor = 1, wave_scale = 0.001, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
 
 
 		#direct is the image getting dispersed
@@ -140,7 +139,6 @@ class Grism:
 		self.index_min = index_min
 		self.index_max = index_max
 		self.wavelength = wavelength
-		self.redshift = redshift
 
 		self.filter = grism_filter
 		self.module = 'A' 
@@ -255,7 +253,7 @@ class Grism:
 		# print(self.xcenter_detector)
 		dispersion_indices += (self.detector_x_space - self.xcenter_detector)
 		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
-		self.wavs = self.wave_space[jnp.argsort(self.wave_space)] #temporary for testing - need to sort this
+		# self.wavs = self.wave_space[jnp.argsort(self.wave_space)] #temporary for testing - need to sort this
 		self.wave_array = self.wavs[wave_indices]
 		# print(self.wave_scale*self.direct.shape[0]//2)
 		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
@@ -308,8 +306,8 @@ class Grism:
 
 		#commenting these 2 out for now because they are not being used and the spline from jax_cosmo gave me trouble in the past I think
 
-		# self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
-		# self.wavs = self.inverse_wave_disp(self.dxs)
+		self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
+		self.wavs = self.inverse_wave_disp(self.dxs)
 		# print('self.wavs: ', self.wavs)
 		# print('wavelengths: ', np.diff(self.wavs))
 		
