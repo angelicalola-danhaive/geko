@@ -2,4 +2,3 @@ corner==2.2.3
 jax==0.6.1
 jaxlib==0.6.1
 numpyro==0.18.0
-jax-cosmo==0.1.0
