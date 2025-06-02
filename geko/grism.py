@@ -480,18 +480,13 @@ class Grism:
 
 		#compute the sigma lsf for the wavelength of interest, wavelength must be in MICRONS
 		R = 3.35*self.wavelength**4 - 41.9*self.wavelength**3 + 95.5*self.wavelength**2 + 536*self.wavelength - 240
-		print(R)
-		# self.sigma_lsf = 0.5*R
-		# self.sigma_v_lsf = 0.5*(0.001*(c/1000)/self.wavelength)
 
-
-		#the 0.5 in front is bc I think I am over-estimating LSF
-		self.sigma_lsf = (1/2.36)*self.wavelength/R #0.5*
+		self.sigma_lsf = (1/2.36)*self.wavelength/R 
 		# print('LSF: ', self.sigma_lsf)
 		self.sigma_v_lsf = (1/2.36)*(c/1000)/R #put c in km/s #0.5*
 		# print('LSF vel: ', self.sigma_v_lsf)
 
-		# print(0.001*(c/1000)/4.2)
+		#returning R for testing purposes
 		return R
 
 	def compute_lsf_new(self):
@@ -509,15 +504,14 @@ class Grism:
 		
 		sigma_1 = fwhm_1/(2*math.sqrt(2*math.log(2)))
 		sigma_2 = fwhm_2/(2*math.sqrt(2*math.log(2)))
-		print('LSF fwhm 1: ', fwhm_1, ' sigma 1: ', sigma_1)
-		print('LSF fwhm 2: ', fwhm_2, ' sigma 2: ', sigma_2)
+
 		self.sigma_lsf = math.sqrt(frac_1*sigma_1**2 + (1-frac_1)*sigma_2**2)*0.617
-		print('LSF sigma: ', self.sigma_lsf)
-		print('R = ', self.wavelength/(self.sigma_lsf*(2*math.sqrt(2*math.log(2)))))
+
 		self.sigma_v_lsf = self.sigma_lsf/(self.wavelength/(c/1000))
-		# print('LSF: ', self.sigma_lsf, ' LSF vel: ', self.sigma_v_lsf)
 
 		R =self.wavelength/(self.sigma_lsf*(2*math.sqrt(2*math.log(2))))
+
+		#returning R for testing purposes
 		return R
 	
 	def compute_PSF(self, PSF):
