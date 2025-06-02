@@ -473,72 +473,6 @@ class Grism:
 		# self.full_kernel = np.array(self.PSF) * np.broadcast_to(np.array(LSF)[:, np.newaxis,np.newaxis],(np.array(LSF).size,np.array(self.PSF).shape[0],np.array(self.PSF).shape[0]))
 		self.full_kernel = jnp.array(self.PSF) * LSF
 
-
-	def disperse_old(self, F, V, D):
-		'''
-			Dispersion function going from flux space F to grism space G
-		'''
-
-		J_min = self.index_min
-		J_max = self.index_max
-
-		DX = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
-		x_grism = DX + self.detector_position
-		# print(DX[15])
-		# print(x_grism)
-
-		#compute the dispersion due to the LSF
-		D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		# print('D_LSF: ', np.unique(D_LSF))
-		# print('D: ', np.unique(D))
-		#add the LSF to the dispersion: 
-		CORR_D = jnp.sqrt( jnp.square(D)+  jnp.square(D_LSF))
-		# CORR_D = D #jnp.where(V>0, D, D)
-		# print('CORR_D: ', CORR_D[0,0])
-		# print(self.wavelength)
-		# print('V: ', V)
-
-		# start = time.time()
-		DX_disp= self.grism_dispersion(self.wavelength*(1  + (CORR_D[0,0])/(c/1000) )) 
-		DX_null = self.grism_dispersion(self.wavelength*(1  + (0.0)/(c/1000) )) 
-		x_grism_sigma = DX_disp - DX_null
-		# print(DX_disp[15])
-		# print(self.detector_position[15])
-		# print(DX[15])
-		# print(x_grism_sigma)
-		
-		grism_space = self.disp_space + 1024
-		grism_space_edges_prov= grism_space[1:] - jnp.diff(grism_space)/2
-		grism_space_edges_prov2 = jnp.insert(grism_space_edges_prov, 0, grism_space_edges_prov[0] - jnp.diff(grism_space)[0])
-		grism_space_edges = jnp.append(grism_space_edges_prov2, grism_space_edges_prov2[-1] + jnp.diff(grism_space)[-1])
-
-
-		mu = x_grism[:,:,jnp.newaxis]
-		# print('mu shape: ', mu.shape)
-
-		sigma = x_grism_sigma[:,:,jnp.newaxis]
-		# print()
-
-		cdf = 0.5* (1 + special.erf( (grism_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
-
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		# print('gaussian_matrix shape: ', gaussian_matrix.shape)
-		# cube = F[:, :, jnp.newaxis]*jnp.exp(-0.5*((grism_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) #*1e-4
-		#crop and renormalize the gaussian so that it sums to 1
-		gaussian_matrix_cut = gaussian_matrix[:,:, J_min:J_max+1*self.wave_factor] #/jnp.sum(gaussian_matrix[:,:, J_min:J_max+1*self.wave_factor], axis = 2)[:,:,jnp.newaxis]
-		# print(gaussian_matrix_cut[1,1].sum())
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
-
-		psf_cube = cube #fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
-
-		grism_full = jnp.sum(psf_cube, axis = 1)
-		# end = time.time()
-		
-		# self.f.write("matmul time: " + str(end-start) + "\n")
-
-		# self.f.close()
-
-		return grism_full
 	
 	def disperse(self, F, V, D):
 		'''
@@ -640,49 +574,7 @@ class Grism:
 		# plt.colorbar()
 		# plt.show()
 		return grism_full
-
-	def disperse_interp(self, F, V, D):
-		'''
-			Dispersion function going from flux space F to grism space G
-		'''
-
-		J_min = 496
-		J_max = 537
-		#get the dispersion of each pixel with its given wavelength
-		disps = self.grism_dispersion(self.wavelength*(1  + V/(c/1000) ))
-		#compute the dx wrt the central pixel
-		dxs= jnp.array(disps + self.detector_position - self.xcenter_detector)
-		#obtain the wave for each of those dxs
-		waves = self.inverse_wave_disp(dxs)
-		# print('waves: ', waves)
-
-
-		#compute the dispersion due to the LSF
-		D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		#add the LSF to the dispersion: 
-		CORR_D = jnp.sqrt( jnp.square(D)+  jnp.square(D_LSF))
-
-		sigma_disps= self.grism_dispersion(self.wavelength*(1  + (V + CORR_D[0,0])/(c/1000) )) 
-		dxs_sigma = jnp.array(sigma_disps + self.detector_position - self.xcenter_detector)
-		waves_sigma = self.inverse_wave_disp(dxs_sigma)
-		# print('waves_sigma: ', waves_sigma)
-		delta_wave_sigma = waves_sigma - waves
-		# print('delta_wave_sigma: ', delta_wave_sigma)
-
-		cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*((self.wavs[jnp.newaxis, jnp.newaxis, J_min:J_max]-waves[:,:, jnp.newaxis])**2/delta_wave_sigma[:,:, jnp.newaxis]**2))/(jnp.sqrt(2.0*jnp.pi)*delta_wave_sigma[:,:, jnp.newaxis])*1e-4
-
-
-		psf_cube = cube #fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
-
-		grism_full = jnp.sum(psf_cube, axis = 1)
-		# end = time.time()
-		
-		# self.f.write("matmul time: " + str(end-start) + "\n")
-
-		# self.f.close()
-
-		return grism_full
-
+	
 	def compute_gaussian(self, V, D):
 		'''
 			Add explanation here
