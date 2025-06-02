@@ -508,6 +508,9 @@ class Grism:
 		self.sigma_lsf = math.sqrt(1/(8*math.log(2))*(frac_1*fwhm_1**2+(1-frac_1)*fwhm_2**2))
 		self.sigma_v_lsf = self.sigma_lsf/(self.wavelength/(c/1000))
 		# print('LSF: ', self.sigma_lsf, ' LSF vel: ', self.sigma_v_lsf)
+
+		#return the v lsf in order to facilitate testing
+		return self.sigma_v_lsf
 	
 	def compute_PSF(self, PSF):
 
