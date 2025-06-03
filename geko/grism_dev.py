@@ -64,9 +64,9 @@ class Grism:
 		self.im_shape = im_shape #used to be self.im_shape
 		self.im_scale = im_scale #used to be self.direct_scale
 
-		self.factor = self.im_scale/self.detector_scale #factor between the model space and the observation space, spatially
-
 		self.set_detector_scale(0.0629) #setting to JWST resolution but made it a function so that it's easy to change as the outside user
+
+		self.factor = self.detector_scale/self.im_scale #factor between the model space and the observation space, spatially
 
 		#this is the RA,DEC center of the galaxy as used in the grism data reduction to define the wavelength space
 		#in order to remain accurate, self.factor should be uneven so that the centroids can be easiliy calculated
@@ -123,9 +123,10 @@ class Grism:
 	def init_detector(self):
 		self.detector_xmin = self.xcenter_detector - self.jcenter
 		self.detector_xmax = self.xcenter_detector + (self.im_shape//self.factor-1-self.jcenter) #need to check that this still works but should do!
-		detector_x_space_low = jnp.linspace(self.detector_xmin, self.detector_xmax, self.im_shape//self.factor)
 
-		detector_x_space_low_2d = jnp.reshape(detector_x_space_low, (1, self.im_shape//self.factor))
+		detector_x_space_low = jnp.linspace(self.detector_xmin, self.detector_xmax, int(self.im_shape//self.factor))
+
+		detector_x_space_low_2d = jnp.reshape(detector_x_space_low, (1, int(self.im_shape//self.factor)))
 
 		#oversampling it to high resolution
 		self.detector_space_1d = image.resize(detector_x_space_low_2d, (1,self.im_shape), method = 'linear')[0] #taking only the first row since all rows are the same - and I want it in 1D
