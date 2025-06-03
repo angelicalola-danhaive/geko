@@ -255,39 +255,28 @@ class Grism:
 
 		#disperse each pixel with wavelength self.wavelength (and zero velocity)
 		dispersion_indices = self.grism_dispersion(self.wavelength)
-		# print('dispersion indices: ', dispersion_indices)
-		# print(self.detector_x_space[0])
-		# print(self.xcenter_detector)
+
+		#put the dxs in the rest frame of the central pixel (since otherwise they are dx wrt to their original pixel in self.detector_x_space)
 		dispersion_indices += (self.detector_x_space - self.xcenter_detector)
+		#for each dx, find the closest in the uniformly distrubuted dxs
 		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
+		#translate this to a wavelength in the rest frame of the central pixel
 		self.wave_array = self.wavs[wave_indices]
-		# print(self.wave_scale*self.direct.shape[0]//2)
-		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
-		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
-		# wave_array_low = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.jcenter), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]-self.jcenter-1), self.direct.shape[0]) 
-		# spacing = wave_array_low[1] - wave_array_low[0]
-    
-		# # Create new positions at twice the resolution
-		# new_spacing = spacing / self.factor
-		# wave_array_high = np.arange(wave_array_low[0] - new_spacing/2, 
-		# 						wave_array_low[-1] + new_spacing, 
-		# 						new_spacing)
-		# if self.factor == 1:
-		# 	self.wave_array = wave_array_low
-		# else:
-		# 	self.wave_array = wave_array_high
-		
-		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(15), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]-15-1), self.direct.shape[0]*self.factor)
-		print('diff wave array: ', np.diff(self.wave_array))
-		# print('det space: ', self.detector_x_space)
+
 
 	def get_trace(self):
+
+		'''
+		Assuming a position on the detector for the galaxy (which we assume to be the center of the detector because we are looking at combined grism data), 
+		compute the dispersion space of the grism image, i.e. where does the central pixel end up on the detector if emitting at each wavelength in wave_space
+
+		Return/Compute:
+
+		-self.wavs: the wavelength corresponding to each pixel in the grism image, in the ref frame of the central pixel
+		'''
 		xpix = self.xcenter_detector
 		ypix = self.ycenter_detector
 		wave = self.wave_space
-
-		# wave_low = jnp.arrange(wave_high[0], wave_high[-1], self.wave_scale*self.wave_factor)
-		# wave= wave_low
 
 		xpix -= 1024
 		ypix -= 1024
