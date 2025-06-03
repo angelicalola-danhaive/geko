@@ -53,7 +53,7 @@ def test_disperse(grism_instance):
     plt.imshow(mock_grism, origin='lower', cmap='viridis')
     plt.colorbar(label='Flux')
     plt.title('Mock Grism Image')
-    plt.savefig('mock_grism.png')
+    plt.savefig('tests/mock_grism.png')
 
 
     # Check that the total flux is preserved (with a tolerance)
