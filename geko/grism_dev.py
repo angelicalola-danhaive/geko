@@ -24,31 +24,19 @@ from . import utils
 
 import numpy as np
 from astropy.io import ascii
-from astropy import wcs
-from astropy.io import fits
 from scipy import interpolate
 from scipy.constants import c #in m/s
-from astropy.coordinates import SkyCoord
 from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
-from astropy import units as u
-import astropy
 import math
 from scipy.constants import c
 import matplotlib.pyplot as plt
 from jax.scipy import special
-from jax.scipy.stats import norm
-from scipy import signal
-
-from scipy import ndimage
 
 import jax.numpy as jnp
 from jax import image
 
-from reproject import reproject_adaptive
-from photutils.centroids import centroid_1dg
-from numpy.fft import rfftn, irfftn, fftshift
 from astropy.convolution import Gaussian1DKernel
-from jax.scipy.signal import convolve, fftconvolve
+from jax.scipy.signal import fftconvolve
 
 #import time
 import time 
@@ -330,7 +318,7 @@ class Grism:
 		#returning R for testing purposes
 		return R
 
-	def compute_lsf_new(self):
+	def compute_lsf_new(self):   
 		'''
 			New LSF computed by Fengwu from new data - sum of two Gaussians
 		'''
