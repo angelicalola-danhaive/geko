@@ -29,7 +29,7 @@ from astropy.io import fits
 from scipy import interpolate
 from scipy.constants import c #in m/s
 from astropy.coordinates import SkyCoord
-# from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
+from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 from astropy import units as u
 import astropy
 import math
@@ -91,8 +91,8 @@ class Grism:
 		#initialize attributes
 
 		#center of the object on the detector image
-		self.xcenter_detector = xcenter_detector 
-		self.ycenter_detector =  ycenter_detector
+		self.xcenter_detector = 1024 #xcenter_detector 
+		self.ycenter_detector =  1024 # ycenter_detector
 
 		# self.detector_xmin = self.xcenter_detector - (self.jcenter_high-1)/self.direct_factor_high
 		# self.detector_xmax = self.xcenter_detector + (self.sh_high[1]-1-self.jcenter_high)/self.direct_factor_high
@@ -245,6 +245,13 @@ class Grism:
 		self.f_sens = list_f_sens[list_mod_pupil == self.module + self.pupil][0]
 
 	def set_wave_array(self):
+		'''
+			Compute the effective central wavelength of each pixel on the plane of the central pixel (i.e. how much are they spatially separated in wavelength space)
+			Steps:
+			1. Disperse each pixel with wavelength self.wavelength (and zero velocity) and see where it ends up on the detector
+			2. Find the wavelength corresponding to each of those pixels (in the ref frame of the central pixels)
+
+		'''
 
 		#disperse each pixel with wavelength self.wavelength (and zero velocity)
 		dispersion_indices = self.grism_dispersion(self.wavelength)
@@ -253,7 +260,6 @@ class Grism:
 		# print(self.xcenter_detector)
 		dispersion_indices += (self.detector_x_space - self.xcenter_detector)
 		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
-		# self.wavs = self.wave_space[jnp.argsort(self.wave_space)] #temporary for testing - need to sort this
 		self.wave_array = self.wavs[wave_indices]
 		# print(self.wave_scale*self.direct.shape[0]//2)
 		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
@@ -272,7 +278,7 @@ class Grism:
 		# 	self.wave_array = wave_array_high
 		
 		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(15), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]-15-1), self.direct.shape[0]*self.factor)
-		# print('wave array: ', self.wave_array)
+		print('diff wave array: ', np.diff(self.wave_array))
 		# print('det space: ', self.detector_x_space)
 
 	def get_trace(self):
@@ -300,20 +306,13 @@ class Grism:
 		wave += 3.95
 
 		#create a dx space centered on 0 where your pixel is in the direct image, evenly spaced
-		self.dxs = jnp.arange(jnp.min(self.disp_space), jnp.max(self.disp_space), 1/self.wave_factor)  #- self.xcenter_detector
-		# print('dx central pixel: ', self.dxs)
-		#obtain the wavelength corresponding to each of those pixels
-
-		#commenting these 2 out for now because they are not being used and the spline from jax_cosmo gave me trouble in the past I think
-
+		delta_dx = (jnp.max(self.disp_space) - jnp.min(self.disp_space))/ (self.disp_space.shape[0]-1) #the -2 is because you need to divide by the number of INTERVALS
+		self.dxs = jnp.arange(jnp.min(self.disp_space), jnp.max(self.disp_space) + delta_dx, delta_dx)
+		print('delta dx: ', delta_dx)
 		self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
 		self.wavs = self.inverse_wave_disp(self.dxs)
-		# print('self.wavs: ', self.wavs)
-		# print('wavelengths: ', np.diff(self.wavs))
-		
-		# self.disp_space = jnp.linspace(self.disp_space_low[0], self.disp_space_low[-1], self.disp_space_low.shape[0]*self.wave_factor)
 
-		# print('disp_space min max: ', self.disp_space[0], self.disp_space[-1])
+		return self.dxs, self.disp_space
 
 	def set_wavelength(self, wavelength):
 		self.wavelength = wavelength
@@ -340,7 +339,7 @@ class Grism:
 
 		xpix = self.detector_position
 		# print('xpix: ', xpix[0])
-		ypix = 1024 * jnp.ones_like(xpix)
+		ypix = self.ycenter_detector * jnp.ones_like(xpix)
 		xpix -= 1024
 		ypix -= 1024
 		xpix2 = xpix**2
