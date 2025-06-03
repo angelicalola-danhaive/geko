@@ -303,8 +303,7 @@ class Grism:
 
 		return self.dxs, self.disp_space
 
-	def set_wavelength(self, wavelength):
-		self.wavelength = wavelength
+
 
 	def load_poly_factors(self,a01, a02, a03, a04, a05, a06, b01, b02, b03, b04, b05, b06, c01, c02, c03, d01):
 		self.a01 = a01
@@ -333,7 +332,7 @@ class Grism:
 		ypix -= 1024
 		xpix2 = xpix**2
 		ypix2 = ypix**2
-
+		#setitng coefficients for the whole grid of the cutout detector
 		self.coef1 = self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)
 		self.coef2 = self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)
 		self.coef3 = self.c01 + (self.c02 * xpix + self.c03 * ypix)
@@ -360,11 +359,6 @@ class Grism:
 
 		return ((self.coef1 + self.coef2 * wave + self.coef3 * wave**2 + self.coef4 * wave**3))
 
-
-	def set_sensitivity(self):
-
-		self.sensitivity = self.f_sens(self.wave_space)
-		self.compute_lsf()
 
 	def set_wave_scale(self, scale):
 
@@ -468,47 +462,39 @@ class Grism:
 		J_min = self.index_min
 		J_max = self.index_max
 
-		# wave_centers = self.wavelength*(1  + V/(c/1000) )
+		#self.wave_array contains the wavelength of each pixel in the grism image, in the ref frame of the central pixel
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
-		wave_sigmas = self.wavelength*(D/(c/1000) ) #*(1/2.36)
-		# print('wave_centers: ', wave_centers[0,0])
-		# print('wave_sigmas: ', wave_sigmas[0,0])
+		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
+
 		sigma_LSF = self.sigma_lsf
-		# print('sigma_LSF: ', sigma_LSF)
-		# print('wave_sigma: ', wave_sigmas)
-		# print('sigma_LSF: ', sigma_LSF)
-		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) #*(1/2.36)
+
+		#set the effective dispersion which also accounts for the LSF
+		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
+
+		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
 		sigma = wave_sigmas_eff[:,:,jnp.newaxis]
-
-		wave_space_crop = self.wave_space[J_min:J_max+1*self.wave_factor]
+		
+		#compute the edges of the wave space in order to evaluate the gaussian at those points - focusing only on the region of interest
+		wave_space_crop = self.wave_space[J_min:J_max]
 		wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
 		wave_space_edges_prov2 = jnp.insert(wave_space_edges_prov, 0, wave_space_edges_prov[0] - jnp.diff(wave_space_crop)[0])
 		wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
-		# print(sigma) 
-		# print(jnp.exp(-0.5*((self.wave_space[jnp.newaxis, jnp.newaxis, :]-mu)**2/sigma**2)))
-		# print(jnp.sqrt(2.0*jnp.pi)*sigma)
-		# cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*(((self.wave_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)/sigma)**2))/(jnp.sqrt(2.0*jnp.pi)*sigma)*1e-3
+
+
 		cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
 		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		gaussian_matrix_cut = gaussian_matrix # [:,:, J_min:J_max+1*self.wave_factor]
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
-		# plt.plot(self.wave_space,jnp.exp(-0.5*((self.wave_space-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) )
-		# plt.show()
-		# print(self.wave_space.shape)
-		# print(self.wavs.shape)
-		# cube = cube_full[:,:,J_min:J_max+1*self.wave_factor]
-		psf_cube = fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
 
-		grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)
-		 #grism_spectra_padded[:, 62:-62]
-		#remove all pixels with flux below 1e-6
-		# grism_full = jnp.where(grism_full < 1e-5, 0, grism_full)
-		# plt.imshow(grism_full, origin = 'lower')
-		# plt.colorbar()
-		# plt.show()
+		cube = F[:,:,jnp.newaxis]*gaussian_matrix
+
+		psf_cube = fftconvolve(cube, self.PSF, mode='same') 
+		#collapse across the x axis
+		grism_full = jnp.sum(psf_cube, axis = 1) 
 		return grism_full
 	
+	#unused functions - if not needed REMOVE
+
+
 	def disperse_mock(self, F, V, D):
 		'''
 			Dispersion function going from flux space F to grism space G
@@ -688,3 +674,12 @@ class Grism:
 		self.grism_cutout = grism_full[:, j_min:j_max]
 
 		return self.grism_cutout
+
+	def set_sensitivity(self):
+	
+
+		self.sensitivity = self.f_sens(self.wave_space)
+		self.compute_lsf()
+
+	def set_wavelength(self, wavelength):
+		self.wavelength = wavelength
