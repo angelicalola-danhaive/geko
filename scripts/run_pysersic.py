@@ -1,7 +1,7 @@
 
 # load modules
 
-import utils
+from geko import utils
 
 import os
 import numpy as np 
@@ -333,15 +333,18 @@ def main():
     # id_file = fits.open('/Users/lola/Downloads/BJ_IDs.fits')
     # IDs = np.array(id_file[1].data).flatten() #[1][0]
 
-    id_file = Table.read('/Users/lola/Downloads/gabe_refit.txt', format='ascii')
-    IDs = id_file['ID']
-    remask = id_file['Remask']
+    # id_file = Table.read('/Users/lola/Downloads/gabe_refit.txt', format='ascii')
+    # IDs = id_file['ID']
+    # remask = id_file['Remask']
 
-    IDs_run = IDs[remask == 'TRUE']
+    # IDs_run = IDs[remask == 'TRUE']
 
-    print(IDs_run)
+    # print(IDs_run)
 
-    for count,id in enumerate(IDs_run):
+
+    IDs_lucy = [10612,6355]
+
+    for count,id in enumerate(IDs_lucy):
 
         # if remask[count] == 'FALSE':
         #     continue
@@ -349,33 +352,35 @@ def main():
         try:
 
             #print the number of iterations we are at out of the total ones to run
-            print('Running iteration ' + str(count) + ' out of ' + str(len(IDs)) + ' with ID ' + str(id))
+            print('Running iteration ' + str(count) + ' out of ' + str(len(IDs_lucy)) + ' with ID ' + str(id))
 
                 
-            for filter in ['F150W', 'F356W', 'F444W']: #
+            for filter in ['F444W']: #
                 if filter == 'F150W':
                     sigma_rms = 1
                 elif filter == 'F356W':
                     sigma_rms = 1
                 elif filter == 'F444W':
-                    sigma_rms = 2
-                path_output = '/Users/lola/Downloads/gabe_pysersic_fits_new/'
-                file = fits.open('/Users/lola/Downloads/v1.0_cutouts/' + str(id) + '_' + filter + '_cutout.fits')
-                im = file['SCI'].data
-                wht = file['WHT'].data
+                    sigma_rms = 5
+                path_output = '/Users/lola/Desktop/lucy_pysersic_fits/'
+                file = fits.open('/Users/lola/Downloads/' + str(id) + '_NIRCam_' + filter + '_crop.fits')
+                im = jnp.array(file[0].data)
+                file_err = fits.open('/Users/lola/Downloads/' + str(id) + '_NIRCam_' + filter + '_error_crop.fits')
+                wht = file_err[0].data
 
                 #crop the image from 167x167 to 51x51
                 # im = im[58:109, 58:109]
                 # wht = wht[58:109, 58:109]
-                im = im[38:129, 38:129]
-                wht = wht[38:129, 38:129]
+                # im = im[38:129, 38:129]
+                # wht = wht[38:129, 38:129]
                 
-                sig = 1/np.sqrt(wht)
-                sig =np.where(np.isnan(im)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
+                # sig = 1/np.sqrt(wht)
+                sig = jnp.array(wht)
+                sig =jnp.where(np.isnan(im)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
                 # id = 10339
                 # psf = fits.getdata('/Users/lola/ASTRO/JWST/grism_project/gdn_mpsf_F356W_small.fits',0)
                 psf= utils.load_psf(filter=filter, y_factor=2)
-                c = im.shape[0]//2
+                # c = im.shape[0]//2
                 fit_data(filter, id, path_output=path_output,  im = im , sig =sig, psf = psf,
                         fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=True, plot=True, sigma_rms = sigma_rms)
                 inc, PA, r_eff, x_c, y_c = get_params(path_output, id, filter, type = 'image')
