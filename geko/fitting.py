@@ -6,9 +6,6 @@ __all__ = ["Fit_Numpyro"]
 # from . import grism_dev
 from . import preprocess_dev as pre
 from . import postprocess as post
-from . import plotting
-from . import utils
-from . import models
 
 import os
 
@@ -110,20 +107,7 @@ class Fit_Numpyro():
 						 num_warmup=num_warmup, num_chains=num_chains)
 		self.rng_key = random.PRNGKey(100)
 
-		sigma_rms = jnp.minimum((self.obs_map/self.obs_error).max(),5)
-		im_conv = convolve_astropy(self.obs_map, make_2dgaussian_kernel(3.0, size=5))
-
-		bkg = Background2D(self.obs_map, (15, 15), filter_size=(5, 5), exclude_percentile=99.0)
-
-
-		segment_map = detect_sources(im_conv, sigma_rms*np.abs(bkg.background_median), npixels=10)
-
-		main_label = segment_map.data[int(0.5*self.obs_map.shape[0]), int(0.5*self.obs_map.shape[1])]
-		
-		# construct mask
-		mask = segment_map.data
-		new_mask = np.zeros_like(mask)
-		new_mask[mask == main_label] = 1.0
+		new_mask = self.create_mask()
 
 		with numpyro.validation_enabled():
 			self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =new_mask) #, extra_fields=("potential_energy", "accept_prob"))
@@ -164,7 +148,25 @@ class Fit_Numpyro():
 		return jnp.array(fluxes_div[divergence_number].data), jnp.array(PA_div[divergence_number]), jnp.array(i_div[divergence_number]), jnp.array(Va_div[divergence_number]), jnp.array(r_t_div[divergence_number]), jnp.array(sigma0_div[divergence_number])
 
 
+	def create_mask(self):
+		'''
+		Create a mask for the grism object based on the obs_map and obs_error
+		'''
+		sigma_rms = jnp.minimum((self.obs_map/self.obs_error).max(),5)
+		im_conv = convolve_astropy(self.obs_map, make_2dgaussian_kernel(3.0, size=5))
 
+		bkg = Background2D(self.obs_map, (15, 15), filter_size=(5, 5), exclude_percentile=99.0)
+
+
+		segment_map = detect_sources(im_conv, sigma_rms*np.abs(bkg.background_median), npixels=10)
+
+		main_label = segment_map.data[int(0.5*self.obs_map.shape[0]), int(0.5*self.obs_map.shape[1])]
+		
+		# construct mask
+		mask = segment_map.data
+		new_mask = np.zeros_like(mask)
+		new_mask[mask == main_label] = 1.0
+		return new_mask
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
 #command line inputs
