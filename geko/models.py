@@ -415,7 +415,7 @@ class Disk():
 		# low_PA = (-10 - self.PA_morph_mu)/(self.PA_morph_std)
 		# high_PA = ( 190- self.PA_morph_mu)/(self.PA_morph_std)
 		# unscaled_PA_morph = numpyro.sample('unscaled_PA_morph' + self.number, dist.TruncatedNormal(low = low_PA, high = high_PA)) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
-		unscaled_PA_morph = numpyro.sample('unscaled_PA_morph' + self.number, dist.Normal()) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
+		unscaled_PA_morph = numpyro.sample('unscaled_PA_morph', dist.Normal()) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
 		PA_morph = numpyro.deterministic('PA_morph', unscaled_PA_morph*self.PA_morph_std + self.PA_morph_mu)
 		# r_eff = numpyro.sample('r_eff', dist.TruncatedNormal(self.r_eff, 0.5, low = 0.0))
 		# n = numpyro.sample('n', dist.TruncatedNormal(1.0, 0.5, low = 0.36))
@@ -449,6 +449,7 @@ class Disk():
 
 		x_grid = image.resize(x, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
 		y_grid = image.resize(y, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
+		#the center is set at 0,0 because the grid is already centered at xc_morph, yc_morph
 		model_image_highres = utils.sersic_profile(x_grid, y_grid, amplitude_re/(sersic_factor*factor)**2, r_eff, n,0.0,0.0, ellip, (90 - PA_morph)*jnp.pi/180)
 		model_image = utils.resample(model_image_highres, int(sersic_factor), int(sersic_factor))
 
@@ -470,37 +471,26 @@ class Disk():
 			Sample all of the parameters needed to model a disk velocity field
 		"""
 
-		# low_PA = (-10 - self.mu_PA)/(self.sigma_PA)
-		# high_PA = ( 100- self.mu_PA)/(self.sigma_PA)
-		# unscaled_PA = numpyro.sample('unscaled_PA' + self.number, dist.TruncatedNormal(low = low_PA, high = high_PA)) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
-		unscaled_PA = numpyro.sample('unscaled_PA'+ self.number, dist.Normal())
-		Pa = numpyro.deterministic('PA' + self.number, unscaled_PA*self.PA_morph_std + self.PA_morph_mu)
+
+		unscaled_PA = numpyro.sample('unscaled_PA', dist.Normal())
+		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std + self.PA_morph_mu)
 
 		unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())  #* (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
 		Va = numpyro.deterministic('Va', unscaled_Va*(2*self.V_max) - self.V_max)
-
-		# r_t_sigma = self.r_t_bounds[1]/2
-		# r_t_mu = self.r_t_bounds[1]
-		# r_t_max = self.r_t_bounds[2]
-		# r_t_high = (r_t_max - r_t_mu)/r_t_sigma
-		# r_t_low = (0.0 - r_t_mu)/r_t_sigma
 
 		unscaled_r_t = numpyro.sample('unscaled_r_t', dist.Uniform())
 		r_t = numpyro.deterministic('r_t', unscaled_r_t*r_eff)
 	
 
-		unscaled_sigma0 = numpyro.sample('unscaled_sigma0'+ self.number, dist.Uniform())
+		unscaled_sigma0 = numpyro.sample('unscaled_sigma0', dist.Uniform())
 		sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*self.D_max)
 
-		# unscaled_y0_vel = numpyro.sample('unscaled_y0_vel'+ self.number, dist.Normal())
-		# y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.y0_std + self.mu_y0_vel)
 		y0_vel = 0
 		
-		# unscaled_x0_vel = numpyro.sample('unscaled_x0_vel'+ self.number, dist.Normal())
-		# x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.y0_std + self.mu_y0_vel)
+
 		x0_vel = 0
 
-		unscaled_v0 = numpyro.sample('unscaled_v0'+ self.number, dist.Normal())
+		unscaled_v0 = numpyro.sample('unscaled_v0', dist.Normal())
 		v0 = numpyro.deterministic('v0', unscaled_v0*50)
 		# v0 = 0
 
@@ -513,29 +503,26 @@ class Disk():
 			Retreive the best sample from the MCMC chains for the main disk variables
 		"""
 
-		self.PA_mean = jnp.array(inference_data.posterior['PA'+ self.number].median(dim=["chain", "draw"]))
-		self.y0_vel_mean = 15 #jnp.array(inference_data.posterior['y0_vel'+ self.number].median(dim=["chain", "draw"]))
-		self.x0_vel_mean = 15 #jnp.array(inference_data.posterior['x0_vel'+ self.number].median(dim=["chain", "draw"]))
-		self.v0_mean = jnp.array(inference_data.posterior['v0'+ self.number].median(dim=["chain", "draw"]))
-		self.r_t_mean = jnp.array(inference_data.posterior['r_t'+ self.number].median(dim=["chain", "draw"]))
-		self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'+ self.number].median(dim=["chain", "draw"]))
-		self.Va_mean = jnp.array(inference_data.posterior['Va'+ self.number].median(dim=["chain", "draw"]))
+		self.PA_mean = jnp.array(inference_data.posterior['PA'].median(dim=["chain", "draw"]))
+		self.y0_vel_mean = 15 
+		self.x0_vel_mean = 15 
+		self.v0_mean = jnp.array(inference_data.posterior['v0'].median(dim=["chain", "draw"]))
+		self.r_t_mean = jnp.array(inference_data.posterior['r_t'].median(dim=["chain", "draw"]))
+		self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'].median(dim=["chain", "draw"]))
+		self.Va_mean = jnp.array(inference_data.posterior['Va'].median(dim=["chain", "draw"]))
 
 		#save the percentiles as well
-		self.PA_16 = jnp.array(inference_data.posterior['PA'+ self.number].quantile(0.16, dim=["chain", "draw"]))
-		self.PA_84 = jnp.array(inference_data.posterior['PA'+ self.number].quantile(0.84, dim=["chain", "draw"]))
-		# self.y0_vel_16 = jnp.array(inference_data.posterior['y0_vel'+ self.number].quantile(0.16, dim=["chain", "draw"]))
-		# self.y0_vel_84 = jnp.array(inference_data.posterior['y0_vel'+ self.number].quantile(0.84, dim=["chain", "draw"]))
-		# self.x0_vel_16 = jnp.array(inference_data.posterior['x0_vel'+ self.number].quantile(0.16, dim=["chain", "draw"]))
-		# self.x0_vel_84 = jnp.array(inference_data.posterior['x0_vel'+ self.number].quantile(0.84, dim=["chain", "draw"]))
-		self.v0_16 = jnp.array(inference_data.posterior['v0'+ self.number].quantile(0.16, dim=["chain", "draw"]))
-		self.v0_84 = jnp.array(inference_data.posterior['v0'+ self.number].quantile(0.84, dim=["chain", "draw"]))
-		self.r_t_16 = jnp.array(inference_data.posterior['r_t'+ self.number].quantile(0.16, dim=["chain", "draw"]))
-		self.r_t_84 = jnp.array(inference_data.posterior['r_t'+ self.number].quantile(0.84, dim=["chain", "draw"]))
-		self.sigma0_16 = jnp.array(inference_data.posterior['sigma0'+ self.number].quantile(0.16, dim=["chain", "draw"]))
-		self.sigma0_84 = jnp.array(inference_data.posterior['sigma0'+ self.number].quantile(0.84, dim=["chain", "draw"]))
-		self.Va_16 = jnp.array(inference_data.posterior['Va'+ self.number].quantile(0.16, dim=["chain", "draw"]))
-		self.Va_84 = jnp.array(inference_data.posterior['Va'+ self.number].quantile(0.84, dim=["chain", "draw"]))
+		self.PA_16 = jnp.array(inference_data.posterior['PA'].quantile(0.16, dim=["chain", "draw"]))
+		self.PA_84 = jnp.array(inference_data.posterior['PA'].quantile(0.84, dim=["chain", "draw"]))
+
+		self.v0_16 = jnp.array(inference_data.posterior['v0'].quantile(0.16, dim=["chain", "draw"]))
+		self.v0_84 = jnp.array(inference_data.posterior['v0'].quantile(0.84, dim=["chain", "draw"]))
+		self.r_t_16 = jnp.array(inference_data.posterior['r_t'].quantile(0.16, dim=["chain", "draw"]))
+		self.r_t_84 = jnp.array(inference_data.posterior['r_t'].quantile(0.84, dim=["chain", "draw"]))
+		self.sigma0_16 = jnp.array(inference_data.posterior['sigma0'].quantile(0.16, dim=["chain", "draw"]))
+		self.sigma0_84 = jnp.array(inference_data.posterior['sigma0'].quantile(0.84, dim=["chain", "draw"]))
+		self.Va_16 = jnp.array(inference_data.posterior['Va'].quantile(0.16, dim=["chain", "draw"]))
+		self.Va_84 = jnp.array(inference_data.posterior['Va'].quantile(0.84, dim=["chain", "draw"]))
 
 		return  self.PA_mean,self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
 
@@ -628,7 +615,7 @@ class Disk():
 		plt.imshow(fluxes, origin='lower')
 		plt.colorbar()
 		plt.scatter(self.x0_vel, self.mu_y0_vel, color='red')
-		plt.title('Disk' + self.number)
+		plt.title('Disk')
 		plt.show()
 
 
