@@ -54,7 +54,7 @@ class Grism:
 
 		self.set_detector_scale(0.0629) #setting to JWST resolution but made it a function so that it's easy to change as the outside user
 
-		self.factor = self.detector_scale/self.im_scale #factor between the model space and the observation space, spatially
+		self.factor = int(self.detector_scale/self.im_scale) #factor between the model space and the observation space, spatially
 
 		#this is the RA,DEC center of the galaxy as used in the grism data reduction to define the wavelength space
 		#in order to remain accurate, self.factor should be uneven so that the centroids can be easiliy calculated
