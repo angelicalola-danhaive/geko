@@ -417,197 +417,197 @@ class Grism:
 	#if keep - then they need to be updated accordingly becasue they are not up to date!!!
 
 
-	def disperse_mock(self, F, V, D):
-		'''
-			Dispersion function going from flux space F to grism space G
-		'''
+	# def disperse_mock(self, F, V, D):
+	# 	'''
+	# 		Dispersion function going from flux space F to grism space G
+	# 	'''
 
-		J_min = self.index_min
-		J_max = self.index_max
+	# 	J_min = self.index_min
+	# 	J_max = self.index_max
 
-		# wave_centers = self.wavelength*(1  + V/(c/1000) )
-		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
-		wave_sigmas = self.wavelength*(D/(c/1000) ) #*(1/2.36)
-		# print('wave_centers: ', wave_centers[0,0])
-		# print('wave_sigmas: ', wave_sigmas[0,0])
-		sigma_LSF = self.sigma_lsf
-		# print('sigma_LSF: ', sigma_LSF)
-		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) #*(1/2.36)
-		mu = wave_centers[:,:,jnp.newaxis]
-		sigma = wave_sigmas_eff[:,:,jnp.newaxis]
+	# 	# wave_centers = self.wavelength*(1  + V/(c/1000) )
+	# 	wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
+	# 	wave_sigmas = self.wavelength*(D/(c/1000) ) #*(1/2.36)
+	# 	# print('wave_centers: ', wave_centers[0,0])
+	# 	# print('wave_sigmas: ', wave_sigmas[0,0])
+	# 	sigma_LSF = self.sigma_lsf
+	# 	# print('sigma_LSF: ', sigma_LSF)
+	# 	wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) #*(1/2.36)
+	# 	mu = wave_centers[:,:,jnp.newaxis]
+	# 	sigma = wave_sigmas_eff[:,:,jnp.newaxis]
 
-		wave_space_crop = self.wave_space[J_min:J_max+1*self.wave_factor]
-		wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
-		wave_space_edges_prov2 = jnp.insert(wave_space_edges_prov, 0, wave_space_edges_prov[0] - jnp.diff(wave_space_crop)[0])
-		wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
-		# print(sigma) 
-		# print(jnp.exp(-0.5*((self.wave_space[jnp.newaxis, jnp.newaxis, :]-mu)**2/sigma**2)))
-		# print(jnp.sqrt(2.0*jnp.pi)*sigma)
-		# cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*(((self.wave_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)/sigma)**2))/(jnp.sqrt(2.0*jnp.pi)*sigma)*1e-3
-		cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		gaussian_matrix_cut = gaussian_matrix # [:,:, J_min:J_max+1*self.wave_factor]
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
-		# plt.plot(self.wave_space,jnp.exp(-0.5*((self.wave_space-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) )
-		# plt.show()
-		# print(self.wave_space.shape)
-		# print(self.wavs.shape)
-		# cube = cube_full[:,:,J_min:J_max+1*self.wave_factor]
-		psf_cube = fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
+	# 	wave_space_crop = self.wave_space[J_min:J_max+1*self.wave_factor]
+	# 	wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
+	# 	wave_space_edges_prov2 = jnp.insert(wave_space_edges_prov, 0, wave_space_edges_prov[0] - jnp.diff(wave_space_crop)[0])
+	# 	wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
+	# 	# print(sigma) 
+	# 	# print(jnp.exp(-0.5*((self.wave_space[jnp.newaxis, jnp.newaxis, :]-mu)**2/sigma**2)))
+	# 	# print(jnp.sqrt(2.0*jnp.pi)*sigma)
+	# 	# cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*(((self.wave_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)/sigma)**2))/(jnp.sqrt(2.0*jnp.pi)*sigma)*1e-3
+	# 	cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+	# 	gaussian_matrix_cut = gaussian_matrix # [:,:, J_min:J_max+1*self.wave_factor]
+	# 	cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
+	# 	# plt.plot(self.wave_space,jnp.exp(-0.5*((self.wave_space-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) )
+	# 	# plt.show()
+	# 	# print(self.wave_space.shape)
+	# 	# print(self.wavs.shape)
+	# 	# cube = cube_full[:,:,J_min:J_max+1*self.wave_factor]
+	# 	psf_cube = fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
 
-		# grism_spectra = jnp.zeros((cube.shape[1],cube.shape[0]))
-		# grism_spectra_padded = jnp.pad(grism_spectra, [(0, 0), (cube.shape[2],cube.shape[2])], mode='constant')
-		# # at this stage, we need to use the instrument dispersion function
+	# 	# grism_spectra = jnp.zeros((cube.shape[1],cube.shape[0]))
+	# 	# grism_spectra_padded = jnp.pad(grism_spectra, [(0, 0), (cube.shape[2],cube.shape[2])], mode='constant')
+	# 	# # at this stage, we need to use the instrument dispersion function
 
 		
-		grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)
-		 #grism_spectra_padded[:, 62:-62]
-		#remove all pixels with flux below 1e-6
-		# grism_full = jnp.where(grism_full < 1e-5, 0, grism_full)
-		# plt.imshow(grism_full, origin = 'lower')
-		# plt.colorbar()
-		# plt.show()
-		return grism_full
+	# 	grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)
+	# 	 #grism_spectra_padded[:, 62:-62]
+	# 	#remove all pixels with flux below 1e-6
+	# 	# grism_full = jnp.where(grism_full < 1e-5, 0, grism_full)
+	# 	# plt.imshow(grism_full, origin = 'lower')
+	# 	# plt.colorbar()
+	# 	# plt.show()
+	# 	return grism_full
 	
-	def compute_gaussian(self, V, D):
-		'''
-			Add explanation here
-		'''
+	# def compute_gaussian(self, V, D):
+	# 	'''
+	# 		Add explanation here
+	# 	'''
 
-		# print('V: ', V)
-		# print('D: ', D)
-		#compute the dispersion dx0 of the central pixel 
-		# print(self.wave_space.shape, self.disp_space.shape)
-		# dx0 = jnp.interp(self.wavelength*(1  + V/(c/1000) ), self.wave_space[jnp.argsort(self.disp_space)], self.disp_space[jnp.argsort(self.disp_space)])
-		dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
-		DX = self.detector_space_2d - self.xcenter_detector + dx0 
-		# print(DX.type(), self.disp_space.type(), self.wave_space.type())
+	# 	# print('V: ', V)
+	# 	# print('D: ', D)
+	# 	#compute the dispersion dx0 of the central pixel 
+	# 	# print(self.wave_space.shape, self.disp_space.shape)
+	# 	# dx0 = jnp.interp(self.wavelength*(1  + V/(c/1000) ), self.wave_space[jnp.argsort(self.disp_space)], self.disp_space[jnp.argsort(self.disp_space)])
+	# 	dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
+	# 	DX = self.detector_space_2d - self.xcenter_detector + dx0 
+	# 	# print(DX.type(), self.disp_space.type(), self.wave_space.type())
 
-		# J = self.compute_disp_index(DX, self.disp_space)
-		# J0 = self.compute_disp_index(dx0, self.disp_space)
+	# 	# J = self.compute_disp_index(DX, self.disp_space)
+	# 	# J0 = self.compute_disp_index(dx0, self.disp_space)
 
-		# J= jnp.argmin(jnp.abs(self.disp_space - DX[:,:, None]), axis = 2)
-		# J0 = jnp.argmin(jnp.abs(self.disp_space - dx0[:,:, None]),axis =2)
+	# 	# J= jnp.argmin(jnp.abs(self.disp_space - DX[:,:, None]), axis = 2)
+	# 	# J0 = jnp.argmin(jnp.abs(self.disp_space - dx0[:,:, None]),axis =2)
 
-		J_min = self.index_min
-		J_max = self.index_max
+	# 	J_min = self.index_min
+	# 	J_max = self.index_max
 
-		# J = (jnp.rint(J)).astype(int)
-		# J0 = (jnp.rint(J0)).astype(int)
+	# 	# J = (jnp.rint(J)).astype(int)
+	# 	# J0 = (jnp.rint(J0)).astype(int)
 
-		# print(J)
-
-
-		#compute the dispersion due to the LSF
-		D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		# print('D_LSF = ', D_LSF)
-
-		#add the LSF to the dispersion: 
-		CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
-		DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
-		DX_disp_final = self.detector_space_2d - self.xcenter_detector + DX_disp - DX
+	# 	# print(J)
 
 
+	# 	#compute the dispersion due to the LSF
+	# 	D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
+	# 	# print('D_LSF = ', D_LSF)
 
-		NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-		# print(NEW_J)
-		# grism_full = jnp.zeros(self.sh_beam)
-		# print(self.sh_beam)
-
-		# mu = self.wave_space[J[:,NEW_K]]
-		# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
-
-		# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
-		# compute the edges of the disp_space array
-
-		disp_space_edges_prov= self.disp_space[1:] - jnp.diff(self.disp_space)/2
-		disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(self.disp_space)[0])
-		disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(self.disp_space)[-1])
-
-		# print(disp_space_edges)
-		# cdf = 0.5* (1 + special.erf( (self.wave_space[NEW_J] - mu)/ (sigma*math.sqrt(2.)) ))
-		# prev_wave = self.wave_space[NEW_J] - self.wave_scale
-		# cdf_prev = 0.5* (1 + special.erf( (prev_wave - mu)/ (sigma*math.sqrt(2.)) ))
-		# gaussian_matrix = cdf[:,NEW_K,NEW_J-J_min] - cdf_prev[:,NEW_K,NEW_J-J_min]
-		# print(self.disp_space[NEW_J].shape)
-		# print(mu.shape)
-		# print(sigma.shape)
-
-		# compute the gaussian matrix in 10 times higher resolution and then sample it down
-
-		# dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
-		# DX = self.detector_space_2d - self.xcenter_detector + dx0 
-
-		# J_min = self.index_min
-		# J_max = self.index_max
-
-		# D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		# # print('D_LSF = ', D_LSF)
-
-		# #add the LSF to the dispersion: 
-		# CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
-		# DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
-		# DX_disp_final = self.detector_space_2d - self.xcenter_detector + DX_disp - DX
-
-		# disp_space_high = jnp.linspace(self.disp_space[0], self.disp_space[-1], 10*self.disp_space.shape[0])
-		# disp_space_edges_prov= disp_space_high[1:] - jnp.diff(disp_space_high)/2
-		# disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(disp_space_high)[0])
-		# disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(disp_space_high)[-1])
+	# 	#add the LSF to the dispersion: 
+	# 	CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
+	# 	DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
+	# 	DX_disp_final = self.detector_space_2d - self.xcenter_detector + DX_disp - DX
 
 
-		# NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, 34*self.wave_factor*10+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-		# mu = DX[:,NEW_K_cdf]
-		# sigma = DX_disp_final[:,NEW_K_cdf]
-		# cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
-		# gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		# # gaussian_matrix_low = np.zeros((14,14,34))
-		# # for i in range(14):
-		# # 	blocks = gaussian_matrix[i].reshape(int(gaussian_matrix[i].shape[0]/(1)), 1, int(gaussian_matrix[i].shape[1]/10), 10)
-		# # 	gaussian_matrix_low[i] = jnp.sum(blocks, axis=(1,3))
-		# plt.imshow(gaussian_matrix[1])
-		# plt.show()
-		# # print('Gauss shape pre :' ,gaussian_matrix.shape)
-		# blocks = gaussian_matrix.reshape((V.shape[0],V.shape[0], int(gaussian_matrix.shape[2]/10), 10))
-		# gaussian_matrix = jnp.sum(blocks, axis=-1)
-		# # print('Gauss shape post :' ,gaussian_matrix.shape)
+
+	# 	NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+	# 	# print(NEW_J)
+	# 	# grism_full = jnp.zeros(self.sh_beam)
+	# 	# print(self.sh_beam)
+
+	# 	# mu = self.wave_space[J[:,NEW_K]]
+	# 	# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
+
+	# 	# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
+	# 	# compute the edges of the disp_space array
+
+	# 	disp_space_edges_prov= self.disp_space[1:] - jnp.diff(self.disp_space)/2
+	# 	disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(self.disp_space)[0])
+	# 	disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(self.disp_space)[-1])
+
+	# 	# print(disp_space_edges)
+	# 	# cdf = 0.5* (1 + special.erf( (self.wave_space[NEW_J] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	# prev_wave = self.wave_space[NEW_J] - self.wave_scale
+	# 	# cdf_prev = 0.5* (1 + special.erf( (prev_wave - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	# gaussian_matrix = cdf[:,NEW_K,NEW_J-J_min] - cdf_prev[:,NEW_K,NEW_J-J_min]
+	# 	# print(self.disp_space[NEW_J].shape)
+	# 	# print(mu.shape)
+	# 	# print(sigma.shape)
+
+	# 	# compute the gaussian matrix in 10 times higher resolution and then sample it down
+
+	# 	# dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
+	# 	# DX = self.detector_space_2d - self.xcenter_detector + dx0 
+
+	# 	# J_min = self.index_min
+	# 	# J_max = self.index_max
+
+	# 	# D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
+	# 	# # print('D_LSF = ', D_LSF)
+
+	# 	# #add the LSF to the dispersion: 
+	# 	# CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
+	# 	# DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
+	# 	# DX_disp_final = self.detector_space_2d - self.xcenter_detector + DX_disp - DX
+
+	# 	# disp_space_high = jnp.linspace(self.disp_space[0], self.disp_space[-1], 10*self.disp_space.shape[0])
+	# 	# disp_space_edges_prov= disp_space_high[1:] - jnp.diff(disp_space_high)/2
+	# 	# disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(disp_space_high)[0])
+	# 	# disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(disp_space_high)[-1])
 
 
-		NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, J_max-J_min+1*self.wave_factor+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-		# print(NEW_K_cdf)
-		mu = DX[:,NEW_K_cdf]
-		sigma = DX_disp_final[:,NEW_K_cdf]
-		cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		# plt.imshow(gaussian_matrix[14], origin = 'lower')
-		# plt.show()
-		# print(gaussian_matrix.shape)
-		return gaussian_matrix
+	# 	# NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, 34*self.wave_factor*10+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+	# 	# mu = DX[:,NEW_K_cdf]
+	# 	# sigma = DX_disp_final[:,NEW_K_cdf]
+	# 	# cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	# gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+	# 	# # gaussian_matrix_low = np.zeros((14,14,34))
+	# 	# # for i in range(14):
+	# 	# # 	blocks = gaussian_matrix[i].reshape(int(gaussian_matrix[i].shape[0]/(1)), 1, int(gaussian_matrix[i].shape[1]/10), 10)
+	# 	# # 	gaussian_matrix_low[i] = jnp.sum(blocks, axis=(1,3))
+	# 	# plt.imshow(gaussian_matrix[1])
+	# 	# plt.show()
+	# 	# # print('Gauss shape pre :' ,gaussian_matrix.shape)
+	# 	# blocks = gaussian_matrix.reshape((V.shape[0],V.shape[0], int(gaussian_matrix.shape[2]/10), 10))
+	# 	# gaussian_matrix = jnp.sum(blocks, axis=-1)
+	# 	# # print('Gauss shape post :' ,gaussian_matrix.shape)
 
-	def get_beam_cutout(self, wave_min, wave_max, wave_space, grism_full):
-		'''
-			get cutout of the full grism spectrum from wave_min to wave_max
-			in the implementation these can be taken by finding wave_min and wave_max on the observed 2D image
 
-		'''
+	# 	NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, J_max-J_min+1*self.wave_factor+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+	# 	# print(NEW_K_cdf)
+	# 	mu = DX[:,NEW_K_cdf]
+	# 	sigma = DX_disp_final[:,NEW_K_cdf]
+	# 	cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+	# 	# plt.imshow(gaussian_matrix[14], origin = 'lower')
+	# 	# plt.show()
+	# 	# print(gaussian_matrix.shape)
+	# 	return gaussian_matrix
 
-		j_min, j_max = self.compute_wave_index(jnp.array([wave_min, wave_max]), wave_space)
-		j_min = 360
-		j_max = 370
-		self.grism_cutout = grism_full[:, j_min:j_max]
+	# def get_beam_cutout(self, wave_min, wave_max, wave_space, grism_full):
+	# 	'''
+	# 		get cutout of the full grism spectrum from wave_min to wave_max
+	# 		in the implementation these can be taken by finding wave_min and wave_max on the observed 2D image
 
-		return self.grism_cutout
+	# 	'''
 
-	def set_sensitivity(self):
+	# 	j_min, j_max = self.compute_wave_index(jnp.array([wave_min, wave_max]), wave_space)
+	# 	j_min = 360
+	# 	j_max = 370
+	# 	self.grism_cutout = grism_full[:, j_min:j_max]
+
+	# 	return self.grism_cutout
+
+	# def set_sensitivity(self):
 	
 
-		self.sensitivity = self.f_sens(self.wave_space)
-		self.compute_lsf()
+	# 	self.sensitivity = self.f_sens(self.wave_space)
+	# 	self.compute_lsf()
 
-	def set_wavelength(self, wavelength):
+	# def set_wavelength(self, wavelength):
 
-		self.wavelength = wavelength
+	# 	self.wavelength = wavelength
 
-	def set_wave_scale(self, scale):
+	# def set_wave_scale(self, scale):
 
 		'''
 			Sets the scale of the grism image to 'scale'. Modifies all relevant parameters in the class so that when the disperse function is called, 
