@@ -222,7 +222,6 @@ class Grism:
 		#create a dx space centered on 0 where your pixel is in the direct image, evenly spaced
 		delta_dx = (jnp.max(self.disp_space) - jnp.min(self.disp_space))/ (self.disp_space.shape[0]-1) #the -2 is because you need to divide by the number of INTERVALS
 		self.dxs = jnp.arange(jnp.min(self.disp_space), jnp.max(self.disp_space) + delta_dx, delta_dx)
-		print('delta dx: ', delta_dx)
 		self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
 		self.wavs = self.inverse_wave_disp(self.dxs)
 
