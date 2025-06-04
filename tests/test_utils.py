@@ -12,6 +12,13 @@ def test_oversample():
     #check that the total flux is preserved
     assert np.isclose(np.sum(arr), np.sum(oversampled_arr))
 
+def test_resample():
+    #test that if you oversample an array and then resample it back to the original size, you get the same array
+    arr = np.random.rand(30, 30)
+    oversampled_arr = oversample(arr, 2, 2)
+    resampled_arr = resample(oversampled_arr, 2, 2)
+    assert np.allclose(arr, resampled_arr, atol=1e-6), "Resampling should return the original array within a small tolerance"
+
 def test_compute_inclination_axis_ratio():
     axis_ratio = 0.5
     inclination = compute_inclination(axis_ratio, q0 = 0)
