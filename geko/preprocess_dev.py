@@ -493,9 +493,6 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     if y0 == None:
         y0 = icenter
 
-    x0_grism = jcenter
-    y0_grism = icenter
-
 
 	
     # cute the S/N to max 20: #try without this
@@ -519,7 +516,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     PA_morph = None
     kin_model.set_bounds(direct, direct_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism, delta_wave, wavelength)
 
-    return redshift, wavelength, direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism,x0_grism, num_samples, num_warmup, step_size, target_accept_prob, wave_space, delta_wave, index_min, index_max, factor
+    return redshift, wavelength, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor
 
 
 ########## unused functions bins below - typically relevant for the non-parametric fitting but useless in the parametric!! ###########
