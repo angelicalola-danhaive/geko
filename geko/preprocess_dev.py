@@ -6,7 +6,7 @@ Eventually should also add here scripts to automatically create folders for sour
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
-__all__ = ['run_full_preprocessing']
+__all__ = ['run_full_preprocessing', 'prep_grism']
 
 #imports
 from . import  utils
@@ -278,15 +278,16 @@ def prep_grism(grism_spectrum,grism_spectrum_error, wavelength, delta_wave_cutof
 	index_max = round((wave_max - wave_first)/d_wave) #-10
 	# print(index_min, index_max)
 	index_wave = round((wavelength - wave_first)/d_wave)
+
 	#subtract continuum and crop image by 200 on each size of EL
 	crop_size = 150
 	if index_min - crop_size < 0:
 		crop_size = index_min
 	grism_spectrum_data = contiuum_subtraction(jnp.array(grism_spectrum), index_wave - crop_size, index_wave + crop_size)
 	#cut EL map by using those wavelengths => saved as obs_map which is an input for Fit_Numpyro class
-	obs_map = grism_spectrum_data[:,index_min-(index_wave -crop_size) +1:index_max-(index_wave -crop_size)+1+1]
+	obs_map = grism_spectrum_data[:,index_min-(index_wave -crop_size):index_max-(index_wave -crop_size)+1]
 
-	obs_error = jnp.power(jnp.array(grism_spectrum_error[:,index_min+1:index_max+1+1]), - 0.5)
+	obs_error = jnp.power(jnp.array(grism_spectrum_error[:,index_min:index_max+1]), - 0.5)
         
 	return obs_map, obs_error, index_min, index_max
 
@@ -461,7 +462,9 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	
     
     if grism_object == None:
-        wave_space_model = jnp.linspace(wave_space[0], wave_space[-1], len(wave_space)*wave_factor) #jnp.linspace goes from first to last entry INCLUSIVE
+
+        half_step = (delta_wave / wave_factor)*(wave_factor//2)
+        wave_space_model = np.arange(wave_space[0]- half_step, wave_space[-1] + delta_wave + half_step, delta_wave / wave_factor)
 
         im_shape = obs_map.shape[0]*factor
         im_scale = 0.0629/factor #in arcsec/pixel
