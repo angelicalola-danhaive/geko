@@ -144,85 +144,85 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 
 
 def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False):
-    """
-        Main function that automatically post-processes the inference data and saves all of the relevant plots
-        Returns the main data products so that data can be analyzed separately
-    """
+	"""
+		Main function that automatically post-processes the inference data and saves all of the relevant plots
+		Returns the main data products so that data can be analyzed separately
+	"""
 
-    #pre-process the galaxy data
-    z_spec,wavelength, direct,direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism, \
-    num_samples, num_warmup, step_size, target_accept_prob,  \
-    wave_space, delta_wave, index_min, index_max, factor  = pre.run_full_preprocessing(output, master_cat, line, mock_params)
+	#pre-process the galaxy data
+	z_spec,wavelength, direct,direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism, \
+	num_samples, num_warmup, step_size, target_accept_prob,  \
+	wave_space, delta_wave, index_min, index_max, factor  = pre.run_full_preprocessing(output, master_cat, line, mock_params)
 
-    #load inference data
-    if mock_params is None:
-        # inf_data = az.InferenceData.from_netcdf('FrescoHa/Runs-Final/' + output + '/'+ 'output')
-        inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
-        j=0
-    else:
-        inf_data = az.InferenceData.from_netcdf('testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_'+ 'output')
-        
-    num_samples = inf_data.posterior['sigma0'].shape[1]
-    data = fit.Fit_Numpyro(obs_map = obs_map, obs_error = obs_error, grism_object = grism_object, kin_model = kin_model, inference_data = inf_data , parametric = parametric)
-    inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object,parametric)
-    #define the wave_space
-    len_wave = int((wave_space[len(wave_space)-1] - wave_space[0])/(delta_wave))
-    wave_space = jnp.linspace(wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
-    wave_space = wave_space[index_min:index_max+1]
+	#load inference data
+	if mock_params is None:
+		# inf_data = az.InferenceData.from_netcdf('FrescoHa/Runs-Final/' + output + '/'+ 'output')
+		inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
+		j=0
+	else:
+		inf_data = az.InferenceData.from_netcdf('testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_'+ 'output')
+		
+	num_samples = inf_data.posterior['sigma0'].shape[1]
+	data = fit.Fit_Numpyro(obs_map = obs_map, obs_error = obs_error, grism_object = grism_object, kin_model = kin_model, inference_data = inf_data , parametric = parametric)
+	inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object,parametric)
+	#define the wave_space
+	len_wave = int((wave_space[len(wave_space)-1] - wave_space[0])/(delta_wave))
+	wave_space = jnp.linspace(wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
+	wave_space = wave_space[index_min:index_max+1]
 
-    #save the posterior of the velocity at the effective radius
-    inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
+	#save the posterior of the velocity at the effective radius
+	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
 
 
 
 	# compute v/sigma posterior and quantiles
 
-    inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
-    inf_data.prior['sigma0_trunc'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
-    for i in [0,1]:
-        for sample in range(num_samples):
-            if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
-                inf_data.posterior['sigma0_trunc'][i,sample] = np.random.uniform(inf_data.posterior['sigma0'].quantile(0.84), 0.5*inf_data.posterior['sigma0'].quantile(0.16))
-                if i == 0:
-                    inf_data.prior['sigma0_trunc'][0,sample] = np.random.uniform(inf_data.prior['sigma0'].quantile(0.84), 0.5*inf_data.prior['sigma0'].quantile(0.16))
-            else:
-                inf_data.posterior['sigma0_trunc'][i,sample] = inf_data.posterior['sigma0'][i,sample]
-                if i == 0:
-                    inf_data.prior['sigma0_trunc'][0,sample] = inf_data.prior['sigma0'][0,sample]
-                
-    inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0_trunc']
-    inf_data['prior']['v_sigma'] = inf_data.prior['v_re'] / inf_data.prior['sigma0_trunc']
-    v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
-    v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
-    v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
-    
+	inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
+	inf_data.prior['sigma0_trunc'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
+	for i in [0,1]:
+		for sample in range(num_samples):
+			if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
+				inf_data.posterior['sigma0_trunc'][i,sample] = np.random.uniform(inf_data.posterior['sigma0'].quantile(0.84), 0.5*inf_data.posterior['sigma0'].quantile(0.16))
+				if i == 0:
+					inf_data.prior['sigma0_trunc'][0,sample] = np.random.uniform(inf_data.prior['sigma0'].quantile(0.84), 0.5*inf_data.prior['sigma0'].quantile(0.16))
+			else:
+				inf_data.posterior['sigma0_trunc'][i,sample] = inf_data.posterior['sigma0'][i,sample]
+				if i == 0:
+					inf_data.prior['sigma0_trunc'][0,sample] = inf_data.prior['sigma0'][0,sample]
+				
+	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0_trunc']
+	inf_data['prior']['v_sigma'] = inf_data.prior['v_re'] / inf_data.prior['sigma0_trunc']
+	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
+	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
+	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
+	
 	#save the best fit parameters in a table
 
 	save_fit_results(output, inf_data, kin_model, z_spec, grism_object.ID, v_re_med, v_re_16, v_re_84)
-    
-    kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med)
+	
+	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med)
 
-    return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
+	return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=str, default='',
-		    		help='folder of the galaxy you want to postprocess')
+					help='folder of the galaxy you want to postprocess')
 parser.add_argument('--line', type=str, default='H_alpha',
-                    help='line to fit')        
+					help='line to fit')        
 parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_catalog.cat',
-                    help = 'master catalog file to use for the post-processing')                                                                                  	
+					help = 'master catalog file to use for the post-processing')                                                                                  	
 
 if __name__ == "__main__":
 
-    #run the post-processing hands-off 
-    args = parser.parse_args()
-    output = args.output
-    line = args.line
-    master_cat = args.master_cat
+	#run the post-processing hands-off 
+	args = parser.parse_args()
+	output = args.output
+	line = args.line
+	master_cat = args.master_cat
 
-    inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
-    process_results(output,master_cat,line)
+	inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
+	process_results(output,master_cat,line)
 
 
 
