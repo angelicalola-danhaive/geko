@@ -514,7 +514,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	r_full_grism = None
 	PA_grism = None
 	PA_morph = None
-	kin_model.set_bounds((obs_map.shape[0], obs_map.shape[0]), factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism)
+	kin_model.set_bounds((obs_map.shape[0], obs_map.shape[0]), factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism)
 
 	return redshift, wavelength, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor
 
