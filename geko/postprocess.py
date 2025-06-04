@@ -34,7 +34,113 @@ from astropy.cosmology import Planck18 as cosmo
 
 import xarray as xr
 
+from astropy.table import Table
+
+import corner
+
 # import smplotlib
+
+def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84):
+	''' 
+		Save all of the best-fit parameters in a table
+	'''
+	#compute v/sigma posterior and quantiles
+	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0']
+	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
+	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
+	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
+
+	#compute Mdyn posterior and quantiles
+	pressure_cor = 3.35 #= 2*re/rd
+	inf_data.posterior['v_circ2'] = inf_data.posterior['v_re']**2 + inf_data.posterior['sigma0']**2*pressure_cor
+	inf_data.posterior['v_circ'] = np.sqrt(inf_data.posterior['v_circ2'])
+	ktot = 1.8 #for q0 = 0.2
+	G = 4.3009172706e-3 #gravitational constant in pc*M_sun^-1*(km/s)^2
+	DA = cosmo.angular_diameter_distance(z_spec).to('m')
+	meters_to_pc = 3.086e16
+	# Convert arcseconds to radians and calculate the physical size
+	inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*DA.value/meters_to_pc
+	inf_data.posterior['M_dyn'] = np.log10(ktot*inf_data.posterior['v_circ2']*inf_data.posterior['r_eff_pc']/G)
+
+	M_dyn_16 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.16, dim=["chain", "draw"]))
+	M_dyn_med = jnp.array(inf_data.posterior['M_dyn'].median(dim=["chain", "draw"]))
+	M_dyn_84 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.84, dim=["chain", "draw"]))
+
+	v_circ_16 = jnp.array(inf_data.posterior['v_circ'].quantile(0.16, dim=["chain", "draw"]))
+	v_circ_med = jnp.array(inf_data.posterior['v_circ'].median(dim=["chain", "draw"]))
+	v_circ_84 = jnp.array(inf_data.posterior['v_circ'].quantile(0.84, dim=["chain", "draw"]))
+
+	#save results to a file
+	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', 'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', 'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84']
+	t_empty = np.zeros((len(params), 3))
+	res = Table(t_empty.T, names=params)
+	res['ID'] = ID
+	res['PA_50'] = kin_model.PA_mean
+	res['i_50'] = kin_model.i_mean
+	res['Va_50'] = kin_model.Va_mean
+	res['r_t_50'] = kin_model.r_t_mean
+	res['sigma0_50'] = kin_model.sigma0_mean_model
+	res['v_re_50'] = v_re_med
+	res['amplitude_50'] = kin_model.amplitude_mean
+	res['r_eff_50'] = kin_model.r_eff_mean
+	res['n_50'] = kin_model.n_mean
+	res['PA_morph_50'] = kin_model.PA_morph_mean
+	res['v_sigma_50'] = v_sigma_med
+
+	res['PA_16'] = kin_model.PA_16
+	res['i_16'] = kin_model.i_16
+	res['Va_16'] = kin_model.Va_16
+	res['r_t_16'] = kin_model.r_t_16
+	res['sigma0_16'] = kin_model.sigma0_16
+	res['v_re_16'] = v_re_16
+	res['v_sigma_16'] = v_sigma_16
+
+	res['PA_84'] = kin_model.PA_84
+	res['i_84'] = kin_model.i_84
+	res['Va_84'] = kin_model.Va_84
+	res['r_t_84'] = kin_model.r_t_84
+	res['sigma0_84'] = kin_model.sigma0_84
+	res['v_re_84'] = v_re_84
+	res['v_sigma_84'] = v_sigma_84
+
+	res['M_dyn_16'] = M_dyn_16
+	res['M_dyn_50'] = M_dyn_med
+	res['M_dyn_84'] = M_dyn_84
+
+	res['vcirc_16'] = v_circ_16
+	res['vcirc_50'] = v_circ_med
+	res['vcirc_84'] = v_circ_84
+
+	res['r_eff_16'] = kin_model.r_eff_16
+	res['r_eff_84'] = kin_model.r_eff_84
+
+	res['ellip_50'] = kin_model.ellip_mean
+	res['ellip_16'] = kin_model.ellip_16
+	res['ellip_84'] = kin_model.ellip_84
+
+	res.write('fitting_results/' + output + 'results', format='ascii', overwrite=True)
+	
+	#save a cornerplot of the v_sigma and sigma posteriors
+	fig = plt.figure(figsize=(10, 10))
+	CORNER_KWARGS = dict(
+		smooth=4,
+		label_kwargs=dict(fontsize=20),
+		title_kwargs=dict(fontsize=20),
+		quantiles=[0.16, 0.5, 0.84],
+		plot_density=False,
+		plot_datapoints=False,
+		fill_contours=True,
+		plot_contours=True,
+		show_titles=True,
+		labels=[r'$v_{re}/\sigma$', r'$\sigma_0$ [km/s]',  r'$\log ( M_{dyn} [M_{\odot}])$', r'$v_{circ}$ [km/s]'],
+		titles= [r'$v_{re}/\sigma$ ', r'$\sigma_0$', r'$\log M_{dyn}$',r'$v_{circ}$'],
+		max_n_ticks=3,
+		divergences=False)
+
+	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
+						color='dodgerblue', **CORNER_KWARGS)
+	plt.tight_layout()
+	plt.savefig('fitting_results/' + output + 'v_sigma_corner.png', dpi=300)
 
 
 def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False):
@@ -67,7 +173,9 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
     #save the posterior of the velocity at the effective radius
     inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
 
-#compute v/sigma posterior and quantiles
+
+
+	# compute v/sigma posterior and quantiles
 
     inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
     inf_data.prior['sigma0_trunc'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
@@ -87,119 +195,16 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
     v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
     v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
     v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
-
-    #compute Mdyn posterior and quantiles
-    pressure_cor = 3.35 #= 2*re/rd
-    inf_data.posterior['v_circ2'] = inf_data.posterior['v_re']**2 + inf_data.posterior['sigma0']**2*pressure_cor
-    inf_data.posterior['v_circ'] = np.sqrt(inf_data.posterior['v_circ2'])
-    inf_data.prior['v_circ2'] = inf_data.prior['v_re']**2 + inf_data.prior['sigma0']**2*pressure_cor
-    inf_data.prior['v_circ'] = np.sqrt(inf_data.prior['v_re']**2 + inf_data.prior['sigma0']**2*pressure_cor)
-    inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*cosmo.angular_diameter_distance(z_spec).to('m').value/3.086e16
-    inf_data.prior['r_eff_pc'] = np.deg2rad(inf_data.prior['r_eff']*0.06/3600)*cosmo.angular_diameter_distance(z_spec).to('m').value/3.086e16
-    ktot = 1.8 #for q0 = 0.2
-    G = 4.3009172706e-3 #gravitational constant in pc*M_sun^-1*(km/s)^2
-    DA = cosmo.angular_diameter_distance(z_spec).to('m')
-    meters_to_pc = 3.086e16
-    # Convert arcseconds to radians and calculate the physical size
-    inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*DA.value/meters_to_pc
-    inf_data.posterior['M_dyn'] = np.log10(ktot*inf_data.posterior['v_circ2']*inf_data.posterior['r_eff_pc']/G)
-    inf_data['prior']['M_dyn'] = np.log10(ktot*inf_data.prior['v_circ2']*inf_data.prior['r_eff_pc']/G)
-
-    M_dyn_16 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.16, dim=["chain", "draw"]))
-    M_dyn_med = jnp.array(inf_data.posterior['M_dyn'].median(dim=["chain", "draw"]))
-    M_dyn_84 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.84, dim=["chain", "draw"]))
-
-    v_circ_16 = jnp.array(inf_data.posterior['v_circ'].quantile(0.16, dim=["chain", "draw"]))
-    v_circ_med = jnp.array(inf_data.posterior['v_circ'].median(dim=["chain", "draw"]))
-    v_circ_84 = jnp.array(inf_data.posterior['v_circ'].quantile(0.84, dim=["chain", "draw"]))
-
-
-    # print(jnp.sum(jnp.abs(convolve(fluxes_mean, kin_model.Laplace_kernel, mode='same'))))
-    # plt.imshow(jnp.abs(convolve(fluxes_mean, kin_model.Laplace_kernel, mode='same')), origin = 'lower')
-    # plt.colorbar()
-    # plt.show()
-    # print(jnp.sqrt(jnp.sum(jnp.power(kin_model.std,2))))
-    #plot the grism model
-    # plotting.plot_grism(obs_map, y0_grism, direct.shape[0], wave_space, save_to_folder=output, name = 'truth_map'+ str(j))
-
-    # plotting.plot_grism(model_map, y0_grism, direct.shape[0], wave_space, save_to_folder=output, name = 'model_map'+ str(j), limits= obs_map)
-
-    # plotting.plot_grism_residual(obs_map, model_map, obs_error, y0_grism, direct.shape[0], wave_space, save_to_folder=output, name = 'residual_map'+ str(j))
-
-    # #plot the flux model
-    # plotting.plot_image(direct,x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'truth_flux'+ str(j))
-
-    # plotting.plot_image(direct_error, x0_grism,  y0_grism, direct.shape[0])
-
-    # plotting.plot_image(fluxes_mean, x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'model_flux'+ str(j)) #, limits= direct)
-    # Laplace_kernel = jnp.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
-
-
-    # plotting.plot_velocities_nice(kin_model)
-
-    # fluxes_mean_lap = convolve(fluxes_mean, Laplace_kernel, mode = 'same')
-    # plotting.plot_image(jnp.abs(fluxes_mean_lap),x0_grism,  y0_grism, direct.shape[0], save_to_folder = output, name = 'truth_flux')
-
-    #save the fluxes image and posteriors in fits file
-    # utils.save_fits_image(fluxes_mean, kin_model.masked_indices, inf_data,'fitting_results/' + output + '/' + 'model_flux' + '.fits')
-
-    # laplace_fluxes = convolve(fluxes_mean, Laplace_kernel, mode='same')
-    # sum and renormalize regularization term
-    # threshold_grism = 0.2*obs_map.max()
-    # sum_reg = jnp.sum(jnp.abs(laplace_fluxes))
-    # #use a cut to be consistent  with grism/direct renormalization + avoid negative pixels
-     # sum_reg_norm = sum_reg/jnp.sum(jnp.where(obs_map>threshold_grism,obs_map, 0.0)) #*self.model_map.shape[0]*self.model_map.shape[1]
-    # error_reg = jnp.sqrt(jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0)**2))/jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0))
-     # # error_reg_norm = error_reg*self.model_map.shape[0]*self.model_map.shape[1]/self.model_map.sum()
-
-    #new renormalization of reg term
-
-    # sum_reg = jnp.sum(jnp.abs(laplace_fluxes))/jnp.sum(jnp.abs(fluxes_mean))
-    # sum_reg_norm = sum_reg*jnp.max(obs_map)
-
-    # error_reg = obs_error[jnp.unravel_index(jnp.argmax(obs_map), (obs_map.shape[0], obs_map.shape[1]))]
-    # # print('obs_map sum: ', np.sum(obs_map))
-    # # # error_reg_norm = error_reg*model_map.shape[0]*model_map.shape[1]/model_map.sum()
-    # # laplace_fluxes_r = jnp.reshape(sum_reg_norm, (1,))
-    # print(sum_reg_norm, error_reg)
-
-    #define grid for velocity plots
-    x = jnp.linspace(0 - x0_grism, direct.shape[1]-1 -x0_grism, direct.shape[1]*factor)
-    y = jnp.linspace(0 - y0_grism, direct.shape[0]-1 -y0_grism, direct.shape[0]*factor)
-    X,Y = jnp.meshgrid(x,y)
-
-    # if parametric:
-        # plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = output, name ='cornerplot_real')
-        # plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = output, name ='cornerplot_test')
-
     
-    #plot the velocity field
-    # if model_name == 'Disk':
+	#save the best fit parameters in a table
 
-    #     plotting.plot_velocity_profile(fluxes_mean, kin_model.x0, kin_model.y0, direct.shape[0], model_velocities, save_to_folder=output, name = 'velocity_profile')
-    #     plotting.plot_velocity_map(model_velocities, kin_model.mask, kin_model.x0, kin_model.y0, direct.shape[0], save_to_folder=output, name = 'velocity_map')
-    #     plotting.plot_velocity_map(model_dispersions, kin_model.mask, kin_model.x0, kin_model.y0, direct.shape[0], save_to_folder=output, name = 'dispersion_map')
+	save_fit_results(output, inf_data, kin_model, z_spec, grism_object.ID, v_re_med, v_re_16, v_re_84)
     
-    #plot the posteriors of the kinemtic parameters
-    # plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = output, name = 'cornerplot_real')
-    #plot the posteriors of the tuning parameters
-    # plotting.plot_tuning_parameters(inf_data, model = model_name, save_to_folder = output, name = 'tuning_parameters_real')
-    #plot some flux posteriors from the middle ish of the cube
-    # index_bright = np.argmax(kin_model.flux_prior[kin_model.mask ==1]) #inf_data.posterior['fluxes'].shape[2]//2
-    # print('index_mid: ', index_bright)
-    # print(inf_data.prior['fluxes'][:,:,index_bright].mean(),inf_data.prior['fluxes'][:,:,index_bright].std(),  inf_data.prior['fluxes'][:,:,index_bright].min(), inf_data.prior['fluxes'][:,:,index_bright].max())
-    # plotting.plot_flux_corner(inf_data, index_min= index_bright - 2, index_max = index_bright + 2, save_to_folder = output, name = 'flux_corner')
-    #plot the full summary of the results
     kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med)
-    # print('Fluxes scaling: ', kin_model.fluxes_scaling_mean)
-    # print('Mean PA: ', kin_model.PA_mean)
-    # print('Mean inclination: ', kin_model.i_mean)
-    # print('Mean V_a: ', kin_model.Va_mean)
-    # print('Mean r_t: ', kin_model.r_t_mean)
-    # print('Mean sigma_0: ', kin_model.sigma0_mean_model)
-    # print('v_rot = v_re/sin i: ', v_re_med)
 
     return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=str, default='',
 		    		help='folder of the galaxy you want to postprocess')

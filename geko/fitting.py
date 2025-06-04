@@ -189,9 +189,8 @@ if __name__ == "__main__":
 
 	print('Running geko for the galaxy ID: ', output, ' with the line: ', line, ' and the master catalog: ', master_cat, ' and parametric: ', parametric)
 
-	z_spec, wavelength, direct, direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism,\
-	num_samples, num_warmup, step_size, target_accept_prob, \
-	wave_space, delta_wave, index_min, index_max, factor = pre.run_full_preprocessing(output, master_cat, line)
+	z_spec, wavelength,  obs_map, obs_error, model_name, kin_model, grism_object,\
+	num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor = pre.run_full_preprocessing(output, master_cat, line)
 	
 	if parametric:
 		with open('fitting_results/' + output + 'config_real.yaml', 'r') as file:
@@ -235,107 +234,6 @@ if __name__ == "__main__":
 
 	#figure out how to make this work well
 	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric)
-
-	#compute v/sigma posterior and quantiles
-	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0']
-	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
-	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
-	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
-
-	#compute Mdyn posterior and quantiles
-	pressure_cor = 3.35 #= 2*re/rd
-	inf_data.posterior['v_circ2'] = inf_data.posterior['v_re']**2 + inf_data.posterior['sigma0']**2*pressure_cor
-	inf_data.posterior['v_circ'] = np.sqrt(inf_data.posterior['v_circ2'])
-	ktot = 1.8 #for q0 = 0.2
-	G = 4.3009172706e-3 #gravitational constant in pc*M_sun^-1*(km/s)^2
-	DA = cosmo.angular_diameter_distance(z_spec).to('m')
-	meters_to_pc = 3.086e16
-	# Convert arcseconds to radians and calculate the physical size
-	inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*DA.value/meters_to_pc
-	inf_data.posterior['M_dyn'] = np.log10(ktot*inf_data.posterior['v_circ2']*inf_data.posterior['r_eff_pc']/G)
-
-	M_dyn_16 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.16, dim=["chain", "draw"]))
-	M_dyn_med = jnp.array(inf_data.posterior['M_dyn'].median(dim=["chain", "draw"]))
-	M_dyn_84 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.84, dim=["chain", "draw"]))
-
-	v_circ_16 = jnp.array(inf_data.posterior['v_circ'].quantile(0.16, dim=["chain", "draw"]))
-	v_circ_med = jnp.array(inf_data.posterior['v_circ'].median(dim=["chain", "draw"]))
-	v_circ_84 = jnp.array(inf_data.posterior['v_circ'].quantile(0.84, dim=["chain", "draw"]))
-
-	#save results to a file
-	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', 'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', 'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84']
-	t_empty = np.zeros((len(params), 3))
-	res = Table(t_empty.T, names=params)
-	res['ID'] = ID
-	res['PA_50'] = kin_model.PA_mean
-	res['i_50'] = kin_model.i_mean
-	res['Va_50'] = kin_model.Va_mean
-	res['r_t_50'] = kin_model.r_t_mean
-	res['sigma0_50'] = kin_model.sigma0_mean_model
-	res['v_re_50'] = v_re_med
-	res['amplitude_50'] = kin_model.amplitude_mean
-	res['r_eff_50'] = kin_model.r_eff_mean
-	res['n_50'] = kin_model.n_mean
-	res['PA_morph_50'] = kin_model.PA_morph_mean
-	res['v_sigma_50'] = v_sigma_med
-
-	res['PA_16'] = kin_model.PA_16
-	res['i_16'] = kin_model.i_16
-	res['Va_16'] = kin_model.Va_16
-	res['r_t_16'] = kin_model.r_t_16
-	res['sigma0_16'] = kin_model.sigma0_16
-	res['v_re_16'] = v_re_16
-	res['v_sigma_16'] = v_sigma_16
-
-	res['PA_84'] = kin_model.PA_84
-	res['i_84'] = kin_model.i_84
-	res['Va_84'] = kin_model.Va_84
-	res['r_t_84'] = kin_model.r_t_84
-	res['sigma0_84'] = kin_model.sigma0_84
-	res['v_re_84'] = v_re_84
-	res['v_sigma_84'] = v_sigma_84
-
-	res['M_dyn_16'] = M_dyn_16
-	res['M_dyn_50'] = M_dyn_med
-	res['M_dyn_84'] = M_dyn_84
-
-	res['vcirc_16'] = v_circ_16
-	res['vcirc_50'] = v_circ_med
-	res['vcirc_84'] = v_circ_84
-
-	res['r_eff_16'] = kin_model.r_eff_16
-	res['r_eff_84'] = kin_model.r_eff_84
-
-	res['ellip_50'] = kin_model.ellip_mean
-	res['ellip_16'] = kin_model.ellip_16
-	res['ellip_84'] = kin_model.ellip_84
-
-	res.write('fitting_results/' + output + 'results', format='ascii', overwrite=True)
-	
-	#save a cornerplot of the v_sigma and sigma posteriors
-	import smplotlib
-	fig = plt.figure(figsize=(10, 10))
-	CORNER_KWARGS = dict(
-		smooth=4,
-		label_kwargs=dict(fontsize=20),
-		title_kwargs=dict(fontsize=20),
-		quantiles=[0.16, 0.5, 0.84],
-		plot_density=False,
-		plot_datapoints=False,
-		fill_contours=True,
-		plot_contours=True,
-		show_titles=True,
-		labels=[r'$v_{re}/\sigma$', r'$\sigma_0$ [km/s]',  r'$\log ( M_{dyn} [M_{\odot}])$', r'$v_{circ}$ [km/s]'],
-		titles= [r'$v_{re}/\sigma$ ', r'$\sigma_0$', r'$\log M_{dyn}$',r'$v_{circ}$'],
-		max_n_ticks=3,
-		divergences=False)
-
-	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
-						color='dodgerblue', **CORNER_KWARGS)
-	plt.tight_layout()
-	plt.savefig('fitting_results/' + output + 'v_sigma_corner.png', dpi=300)
-    
-	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, 'H_alpha', parametric = True)
 
 
 #==============================EXTRA STUFF = NEED TO PUT SOMEWHERE ELSE==================================================
