@@ -76,13 +76,13 @@ def read_config_file(input, output, master_cat_path, line):
 
 
 	if field == 'GOODS-N':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + 'F444W' + '_ID' + str(ID) + '_comb.fits'
+		grism_spectrum_path = '/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output+ 'spec_2d_GDN_' + 'F444W' + '_ID' + str(ID) + '_comb.fits'
 		grism_filter = 'F444W'
 	elif field == 'GOODS-N-CONGRESS':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + 'F356W' + '_ID' + str(ID) + '_comb.fits'
+		grism_spectrum_path = '/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output+ 'spec_2d_GDN_' + 'F356W' + '_ID' + str(ID) + '_comb.fits'
 		grism_filter = 'F356W'
 	elif field == 'GOODS-S-FRESCO':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_FRESCO_' + 'F444W' + '_ID' + str(ID) + '_comb.fits'
+		grism_spectrum_path = '/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output+ 'spec_2d_FRESCO_' + 'F444W' + '_ID' + str(ID) + '_comb.fits'
 		grism_filter = 'F444W'
 	else:
 		#generate error that the input field is not supported
@@ -428,7 +428,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	"""
 	
 	if mock_params == None:
-		with open('fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
+		with open('/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
 			input = yaml.load(file, Loader=yaml.FullLoader)
 		print('Read inputs successfully')
 		#load of all the parameters from the configuration file
@@ -453,7 +453,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 
 	#run pysersic fit to get morphological parameters
 	if mock_params == None:
-		path_output = 'fitting_results/' + output
+		path_output = '/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output
 	else: 
 		test = mock_params['test']
 		j = mock_params['j']
@@ -488,6 +488,8 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 		wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
 
 	# take x0 and y0 from the pre-processing unless specified otherwise in the config file
+	x0 = None
+	y0 = None
 	if x0 == None:
 		x0 = jcenter
 	if y0 == None:

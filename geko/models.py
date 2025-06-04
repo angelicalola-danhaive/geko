@@ -143,8 +143,7 @@ class KinModels:
 		
 
 
-	def set_main_bounds(self, factor, PA_sigma, i_bounds, Va_bounds, r_t_bounds,
-						 sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism):
+	def set_main_bounds(self, factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism):
 		"""
 		Set the bounds for the model parameters by reading the ones from the config file.
 		The more specific bounds computations for the different models will be done inside their
@@ -153,6 +152,8 @@ class KinModels:
 
 		self.factor = factor
 
+		self.wave_factor = wave_factor
+
 		self.PA_sigma = PA_sigma
 		self.PA_grism = PA_grism
 		self.PA_morph = PA_morph
@@ -160,7 +161,6 @@ class KinModels:
 		self.r_eff = r_eff
 		self.r_eff_grism = r_eff_grism
 		# these are in the form (low, high)
-		self.i_bounds = i_bounds
 		self.Va_bounds = Va_bounds
 		self.r_t_bounds = r_t_bounds
 		self.sigma0_bounds = sigma0_bounds
@@ -200,10 +200,6 @@ class Disk():
 
 		#initialize all attributes with function parameters
 		self.direct_shape = direct_shape
-
-		#has to be rescaled for the normal distribution sampling
-		self.i_low = (1-self.mu_i)/self.sigma_i
-		self.i_high = (89-self.mu_i)/self.sigma_i
 
 
 		self.x0_vel = direct_shape[1]//2
@@ -635,14 +631,14 @@ class DiskModel(KinModels):
 		# self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0_max', 'sigma0_scale', 'sigma0_const']
 		# self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_{max}$', r'$\sigma_{scale}$', r'$\sigma_{const}$']
 
-	def set_bounds(self, im_shape, factor, PA_sigma,Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_eff_grism):
+	def set_bounds(self, im_shape, factor, wave_factor, PA_sigma,Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_eff_grism):
 		"""
 
 		Compute all of the necessary bounds for the disk model sampling distributions
 
 		"""
 		# first set all of the main bounds taken from the config file
-		self.set_main_bounds(factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism)
+		self.set_main_bounds(factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism)
 
 		self.im_shape = im_shape
 			
