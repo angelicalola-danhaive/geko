@@ -3,8 +3,8 @@ __all__ = ["Fit_Numpyro"]
 # imports
 
 # importing my own modules
-from . import grism
-from . import preprocess as pre
+# from . import grism_dev
+from . import preprocess_dev as pre
 from . import postprocess as post
 from . import plotting
 from . import utils
@@ -167,7 +167,7 @@ class Fit_Numpyro():
 
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
-
+#command line inputs
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=str, default='',
                     help='output folder name')
@@ -208,6 +208,9 @@ if __name__ == "__main__":
 			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F444W_svi.cat', format='ascii')
 
 		kin_model.disk.set_parametric_priors(pysersic_summary, pysersic_grism_summary, z_spec, wavelength, delta_wave)
+	else:
+		#raise non-parametric fitting not implemented error
+		raise ValueError("Non-parametric fitting is not implemented yet. Please set --parametric to True to use the parametric fitting.")
 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
 

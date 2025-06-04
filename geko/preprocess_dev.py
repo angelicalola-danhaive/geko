@@ -263,7 +263,34 @@ def contiuum_subtraction(grism_spectrum_data, min, max):
 
 	return grism_spectrum_data
 
-def preprocess_data( grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, field = 'GOODS-S'):
+def prep_grism(grism_spectrum,grism_spectrum_error, wavelength, delta_wave_cutoff = 0.02, wave_first = 3.5, d_wave = 0.001):
+	'''
+		Crop the grism spectrum to a smaller size, centered on the wavelength of interest
+		Remove the continuum
+	'''
+	#choose which wavelengths will be the cutoff of the EL map and save those
+	wave_min = wavelength - delta_wave_cutoff 
+	wave_max = wavelength + delta_wave_cutoff 
+
+	# print(wave_min, wave_max)
+
+	index_min = round((wave_min - wave_first)/d_wave) #+10
+	index_max = round((wave_max - wave_first)/d_wave) #-10
+	# print(index_min, index_max)
+	index_wave = round((wavelength - wave_first)/d_wave)
+	#subtract continuum and crop image by 200 on each size of EL
+	crop_size = 150
+	if index_min - crop_size < 0:
+		crop_size = index_min
+	grism_spectrum_data = contiuum_subtraction(jnp.array(grism_spectrum), index_wave - crop_size, index_wave + crop_size)
+	#cut EL map by using those wavelengths => saved as obs_map which is an input for Fit_Numpyro class
+	obs_map = grism_spectrum_data[:,index_min-(index_wave -crop_size) +1:index_max-(index_wave -crop_size)+1+1]
+
+	obs_error = jnp.power(jnp.array(grism_spectrum_error[:,index_min+1:index_max+1+1]), - 0.5)
+        
+	return obs_map, obs_error, index_min, index_max
+
+def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, field = 'GOODS-S'):
 
 	grism_spectrum_fits = fits.open(grism_spectrum_path)
 
@@ -293,30 +320,13 @@ def preprocess_data( grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, f
 	naxis_y = grism_spectrum_fits['SPEC2D'].header['NAXIS2']
 	# print(wave_first, d_wave, naxis_x, naxis_y)
 
-	wave_last = wave_first + d_wave*(naxis_x-1)
-
 	wave_space = wave_first + jnp.arange(0, naxis_x, 1) * d_wave
 
 
-	#choose which wavelengths will be the cutoff of the EL map and save those
-	wave_min = wavelength - delta_wave_cutoff 
-	wave_max = wavelength + delta_wave_cutoff 
-
-	# print(wave_min, wave_max)
-
-	index_min = round((wave_min - wave_first)/d_wave) #+10
-	index_max = round((wave_max - wave_first)/d_wave) #-10
-	# print(index_min, index_max)
-	index_wave = round((wavelength - wave_first)/d_wave)
-	#subtract continuum and crop image by 200 on each size of EL
-	crop_size = 150
-	if index_min - crop_size < 0:
-		crop_size = index_min
-	grism_spectrum_data = contiuum_subtraction(jnp.array(grism_spectrum_fits['SPEC2D'].data), index_wave - crop_size, index_wave + crop_size)
-	#cut EL map by using those wavelengths => saved as obs_map which is an input for Fit_Numpyro class
-	obs_map = grism_spectrum_data[:,index_min-(index_wave -crop_size) +1:index_max-(index_wave -crop_size)+1+1]
-
-	obs_error = jnp.power(jnp.array(grism_spectrum_fits['WHT2D'].data[:,index_min+1:index_max+1+1]), - 0.5)
+	#crop and continuum subtract the grism spectrum
+	grism_spectrum = grism_spectrum_fits['SPEC2D'].data
+	grism_spectrum_error = grism_spectrum_fits['WHT2D'].data
+	obs_map, obs_error, index_min, index_max = prep_grism(grism_spectrum,grism_spectrum_error, wavelength, delta_wave_cutoff, wave_first, d_wave)
 
 	#mask bad pixels in obs/error map
 	obs_error = jnp.where(jnp.isnan(obs_map)| jnp.isnan(obs_error) | jnp.isinf(obs_error), 1e10, obs_error)
