@@ -682,7 +682,7 @@ class DiskModel(KinModels):
 
 		self.model_map = grism_object.disperse(fluxes_high, velocities_scaled, dispersions)
 
-		self.model_map = utils.resample(self.model_map, grism_object.factor, grism_object.wave_factor)
+		self.model_map = utils.resample(self.model_map, grism_object.factor, self.wave_factor)
 
 
 		self.error_scaling = 1 #numpyro.sample('error_scaling', dist.Uniform(0, 1))*5
@@ -731,7 +731,7 @@ class DiskModel(KinModels):
 		self.model_map_high = grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
 		# self.model_map_high = grism_object.disperse(self.convolved_fluxes, self.convolved_velocities, self.convolved_dispersions)
 
-		self.model_map = utils.resample(self.model_map_high, grism_object.factor, grism_object.wave_factor)
+		self.model_map = utils.resample(self.model_map_high, grism_object.factor, self.wave_factor)
 
 		#compute velocity grid in flux image resolution for plotting velocity maps
 		self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='nearest')
@@ -796,7 +796,7 @@ class DiskModel(KinModels):
 		self.model_map_high = grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
 		# self.model_map_high = grism_object.disperse(self.convolved_fluxes, self.convolved_velocities, self.convolved_dispersions)
 
-		self.model_map = utils.resample(self.model_map_high, grism_object.factor, grism_object.wave_factor)
+		self.model_map = utils.resample(self.model_map_high, grism_object.factor, self.wave_factor)
 		# print('Model vels:', self.model_velocities)
 		#compute velocity grid in flux image resolution for plotting velocity maps
 		self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='nearest')
@@ -850,7 +850,7 @@ class DiskModel(KinModels):
 		self.model_map = grism_object.disperse(fluxes_high, velocities_scaled, dispersions)
 
 
-		self.model_map = utils.resample(self.model_map, grism_object.y_factor*grism_object.factor, grism_object.wave_factor)
+		self.model_map = utils.resample(self.model_map, grism_object.y_factor*grism_object.factor, self.wave_factor)
 		# #plot the residuals
 		# plt.imshow((obs_map - self.model_map)/obs_error, origin = 'lower')
 		# plt.colorbar()
@@ -1330,7 +1330,7 @@ class DiskModel(KinModels):
 # 		# self.model_map = grism_object.disperse(convolved_fluxes, convolved_velocities, convolved_dispersions)
 
 # 		# start = time.time()
-# 		self.model_map = utils.resample(self.model_map, grism_object.y_factor*grism_object.factor, grism_object.wave_factor)
+# 		self.model_map = utils.resample(self.model_map, grism_object.y_factor*grism_object.factor, self.wave_factor)
 # 		# end = time.time()
 # 		# f.write("Time to resample: " + str(end-start) + "\n")
 
