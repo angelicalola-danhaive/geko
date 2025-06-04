@@ -61,7 +61,7 @@ c_m = c*1e-9
 def read_config_file(input, output, master_cat_path, line):
 	"""
 
-        Read the config file for the galaxy and returns all of the relevant parameters
+		Read the config file for the galaxy and returns all of the relevant parameters
 
 	"""
 	data = input[0]
@@ -103,7 +103,7 @@ def read_config_file(input, output, master_cat_path, line):
 
 	model_name = inference['Inference']['model']
 	
-    #import all of the bounds needed for the priors
+	#import all of the bounds needed for the priors
 
 	PA_sigma = inference['Inference']['PA_bounds']
 	i_bounds = inference['Inference']['i_bounds']
@@ -288,7 +288,7 @@ def prep_grism(grism_spectrum,grism_spectrum_error, wavelength, delta_wave_cutof
 	obs_map = grism_spectrum_data[:,index_min-(index_wave -crop_size):index_max-(index_wave -crop_size)+1]
 
 	obs_error = jnp.power(jnp.array(grism_spectrum_error[:,index_min:index_max+1]), - 0.5)
-        
+		
 	return obs_map, obs_error, index_min, index_max
 
 def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, field = 'GOODS-S'):
@@ -347,176 +347,174 @@ def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, fi
 
 def define_mock_params():
 
-    broad_filter = 'F356W'
-    grism_filter = 'F356W'
-    wavelength = 4.5
-    redshift = 3.0
-    line = 'H_alpha'
-    y_factor = 1
-    flux_threshold = 3
-    factor = 5
-    wave_factor = 5
-    x0 = y0 = 31//2
-    model_name = 'Disk'
-    flux_bounds = None
-    flux_type = 'auto'
-    PA_sigma = None
-    i_bounds = [0,90]
-    Va_bounds = None
-    r_t_bounds = None
-    sigma0_bounds = None #can put similar bounds on this using the Va measured from 1D spectrum
-    num_samples = 500
-    num_warmup = 500
-    step_size = 0.001
-    target_accept_prob = 0.8
+	broad_filter = 'F356W'
+	grism_filter = 'F356W'
+	wavelength = 4.5
+	redshift = 3.0
+	line = 'H_alpha'
+	y_factor = 1
+	flux_threshold = 3
+	factor = 5
+	wave_factor = 5
+	x0 = y0 = 31//2
+	model_name = 'Disk'
+	flux_bounds = None
+	flux_type = 'auto'
+	PA_sigma = None
+	i_bounds = [0,90]
+	Va_bounds = None
+	r_t_bounds = None
+	sigma0_bounds = None #can put similar bounds on this using the Va measured from 1D spectrum
+	num_samples = 500
+	num_warmup = 500
+	step_size = 0.001
+	target_accept_prob = 0.8
 
 	
-    return broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
-        wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
-        r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob
+	return broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
+		wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
+		r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob
 
 def preprocess_mock_data(mock_params):
 
-    obs_map = mock_params['grism_spectrum_noise']
-    obs_error = mock_params['grism_error']*2
-    direct = mock_params['convolved_noise_image']
-    direct_error = mock_params['image_error']
-    broad_band = mock_params['convolved_noise_image']
-    xcenter_detector = 1024
-    ycenter_detector = 1024
-    icenter = 31//2
-    jcenter = 31//2
-    icenter_low = None
-    jcenter_low = None
-    wave_space = mock_params['wave_space']
-    delta_wave = wave_space[1] - wave_space[0]
-    index_min = mock_params['index_min']
-    index_max = mock_params['index_max']
-    wavelength = mock_params['wavelength']
-    theta = 0
-    grism_object = mock_params['grism_object']
+	obs_map = mock_params['grism_spectrum_noise']
+	obs_error = mock_params['grism_error']*2
+	direct = mock_params['convolved_noise_image']
+	direct_error = mock_params['image_error']
+	broad_band = mock_params['convolved_noise_image']
+	xcenter_detector = 1024
+	ycenter_detector = 1024
+	icenter = 31//2
+	jcenter = 31//2
+	icenter_low = None
+	jcenter_low = None
+	wave_space = mock_params['wave_space']
+	delta_wave = wave_space[1] - wave_space[0]
+	index_min = mock_params['index_min']
+	index_max = mock_params['index_max']
+	wavelength = mock_params['wavelength']
+	theta = 0
+	grism_object = mock_params['grism_object']
 
-    plt.imshow(obs_map, origin='lower')
-    plt.title('obs_map')
-    plt.colorbar()
-    plt.show()
+	plt.imshow(obs_map, origin='lower')
+	plt.title('obs_map')
+	plt.colorbar()
+	plt.show()
 
-    plt.imshow(obs_map/obs_error, origin='lower')
-    plt.title('obs map S/N')
-    plt.colorbar()
-    plt.show()
+	plt.imshow(obs_map/obs_error, origin='lower')
+	plt.title('obs map S/N')
+	plt.colorbar()
+	plt.show()
 
-    plt.imshow(direct, origin='lower')
-    plt.title('Direct')
-    plt.colorbar()
-    plt.show()
+	plt.imshow(direct, origin='lower')
+	plt.title('Direct')
+	plt.colorbar()
+	plt.show()
 
-    plt.imshow(direct/direct_error, origin='lower')
-    plt.title('Direct S/N')
-    plt.colorbar()
-    plt.show()
+	plt.imshow(direct/direct_error, origin='lower')
+	plt.title('Direct S/N')
+	plt.colorbar()
+	plt.show()
 
-    plt.close()
+	plt.close()
 
 	
-    return  obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-	    	    wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object
+	return  obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+				wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object
 
 def run_full_preprocessing(output,master_cat, line, mock_params = None, priors = None):
-    """
-        Main function that automatically post-processes the inference data and saves all of the relevant plots
-    """
-    
-    if mock_params == None:
-        with open('fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
-            input = yaml.load(file, Loader=yaml.FullLoader)
-        print('Read inputs successfully')
-    	#load of all the parameters from the configuration file
-        ID, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds,\
-        sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
-        #preprocess the images and the grism spectrum
-        if field == 'ALT':
-            #generate an error that says not updated
-            raise ValueError("The field ALT is not updated in the preprocessing function. Please use a different field.")
-        else:
-            module,obs_map, obs_error,wave_space, delta_wave, index_min, index_max, wavelength = preprocess_data(grism_spectrum_path, wavelength, delta_wave_cutoff, field)
-        grism_object = None
-    else:
-        broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
-        wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
-        r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob = define_mock_params()
-        obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
-	    	    wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object = preprocess_mock_data(mock_params)
+	"""
+		Main function that automatically post-processes the inference data and saves all of the relevant plots
+	"""
+	
+	if mock_params == None:
+		with open('fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
+			input = yaml.load(file, Loader=yaml.FullLoader)
+		print('Read inputs successfully')
+		#load of all the parameters from the configuration file
+		ID, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds,\
+		sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
+		#preprocess the images and the grism spectrum
+		if field == 'ALT':
+			#generate an error that says not updated
+			raise ValueError("The field ALT is not updated in the preprocessing function. Please use a different field.")
+		else:
+			module,obs_map, obs_error,wave_space, delta_wave, index_min, index_max, wavelength = preprocess_data(grism_spectrum_path, wavelength, delta_wave_cutoff, field)
+		grism_object = None
+	else:
+		broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
+		wave_factor, x0, y0, model_name, flux_bounds, flux_type, PA_sigma, i_bounds, Va_bounds, \
+		r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob = define_mock_params()
+		obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
+				wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object = preprocess_mock_data(mock_params)
 
 
-    PSF = utils.load_psf(filter = grism_filter, y_factor = 1) #y_factor = 1 because putting it at grism resolution and then will be oversampled accordingly in the grism module
+	PSF = utils.load_psf(filter = grism_filter, y_factor = 1) #y_factor = 1 because putting it at grism resolution and then will be oversampled accordingly in the grism module
 
 	#run pysersic fit to get morphological parameters
-    if mock_params == None:
-        path_output = 'fitting_results/' + output
-    else: 
-        test = mock_params['test']
-        j = mock_params['j']
-        path_output = 'testing/' + str(test) + '/'
-        ID = j
+	if mock_params == None:
+		path_output = 'fitting_results/' + output
+	else: 
+		test = mock_params['test']
+		j = mock_params['j']
+		path_output = 'testing/' + str(test) + '/'
+		ID = j
 	
-    
-    if grism_object == None:
-
-        half_step = (delta_wave / wave_factor)*(wave_factor//2)
-        wave_space_model = np.arange(wave_space[0]- half_step, wave_space[-1] + delta_wave + half_step, delta_wave / wave_factor)
-
-        im_shape = obs_map.shape[0]*factor
-        im_scale = 0.0629/factor #in arcsec/pixel
 	
-        #the input index_max should be the index of the last element of the array +1 (since that is how array cropping works)
-        #setting by default the dispersion center at the center of the image in its original resolution 
-        icenter = jcenter = obs_map.shape[0]//2
-        grism_object = grism_dev.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
-				       grism_filter = grism_filter, grism_module = module, grism_pupil = 'R', PSF = PSF)
+	if grism_object == None:
+
+		half_step = (delta_wave / wave_factor)*(wave_factor//2)
+		wave_space_model = np.arange(wave_space[0]- half_step, wave_space[-1] + delta_wave + half_step, delta_wave / wave_factor)
+
+		im_shape = obs_map.shape[0]*factor
+		im_scale = 0.0629/factor #in arcsec/pixel
+	
+		#the input index_max should be the index of the last element of the array +1 (since that is how array cropping works)
+		#setting by default the dispersion center at the center of the image in its original resolution 
+		icenter = jcenter = obs_map.shape[0]//2
+		grism_object = grism_dev.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
+					   grism_filter = grism_filter, grism_module = module, grism_pupil = 'R', PSF = PSF)
 
 
 
-    x0_vel = jcenter
-    y0_vel = icenter
+	x0_vel = jcenter
+	y0_vel = icenter
 
 
 
-    len_wave = int(
-        (wave_space[len(wave_space)-1]-wave_space[0])/(delta_wave/wave_factor))
-    wave_space = jnp.linspace(
-        wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
+	len_wave = int(
+		(wave_space[len(wave_space)-1]-wave_space[0])/(delta_wave/wave_factor))
+	wave_space = jnp.linspace(
+		wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
 
-    # take x0 and y0 from the pre-processing unless specified otherwise in the config file
-    if x0 == None:
-        x0 = jcenter
-    if y0 == None:
-        y0 = icenter
+	# take x0 and y0 from the pre-processing unless specified otherwise in the config file
+	if x0 == None:
+		x0 = jcenter
+	if y0 == None:
+		y0 = icenter
 
 
 	
-    # cute the S/N to max 20: #try without this
-    SN_max = 20
-    obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
+	# cute the S/N to max 20: #try without this
+	SN_max = 20
+	obs_error = jnp.where(jnp.abs(obs_map/obs_error) > SN_max, obs_map/SN_max, obs_error)
 
-    if model_name == 'Disk':
-        kin_model = models.DiskModel()
-    elif model_name == 'Disk_prior':
-        kin_model = models.DiskModel_withPrior()
-    elif model_name == 'Merger':
-        kin_model = models.Merger()
+	if model_name == 'Disk':
+		kin_model = models.DiskModel()
+	else:
+		raise ValueError(f"Model {model_name} is not supported. Supported models are: Disk.")
 	
 
 
-    # plt.show()
-    inclination = None
-    r_eff = None
-    r_full_grism = None
-    PA_grism = None
-    PA_morph = None
-    kin_model.set_bounds(direct, direct_error, broad_band, flux_bounds, flux_type, flux_threshold, PA_sigma,i_bounds, Va_bounds, r_t_bounds, sigma0_bounds, y_factor, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism, delta_wave, wavelength)
+	# plt.show()
+	inclination = None
+	r_eff = None
+	r_full_grism = None
+	PA_grism = None
+	PA_morph = None
+	kin_model.set_bounds((obs_map.shape[0], obs_map.shape[0]), factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism)
 
-    return redshift, wavelength, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor
+	return redshift, wavelength, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor
 
 
 ########## unused functions bins below - typically relevant for the non-parametric fitting but useless in the parametric!! ###########
