@@ -257,8 +257,8 @@ class Disk():
 
 		#because the F115W is fit with the 0.03 resolution, r_eff is twice too big
 		#also using Natalia's fit to convert from near-UV to Ha sizes and for the scatter/uncertainty
-		nUV_to_Ha = 10**0.2
-		nUV_to_Ha_std = 10**0.171
+		nUV_to_Ha = 1 #10**0.2
+		nUV_to_Ha_std = 0 #10**0.171
 		#put the r_eff in kpc
 		r_eff_kpc = py_table['r_eff_q50'][0]*kpc_per_pixel
 		r_eff_kpc_err = (((py_table['r_eff_q84'][0] - py_table['r_eff_q50'][0]) + (py_table['r_eff_q50'][0] - py_table['r_eff_q16'][0]))/2)*kpc_per_pixel
@@ -267,7 +267,7 @@ class Disk():
 		r_eff_Ha = r_eff_UV*nUV_to_Ha
 		r_eff_UV_err = ((py_table['r_eff_q84'][0] - py_table['r_eff_q50'][0]) + (py_table['r_eff_q50'][0] - py_table['r_eff_q16'][0]))/4
 		#combine the uncertainties from measurements and scaling relation
-		r_eff_std = r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)
+		r_eff_std = r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)*2 #adding uncertainity of 2 to broaden prior
 
 		#compute hard bounds for r_eff in kpc to not be too small or too big
 		r_eff_min_kpc = 0.1 
@@ -333,7 +333,7 @@ class Disk():
 
 		self.amplitude_mu = amplitude
 		self.amplitude_std = amplitude_std
-		self.n_mu = n #*2 #just testing for Erica's
+		self.n_mu = n 
 		self.n_std = n_std
 		self.xc_morph = xc_morph
 		self.xc_std = xc_std
@@ -465,7 +465,6 @@ class Disk():
 		"""
 			Sample all of the parameters needed to model a disk velocity field
 		"""
-
 
 		unscaled_PA = numpyro.sample('unscaled_PA', dist.Normal())
 		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std*4 + self.PA_morph_mu) #giving more freedom to the kinematic PA! it's really the morph one that has to be well constrained
