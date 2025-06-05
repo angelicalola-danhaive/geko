@@ -7,11 +7,9 @@ Put all of the necessary post-processing functions here
 __all__ = ['process_results']
 
 # imports
-from . import  preprocess as pre
+from . import  preprocess_dev as pre
 from . import  fitting as fit
-from . import  models
-from . import  grism
-from . import  plotting
+
 from . import  utils
 
 from matplotlib import pyplot as plt
@@ -150,9 +148,7 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	"""
 
 	#pre-process the galaxy data
-	z_spec,wavelength, direct,direct_error, obs_map, obs_error, model_name, kin_model, grism_object, y0_grism, x0_grism, \
-	num_samples, num_warmup, step_size, target_accept_prob,  \
-	wave_space, delta_wave, index_min, index_max, factor  = pre.run_full_preprocessing(output, master_cat, line, mock_params)
+	z_spec, wavelength, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor  = pre.run_full_preprocessing(output, master_cat, line, mock_params)
 
 	#load inference data
 	if mock_params is None:
@@ -166,9 +162,11 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	data = fit.Fit_Numpyro(obs_map = obs_map, obs_error = obs_error, grism_object = grism_object, kin_model = kin_model, inference_data = inf_data , parametric = parametric)
 	inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object,parametric)
 	#define the wave_space
+	index_min = grism_object.index_min
+	index_max = grism_object.index_max
 	len_wave = int((wave_space[len(wave_space)-1] - wave_space[0])/(delta_wave))
 	wave_space = jnp.linspace(wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
-	wave_space = wave_space[index_min:index_max+1]
+	wave_space = wave_space[index_min:index_max]
 
 	#save the posterior of the velocity at the effective radius
 	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
