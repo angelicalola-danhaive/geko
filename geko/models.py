@@ -698,7 +698,7 @@ class DiskModel(KinModels):
 		# obs_masked = jnp.where(mask == 1, obs_map, 0)
 		# obs_error_masked = jnp.where(mask == 1, obs_error, 1e6)
 
-		obs_error_masked = jnp.where(mask == 1, obs_error, 1e6)
+		obs_error_masked = obs_error #jnp.where(mask == 1, obs_error, 1e6)
 
 
 
