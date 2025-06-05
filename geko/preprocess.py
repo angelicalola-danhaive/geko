@@ -1176,9 +1176,10 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
     
     if grism_object == None:
         wave_space = jnp.linspace(wave_space[0], wave_space[len(wave_space)-1], len(wave_space)*wave_factor)
+	#the input index_max should be the index of the last element of the array +1 (since that is how array cropping works)
         grism_object = grism.Grism(direct=direct, direct_scale=0.0629/y_factor, icenter=icenter, jcenter=jcenter, segmentation=None, factor=factor, y_factor=y_factor,
                             xcenter_detector=xcenter_detector, ycenter_detector=ycenter_detector, wavelength=wavelength, redshift=redshift,
-                            wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max)*wave_factor,
+                            wave_space=wave_space, wave_factor=wave_factor, wave_scale=delta_wave/wave_factor, index_min=(index_min)*wave_factor, index_max=(index_max+1)*wave_factor,
                             grism_filter=grism_filter, grism_module=module, grism_pupil='R', PSF = PSF)
 
     # inclination, py_PA, phot_PA, r_eff, x0_vel, y0_vel = py.run_pysersic_fit(filter = grism_filter, id = ID, path_output = path_output, im = direct, sig = direct_error, psf = PSF, type = 'image', sigma_rms = 3.0)

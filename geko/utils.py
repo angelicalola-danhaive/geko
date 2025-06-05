@@ -565,8 +565,8 @@ def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual = None):
     #make the prior array based on the shape of another prior from inf_data
     for i in [0,1]:
         for sample in range(num_samples):
-            x = np.linspace(0 - kin_model.x0_vel, grism_object.direct.shape[1]-1 - kin_model.x0_vel, grism_object.direct.shape[1]*grism_object.factor)
-            y = np.linspace(0 - 15, grism_object.direct.shape[0]-1 - 15, grism_object.direct.shape[0]*grism_object.factor)
+            x = np.linspace(0 - kin_model.x0_vel_mean, kin_model.im_shape[1]-1 - kin_model.x0_vel_mean, kin_model.im_shape[1]*kin_model.factor)
+            y = np.linspace(0 - kin_model.y0_vel_mean, kin_model.im_shape[0]-1 - kin_model.y0_vel_mean, kin_model.im_shape[0]*kin_model.factor)
             X, Y = np.meshgrid(x, y)
             if re_manual is not None:
                 re = re_manual

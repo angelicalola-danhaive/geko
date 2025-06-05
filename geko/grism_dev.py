@@ -24,31 +24,19 @@ from . import utils
 
 import numpy as np
 from astropy.io import ascii
-from astropy import wcs
-from astropy.io import fits
 from scipy import interpolate
 from scipy.constants import c #in m/s
-from astropy.coordinates import SkyCoord
-# from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
-from astropy import units as u
-import astropy
+from jax_cosmo.scipy.interpolate import InterpolatedUnivariateSpline
 import math
 from scipy.constants import c
 import matplotlib.pyplot as plt
 from jax.scipy import special
-from jax.scipy.stats import norm
-from scipy import signal
-
-from scipy import ndimage
 
 import jax.numpy as jnp
 from jax import image
 
-from reproject import reproject_adaptive
-from photutils.centroids import centroid_1dg
-from numpy.fft import rfftn, irfftn, fftshift
 from astropy.convolution import Gaussian1DKernel
-from jax.scipy.signal import convolve, fftconvolve
+from jax.scipy.signal import fftconvolve
 
 #import time
 import time 
@@ -58,83 +46,35 @@ jax.config.update('jax_enable_x64', True)
 
 
 class Grism:
-	def __init__(self, direct = None, direct_scale = 0.03, factor = 1, y_factor = 1, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, wave_factor = 1, wave_scale = 0.001, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
+	def __init__(self, im_shape, im_scale = 0.031, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
 
 
-		#direct is the image getting dispersed
-		self.direct = jnp.array(direct) # initiliazed with the real image (not the high res model image)
-		# self.sh = direct.shape
-		self.sh_high = [direct.shape[0]*factor,	direct.shape[1]*factor]  #this is the updated shape of the flux image that will be dispersed (so high res model image)
-		self.direct_scale_high = direct_scale/factor #this is the updated scale of the flux image that will be dispersed (so high res model image)
-		# self.direct_scale = direct_scale
+		self.im_shape = im_shape #used to be self.im_shape
+		self.im_scale = im_scale #used to be self.direct_scale
 
-		self.detector_scale = 0.0629
+		self.set_detector_scale(0.0629) #setting to JWST resolution but made it a function so that it's easy to change as the outside user
 
-		self.direct_factor_high = round(0.0629/self.direct_scale_high)
+		self.factor = int(self.detector_scale/self.im_scale) #factor between the model space and the observation space, spatially
 
+		#this is the RA,DEC center of the galaxy as used in the grism data reduction to define the wavelength space
+		#in order to remain accurate, self.factor should be uneven so that the centroids can be easiliy calculated
+		#these centers are expressed in pixel INDICES on the cutout (original res) image
 		self.icenter = icenter
 		self.jcenter = jcenter
 
-		self.icenter_high = icenter*factor
-		self.jcenter_high = jcenter*factor 
-
-		self.factor = factor
-		self.wave_factor = wave_factor
-		self.y_factor = y_factor
-
-		#segmentation map over the object pixels that need to be considered
-		# self.seg = jnp.array(segmentation)
-
-		# #full 1048x1048 image of the dispersion field
-		# self.detector_image = detector_image
 
 		#initialize attributes
 
 		#center of the object on the detector image
-		self.xcenter_detector = xcenter_detector 
-		self.ycenter_detector =  ycenter_detector
+		self.xcenter_detector = 1024 #xcenter_detector 
+		self.ycenter_detector =  1024 # ycenter_detector
 
-		# self.detector_xmin = self.xcenter_detector - (self.jcenter_high-1)/self.direct_factor_high
-		# self.detector_xmax = self.xcenter_detector + (self.sh_high[1]-1-self.jcenter_high)/self.direct_factor_high
-
-		self.detector_xmin = self.xcenter_detector - self.jcenter/y_factor
-		self.detector_xmax = self.xcenter_detector + (self.direct.shape[0]-1-self.jcenter)/y_factor
-		detector_x_space_low = jnp.linspace(self.detector_xmin, self.detector_xmax, direct.shape[0])
-		spacing = detector_x_space_low[1] - detector_x_space_low[0]
-		# print(detector_x_space_low)
-		# Create new positions at twice the resolution
-		# new_spacing = spacing / factor
-		# detector_x_space_high = np.arange(detector_x_space_low[0] - new_spacing/2, 
-		# 						detector_x_space_low[-1] + new_spacing, 
-		# 						new_spacing)
-		# if factor == 1:
-		# 	self.detector_x_space = detector_x_space_low
-		# else:
-		# 	self.detector_x_space = detector_x_space_high
-
-		# self.detector_x_space = jnp.linspace(self.detector_xmin, self.detector_xmax, self.sh_high[0])
-		detector_x_space_low_2d = jnp.reshape(detector_x_space_low, (1, direct.shape[0]))
-
-		self.detector_x_space = image.resize(detector_x_space_low_2d, (1,self.sh_high[0]), method = 'linear')[0]
-
-		# print('det x space: ', self.detector_x_space)
-
-		# self.detector_position = self.detector_x_space * jnp.ones_like(np.zeros( (self.sh[0]*factor,1) ))
-		# self.detector_position = self.detector_x_space * jnp.ones_like(jnp.zeros( (self.sh[0]*factor,1) ))
-		self.detector_position = self.detector_x_space * jnp.ones_like(jnp.zeros( (self.sh_high[0],1) ))
-
-
-		# print(self.detector_position)
-
-		#these are already in the high model
-		self.wave_scale = wave_scale
+		#create the detector space 
+		self.init_detector()
 		
-		self.wave_space = wave_space 
-		# print('wave space grism: ', wave_space)
-		#make a higer res wave_space => the computed disp space will also be higher res
-		# wave_min = wave_space[0]
-		# wave_max = wave_space[len(self.wave_space)-1]
-		# self.wave_space = jnp.linspace(wave_min, wave_max + wave_scale, int((wave_max-wave_min)/ self.wave_scale))
+		self.wave_space = wave_space #already in the model resolution
+
+		self.wave_scale = jnp.diff(self.wave_space)[0] #in microns, this is the scale of the wavelength space in the model
 
 		self.index_min = index_min
 		self.index_max = index_max
@@ -145,38 +85,42 @@ class Grism:
 		self.module_lsf = grism_module
 		self.pupil = grism_pupil
 
+		#load the coefficients needed for the trace and dispersion
 		self.load_coefficients()
 
 		self.load_poly_factors(*self.w_opt)
 		self.load_poly_coefficients()
 
-		# self.sh_beam = (self.sh[0]*factor,self.wave_space.shape[0])
-		self.sh_beam = (self.sh_high[0],self.wave_space.shape[0])
+		#initialize model grism detector cutout
+		self.sh_beam = (self.im_shape,self.wave_space.shape[0])
 		#full grism array
 		self.grism_full = jnp.zeros(self.sh_beam)
 
-		
 
 		self.get_trace()
 
-		# self.dx_of_lambda = interpolate.UnivariateSpline(self.wave_space[jnp.argsort(self.disp_space)], self.disp_space[jnp.argsort(self.disp_space)], s = 0, k = 1)
-
-		# self.dx_to_wave = interpolate.UnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], self.wave_space[jnp.argsort(self.disp_space)], s = 0, k = 1)
-
 		self.compute_lsf_new()
-		# print(self.sigma_v_lsf)
-
-		self.set_sensitivity()
 
 		self.compute_PSF(PSF)
 
-		# disp_grid = self.grism_dispersion(self.wavelength)
-		# print(np.diff(disp_grid))
 		self.set_wave_array()
 	
 	def __str__(self):
-		return 'Grism object: \n' + ' - direct shape: ' + str(self.sh_high) + '\n - grism shape: ' + str(self.sh_beam) + '\n - wave_scale = ' + str(self.wave_scale) + '\n - factor = ' + str(self.factor) + '\n - wave_factor = ' + str(self.wave_factor) + '\n - i_center = ' + str(self.icenter) + '\n - j_center = ' + str(self.jcenter)
+		return 'Grism object: \n' + ' - direct shape: ' + str(self.im_shape) + '\n - grism shape: ' + str(self.sh_beam) + '\n - wave_scale = ' + str(self.wave_scale) + '\n - factor = ' + str(self.factor) + '\n - i_center = ' + str(self.icenter) + '\n - j_center = ' + str(self.jcenter)
 
+	def init_detector(self):
+		self.detector_xmin = self.xcenter_detector - self.jcenter
+		self.detector_xmax = self.xcenter_detector + (self.im_shape//self.factor-1-self.jcenter) #need to check that this still works but should do!
+
+		detector_x_space_low = jnp.linspace(self.detector_xmin, self.detector_xmax, int(self.im_shape//self.factor))
+
+		detector_x_space_low_2d = jnp.reshape(detector_x_space_low, (1, int(self.im_shape//self.factor)))
+
+		#oversampling it to high resolution
+		self.detector_space_1d = image.resize(detector_x_space_low_2d, (1,self.im_shape), method = 'linear')[0] #taking only the first row since all rows are the same - and I want it in 1D
+
+		#the position on the detector of each pixel in the high res model
+		self.detector_space_2d = self.detector_space_1d * jnp.ones_like(jnp.zeros( (self.im_shape,1) ))
 
 	def load_coefficients(self):
 		'''
@@ -203,23 +147,23 @@ class Grism:
 		if tmp_filter in ['F277W', 'F356W']: disp_filter = 'F322W2'
 		else: disp_filter = tmp_filter
 		#no ../ because the open() function reads from terminal directory (not module directory)
-		tb_order23_fit_AR = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'R'))
+		tb_order23_fit_AR = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'R'))
 		fit_opt_fit_AR, fit_err_fit_AR = tb_order23_fit_AR['col0'].data, tb_order23_fit_AR['col1'].data
-		tb_order23_fit_BR = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'R'))
+		tb_order23_fit_BR = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'R'))
 		fit_opt_fit_BR, fit_err_fit_BR = tb_order23_fit_BR['col0'].data, tb_order23_fit_BR['col1'].data
-		tb_order23_fit_AC = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'C'))
+		tb_order23_fit_AC = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'A', 'C'))
 		fit_opt_fit_AC, fit_err_fit_AC = tb_order23_fit_AC['col0'].data, tb_order23_fit_AC['col1'].data
-		tb_order23_fit_BC = ascii.read('../nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'C'))
+		tb_order23_fit_BC = ascii.read('nircam_grism/FS_grism_config/DISP_%s_mod%s_grism%s.txt' % (disp_filter, 'B', 'C'))
 		fit_opt_fit_BC, fit_err_fit_BC = tb_order23_fit_BC['col0'].data, tb_order23_fit_BC['col1'].data
 
 		### grism dispersion parameters:
-		tb_fit_displ_AR = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "R"))
+		tb_fit_displ_AR = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "R"))
 		w_opt_AR, w_err_AR = tb_fit_displ_AR['col0'].data, tb_fit_displ_AR['col1'].data
-		tb_fit_displ_BR = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "R"))
+		tb_fit_displ_BR = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "R"))
 		w_opt_BR, w_err_BR = tb_fit_displ_BR['col0'].data, tb_fit_displ_BR['col1'].data
-		tb_fit_displ_AC = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "C"))
+		tb_fit_displ_AC = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('A', "C"))
 		w_opt_AC, w_err_AC = tb_fit_displ_AC['col0'].data, tb_fit_displ_AC['col1'].data
-		tb_fit_displ_BC = ascii.read('../nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "C"))
+		tb_fit_displ_BC = ascii.read('nircam_grism/FS_grism_config/DISPL_mod%s_grism%s.txt' % ('B', "C"))
 		w_opt_BC, w_err_BC = tb_fit_displ_BC['col0'].data, tb_fit_displ_BC['col1'].data
 
 		### list of module/pupil and corresponding tracing/dispersion function:
@@ -228,7 +172,7 @@ class Grism:
 		list_w_opt       = np.array([w_opt_AR, w_opt_BR, w_opt_AC, w_opt_BC])
 
 		### Sensitivity curve:
-		dir_fluxcal = '../nircam_grism/all_wfss_sensitivity/'
+		dir_fluxcal = 'nircam_grism/all_wfss_sensitivity/'
 		tb_sens_AR = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat' % (disp_filter, 'A', 'R'))
 		tb_sens_BR = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat'% (disp_filter, 'B', 'R'))
 		tb_sens_AC = ascii.read(dir_fluxcal + '%s_mod%s_grism%s_sensitivity.dat' % (disp_filter, 'A', 'C'))
@@ -244,44 +188,20 @@ class Grism:
 		self.WRANGE = WRANGE
 		self.f_sens = list_f_sens[list_mod_pupil == self.module + self.pupil][0]
 
-	def set_wave_array(self):
-
-		#disperse each pixel with wavelength self.wavelength (and zero velocity)
-		dispersion_indices = self.grism_dispersion(self.wavelength)
-		# print('dispersion indices: ', dispersion_indices)
-		# print(self.detector_x_space[0])
-		# print(self.xcenter_detector)
-		dispersion_indices += (self.detector_x_space - self.xcenter_detector)
-		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
-		# self.wavs = self.wave_space[jnp.argsort(self.wave_space)] #temporary for testing - need to sort this
-		self.wave_array = self.wavs[wave_indices]
-		# print(self.wave_scale*self.direct.shape[0]//2)
-		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
-		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]//2), self.direct.shape[0]*self.factor)
-		# wave_array_low = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(self.jcenter), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]-self.jcenter-1), self.direct.shape[0]) 
-		# spacing = wave_array_low[1] - wave_array_low[0]
-    
-		# # Create new positions at twice the resolution
-		# new_spacing = spacing / self.factor
-		# wave_array_high = np.arange(wave_array_low[0] - new_spacing/2, 
-		# 						wave_array_low[-1] + new_spacing, 
-		# 						new_spacing)
-		# if self.factor == 1:
-		# 	self.wave_array = wave_array_low
-		# else:
-		# 	self.wave_array = wave_array_high
-		
-		# self.wave_array = jnp.linspace(self.wavelength - (self.wave_scale*self.wave_factor)*(15), self.wavelength + (self.wave_scale*self.wave_factor)*(self.direct.shape[0]-15-1), self.direct.shape[0]*self.factor)
-		# print('wave array: ', self.wave_array)
-		# print('det space: ', self.detector_x_space)
 
 	def get_trace(self):
+
+		'''
+		Assuming a position on the detector for the galaxy (which we assume to be the center of the detector because we are looking at combined grism data), 
+		compute the dispersion space of the grism image, i.e. where does the central pixel end up on the detector if emitting at each wavelength in wave_space
+
+		Return/Compute:
+
+		-self.wavs: the wavelength corresponding to each pixel in the grism image, in the ref frame of the central pixel
+		'''
 		xpix = self.xcenter_detector
 		ypix = self.ycenter_detector
 		wave = self.wave_space
-
-		# wave_low = jnp.arrange(wave_high[0], wave_high[-1], self.wave_scale*self.wave_factor)
-		# wave= wave_low
 
 		xpix -= 1024
 		ypix -= 1024
@@ -300,23 +220,31 @@ class Grism:
 		wave += 3.95
 
 		#create a dx space centered on 0 where your pixel is in the direct image, evenly spaced
-		self.dxs = jnp.arange(jnp.min(self.disp_space), jnp.max(self.disp_space), 1/self.wave_factor)  #- self.xcenter_detector
-		# print('dx central pixel: ', self.dxs)
-		#obtain the wavelength corresponding to each of those pixels
-
-		#commenting these 2 out for now because they are not being used and the spline from jax_cosmo gave me trouble in the past I think
-
+		delta_dx = (jnp.max(self.disp_space) - jnp.min(self.disp_space))/ (self.disp_space.shape[0]-1) #the -2 is because you need to divide by the number of INTERVALS
+		self.dxs = jnp.arange(jnp.min(self.disp_space), jnp.max(self.disp_space) + delta_dx, delta_dx)
 		self.inverse_wave_disp = InterpolatedUnivariateSpline(self.disp_space[jnp.argsort(self.disp_space)], wave[jnp.argsort(self.disp_space)], k = 1)	
 		self.wavs = self.inverse_wave_disp(self.dxs)
-		# print('self.wavs: ', self.wavs)
-		# print('wavelengths: ', np.diff(self.wavs))
-		
-		# self.disp_space = jnp.linspace(self.disp_space_low[0], self.disp_space_low[-1], self.disp_space_low.shape[0]*self.wave_factor)
 
-		# print('disp_space min max: ', self.disp_space[0], self.disp_space[-1])
+		return self.dxs, self.disp_space
 
-	def set_wavelength(self, wavelength):
-		self.wavelength = wavelength
+	def set_wave_array(self):
+		'''
+			Compute the effective central wavelength of each pixel on the plane of the central pixel (i.e. how much are they spatially separated in wavelength space)
+			Steps:
+			1. Disperse each pixel with wavelength self.wavelength (and zero velocity) and see where it ends up on the detector
+			2. Find the wavelength corresponding to each of those pixels (in the ref frame of the central pixels)
+
+		'''
+
+		#disperse each pixel with wavelength self.wavelength (and zero velocity)
+		dispersion_indices = self.grism_dispersion(self.wavelength)
+
+		#put the dxs in the rest frame of the central pixel (since otherwise they are dx wrt to their original pixel in self.detector_space_1d)
+		dispersion_indices += (self.detector_space_1d - self.xcenter_detector)
+		#for each dx, find the closest in the uniformly distrubuted dxs
+		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
+		#translate this to a wavelength in the rest frame of the central pixel
+		self.wave_array = self.wavs[wave_indices]
 
 	def load_poly_factors(self,a01, a02, a03, a04, a05, a06, b01, b02, b03, b04, b05, b06, c01, c02, c03, d01):
 		self.a01 = a01
@@ -338,14 +266,14 @@ class Grism:
 	
 	def load_poly_coefficients(self):
 
-		xpix = self.detector_position
+		xpix = self.detector_space_2d 
 		# print('xpix: ', xpix[0])
-		ypix = 1024 * jnp.ones_like(xpix)
+		ypix = self.ycenter_detector * jnp.ones_like(xpix) #bcause we are not considering vertical dys, we can set this as if they are all on the same row
 		xpix -= 1024
 		ypix -= 1024
 		xpix2 = xpix**2
 		ypix2 = ypix**2
-
+		#setitng coefficients for the whole grid of the cutout detector
 		self.coef1 = self.a01 + (self.a02 * xpix + self.a03 * ypix) + (self.a04 * xpix2 + self.a05 * xpix * ypix + self.a06 * ypix2)
 		self.coef2 = self.b01 + (self.b02 * xpix + self.b03 * ypix) + (self.b04 * xpix2 + self.b05 * xpix * ypix + self.b06 * ypix2)
 		self.coef3 = self.c01 + (self.c02 * xpix + self.c03 * ypix)
@@ -372,35 +300,9 @@ class Grism:
 
 		return ((self.coef1 + self.coef2 * wave + self.coef3 * wave**2 + self.coef4 * wave**3))
 
+	def set_detector_scale(self, scale):
+		self.detector_scale = scale
 
-	def set_sensitivity(self):
-
-		self.sensitivity = self.f_sens(self.wave_space)
-		self.compute_lsf()
-
-	def set_wave_scale(self, scale):
-
-		'''
-			Sets the scale of the grism image to 'scale'. Modifies all relevant parameters in the class so that when the disperse function is called, 
-			the grism wavelength space has the appropriate scale
-
-			Parameters
-			----------
-
-			Returns
-			----------
-		'''
-
-		self.wave_scale = scale
-		self.sh_beam = (self.sh[0],((self.WRANGE[1]-self.WRANGE[0])/self.wave_scale).astype(int))
-		#full grism array
-		self.grism_full = jnp.zeros(self.sh_beam)
-
-		self.get_trace()
-
-		self.compute_lsf()
-
-		self.set_sensitivity()
 
 	def compute_lsf(self):
 
@@ -415,7 +317,7 @@ class Grism:
 		#returning R for testing purposes
 		return R
 
-	def compute_lsf_new(self):
+	def compute_lsf_new(self):   
 		'''
 			New LSF computed by Fengwu from new data - sum of two Gaussians
 		'''
@@ -460,7 +362,7 @@ class Grism:
 		self.PSF =  self.oversampled_PSF[:,:, jnp.newaxis]
 
 		# velocity_space = jnp.linspace(-1000, 1000, 2001)
-		# self.velocity_space = jnp.broadcast_to(velocity_space[:, jnp.newaxis, jnp.newaxis], (velocity_space.size, self.sh_high[0], self.sh_high[0]))
+		# self.velocity_space = jnp.broadcast_to(velocity_space[:, jnp.newaxis, jnp.newaxis], (velocity_space.size, self.im_shape, self.im_shape))
 		gaussian_kernel = Gaussian1DKernel(float(self.sigma_lsf/self.wave_scale))
 		LSF = gaussian_kernel.array
 		LSF = LSF[LSF.shape[0]//2 - 5:LSF.shape[0]//2 + 5]
@@ -480,223 +382,250 @@ class Grism:
 		J_min = self.index_min
 		J_max = self.index_max
 
-		# wave_centers = self.wavelength*(1  + V/(c/1000) )
+		#self.wave_array contains the wavelength of each pixel in the grism image, in the ref frame of the central pixel
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
-		wave_sigmas = self.wavelength*(D/(c/1000) ) #*(1/2.36)
-		# print('wave_centers: ', wave_centers[0,0])
-		# print('wave_sigmas: ', wave_sigmas[0,0])
+		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
+
 		sigma_LSF = self.sigma_lsf
-		# print('sigma_LSF: ', sigma_LSF)
-		# print('wave_sigma: ', wave_sigmas)
-		# print('sigma_LSF: ', sigma_LSF)
-		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) #*(1/2.36)
+
+		#set the effective dispersion which also accounts for the LSF
+		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
+
+		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
 		sigma = wave_sigmas_eff[:,:,jnp.newaxis]
-
-		wave_space_crop = self.wave_space[J_min:J_max+1*self.wave_factor]
+		
+		#compute the edges of the wave space in order to evaluate the gaussian at those points - focusing only on the region of interest
+		wave_space_crop = self.wave_space[J_min:J_max]
 		wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
 		wave_space_edges_prov2 = jnp.insert(wave_space_edges_prov, 0, wave_space_edges_prov[0] - jnp.diff(wave_space_crop)[0])
 		wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
-		# print(sigma) 
-		# print(jnp.exp(-0.5*((self.wave_space[jnp.newaxis, jnp.newaxis, :]-mu)**2/sigma**2)))
-		# print(jnp.sqrt(2.0*jnp.pi)*sigma)
-		# cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*(((self.wave_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)/sigma)**2))/(jnp.sqrt(2.0*jnp.pi)*sigma)*1e-3
+
+
 		cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
 		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		gaussian_matrix_cut = gaussian_matrix # [:,:, J_min:J_max+1*self.wave_factor]
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
-		# plt.plot(self.wave_space,jnp.exp(-0.5*((self.wave_space-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) )
-		# plt.show()
-		# print(self.wave_space.shape)
-		# print(self.wavs.shape)
-		# cube = cube_full[:,:,J_min:J_max+1*self.wave_factor]
-		psf_cube = fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
 
-		grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)
-		 #grism_spectra_padded[:, 62:-62]
-		#remove all pixels with flux below 1e-6
-		# grism_full = jnp.where(grism_full < 1e-5, 0, grism_full)
-		# plt.imshow(grism_full, origin = 'lower')
-		# plt.colorbar()
-		# plt.show()
+		cube = F[:,:,jnp.newaxis]*gaussian_matrix
+
+		psf_cube = fftconvolve(cube, self.PSF, mode='same') 
+		#collapse across the x axis
+		grism_full = jnp.sum(psf_cube, axis = 1) 
 		return grism_full
 	
-	def disperse_mock(self, F, V, D):
-		'''
-			Dispersion function going from flux space F to grism space G
-		'''
+	#unused functions - if not needed REMOVE
+	#if keep - then they need to be updated accordingly becasue they are not up to date!!!
 
-		J_min = self.index_min
-		J_max = self.index_max
 
-		# wave_centers = self.wavelength*(1  + V/(c/1000) )
-		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
-		wave_sigmas = self.wavelength*(D/(c/1000) ) #*(1/2.36)
-		# print('wave_centers: ', wave_centers[0,0])
-		# print('wave_sigmas: ', wave_sigmas[0,0])
-		sigma_LSF = self.sigma_lsf
-		# print('sigma_LSF: ', sigma_LSF)
-		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) #*(1/2.36)
-		mu = wave_centers[:,:,jnp.newaxis]
-		sigma = wave_sigmas_eff[:,:,jnp.newaxis]
+	# def disperse_mock(self, F, V, D):
+	# 	'''
+	# 		Dispersion function going from flux space F to grism space G
+	# 	'''
 
-		wave_space_crop = self.wave_space[J_min:J_max+1*self.wave_factor]
-		wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
-		wave_space_edges_prov2 = jnp.insert(wave_space_edges_prov, 0, wave_space_edges_prov[0] - jnp.diff(wave_space_crop)[0])
-		wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
-		# print(sigma) 
-		# print(jnp.exp(-0.5*((self.wave_space[jnp.newaxis, jnp.newaxis, :]-mu)**2/sigma**2)))
-		# print(jnp.sqrt(2.0*jnp.pi)*sigma)
-		# cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*(((self.wave_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)/sigma)**2))/(jnp.sqrt(2.0*jnp.pi)*sigma)*1e-3
-		cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		gaussian_matrix_cut = gaussian_matrix # [:,:, J_min:J_max+1*self.wave_factor]
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
-		# plt.plot(self.wave_space,jnp.exp(-0.5*((self.wave_space-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) )
-		# plt.show()
-		# print(self.wave_space.shape)
-		# print(self.wavs.shape)
-		# cube = cube_full[:,:,J_min:J_max+1*self.wave_factor]
-		psf_cube = fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
+	# 	J_min = self.index_min
+	# 	J_max = self.index_max
 
-		# grism_spectra = jnp.zeros((cube.shape[1],cube.shape[0]))
-		# grism_spectra_padded = jnp.pad(grism_spectra, [(0, 0), (cube.shape[2],cube.shape[2])], mode='constant')
-		# # at this stage, we need to use the instrument dispersion function
+	# 	# wave_centers = self.wavelength*(1  + V/(c/1000) )
+	# 	wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
+	# 	wave_sigmas = self.wavelength*(D/(c/1000) ) #*(1/2.36)
+	# 	# print('wave_centers: ', wave_centers[0,0])
+	# 	# print('wave_sigmas: ', wave_sigmas[0,0])
+	# 	sigma_LSF = self.sigma_lsf
+	# 	# print('sigma_LSF: ', sigma_LSF)
+	# 	wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) #*(1/2.36)
+	# 	mu = wave_centers[:,:,jnp.newaxis]
+	# 	sigma = wave_sigmas_eff[:,:,jnp.newaxis]
+
+	# 	wave_space_crop = self.wave_space[J_min:J_max+1*self.wave_factor]
+	# 	wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
+	# 	wave_space_edges_prov2 = jnp.insert(wave_space_edges_prov, 0, wave_space_edges_prov[0] - jnp.diff(wave_space_crop)[0])
+	# 	wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
+	# 	# print(sigma) 
+	# 	# print(jnp.exp(-0.5*((self.wave_space[jnp.newaxis, jnp.newaxis, :]-mu)**2/sigma**2)))
+	# 	# print(jnp.sqrt(2.0*jnp.pi)*sigma)
+	# 	# cube= F[:, :, jnp.newaxis]*jnp.exp(-0.5*(((self.wave_space[jnp.newaxis, jnp.newaxis, J_min:J_max+1*self.wave_factor]-mu)/sigma)**2))/(jnp.sqrt(2.0*jnp.pi)*sigma)*1e-3
+	# 	cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+	# 	gaussian_matrix_cut = gaussian_matrix # [:,:, J_min:J_max+1*self.wave_factor]
+	# 	cube = F[:,:,jnp.newaxis]*gaussian_matrix_cut
+	# 	# plt.plot(self.wave_space,jnp.exp(-0.5*((self.wave_space-mu)**2/sigma**2))/(jnp.sqrt(2.0*jnp.pi)*sigma) )
+	# 	# plt.show()
+	# 	# print(self.wave_space.shape)
+	# 	# print(self.wavs.shape)
+	# 	# cube = cube_full[:,:,J_min:J_max+1*self.wave_factor]
+	# 	psf_cube = fftconvolve(cube, self.PSF, mode='same') #convolve(cube, self.full_kernel)
+
+	# 	# grism_spectra = jnp.zeros((cube.shape[1],cube.shape[0]))
+	# 	# grism_spectra_padded = jnp.pad(grism_spectra, [(0, 0), (cube.shape[2],cube.shape[2])], mode='constant')
+	# 	# # at this stage, we need to use the instrument dispersion function
 
 		
-		grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)
-		 #grism_spectra_padded[:, 62:-62]
-		#remove all pixels with flux below 1e-6
-		# grism_full = jnp.where(grism_full < 1e-5, 0, grism_full)
-		# plt.imshow(grism_full, origin = 'lower')
-		# plt.colorbar()
-		# plt.show()
-		return grism_full
+	# 	grism_full = jnp.sum(psf_cube, axis = 1) #grism_spectra_padded[:, cube.shape[0]:-cube.shape[0]] #jnp.sum(psf_cube, axis = 1)
+	# 	 #grism_spectra_padded[:, 62:-62]
+	# 	#remove all pixels with flux below 1e-6
+	# 	# grism_full = jnp.where(grism_full < 1e-5, 0, grism_full)
+	# 	# plt.imshow(grism_full, origin = 'lower')
+	# 	# plt.colorbar()
+	# 	# plt.show()
+	# 	return grism_full
 	
-	def compute_gaussian(self, V, D):
+	# def compute_gaussian(self, V, D):
+	# 	'''
+	# 		Add explanation here
+	# 	'''
+
+	# 	# print('V: ', V)
+	# 	# print('D: ', D)
+	# 	#compute the dispersion dx0 of the central pixel 
+	# 	# print(self.wave_space.shape, self.disp_space.shape)
+	# 	# dx0 = jnp.interp(self.wavelength*(1  + V/(c/1000) ), self.wave_space[jnp.argsort(self.disp_space)], self.disp_space[jnp.argsort(self.disp_space)])
+	# 	dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
+	# 	DX = self.detector_space_2d - self.xcenter_detector + dx0 
+	# 	# print(DX.type(), self.disp_space.type(), self.wave_space.type())
+
+	# 	# J = self.compute_disp_index(DX, self.disp_space)
+	# 	# J0 = self.compute_disp_index(dx0, self.disp_space)
+
+	# 	# J= jnp.argmin(jnp.abs(self.disp_space - DX[:,:, None]), axis = 2)
+	# 	# J0 = jnp.argmin(jnp.abs(self.disp_space - dx0[:,:, None]),axis =2)
+
+	# 	J_min = self.index_min
+	# 	J_max = self.index_max
+
+	# 	# J = (jnp.rint(J)).astype(int)
+	# 	# J0 = (jnp.rint(J0)).astype(int)
+
+	# 	# print(J)
+
+
+	# 	#compute the dispersion due to the LSF
+	# 	D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
+	# 	# print('D_LSF = ', D_LSF)
+
+	# 	#add the LSF to the dispersion: 
+	# 	CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
+	# 	DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
+	# 	DX_disp_final = self.detector_space_2d - self.xcenter_detector + DX_disp - DX
+
+
+
+	# 	NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+	# 	# print(NEW_J)
+	# 	# grism_full = jnp.zeros(self.sh_beam)
+	# 	# print(self.sh_beam)
+
+	# 	# mu = self.wave_space[J[:,NEW_K]]
+	# 	# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
+
+	# 	# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
+	# 	# compute the edges of the disp_space array
+
+	# 	disp_space_edges_prov= self.disp_space[1:] - jnp.diff(self.disp_space)/2
+	# 	disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(self.disp_space)[0])
+	# 	disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(self.disp_space)[-1])
+
+	# 	# print(disp_space_edges)
+	# 	# cdf = 0.5* (1 + special.erf( (self.wave_space[NEW_J] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	# prev_wave = self.wave_space[NEW_J] - self.wave_scale
+	# 	# cdf_prev = 0.5* (1 + special.erf( (prev_wave - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	# gaussian_matrix = cdf[:,NEW_K,NEW_J-J_min] - cdf_prev[:,NEW_K,NEW_J-J_min]
+	# 	# print(self.disp_space[NEW_J].shape)
+	# 	# print(mu.shape)
+	# 	# print(sigma.shape)
+
+	# 	# compute the gaussian matrix in 10 times higher resolution and then sample it down
+
+	# 	# dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
+	# 	# DX = self.detector_space_2d - self.xcenter_detector + dx0 
+
+	# 	# J_min = self.index_min
+	# 	# J_max = self.index_max
+
+	# 	# D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
+	# 	# # print('D_LSF = ', D_LSF)
+
+	# 	# #add the LSF to the dispersion: 
+	# 	# CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
+	# 	# DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
+	# 	# DX_disp_final = self.detector_space_2d - self.xcenter_detector + DX_disp - DX
+
+	# 	# disp_space_high = jnp.linspace(self.disp_space[0], self.disp_space[-1], 10*self.disp_space.shape[0])
+	# 	# disp_space_edges_prov= disp_space_high[1:] - jnp.diff(disp_space_high)/2
+	# 	# disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(disp_space_high)[0])
+	# 	# disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(disp_space_high)[-1])
+
+
+	# 	# NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, 34*self.wave_factor*10+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+	# 	# mu = DX[:,NEW_K_cdf]
+	# 	# sigma = DX_disp_final[:,NEW_K_cdf]
+	# 	# cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	# gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+	# 	# # gaussian_matrix_low = np.zeros((14,14,34))
+	# 	# # for i in range(14):
+	# 	# # 	blocks = gaussian_matrix[i].reshape(int(gaussian_matrix[i].shape[0]/(1)), 1, int(gaussian_matrix[i].shape[1]/10), 10)
+	# 	# # 	gaussian_matrix_low[i] = jnp.sum(blocks, axis=(1,3))
+	# 	# plt.imshow(gaussian_matrix[1])
+	# 	# plt.show()
+	# 	# # print('Gauss shape pre :' ,gaussian_matrix.shape)
+	# 	# blocks = gaussian_matrix.reshape((V.shape[0],V.shape[0], int(gaussian_matrix.shape[2]/10), 10))
+	# 	# gaussian_matrix = jnp.sum(blocks, axis=-1)
+	# 	# # print('Gauss shape post :' ,gaussian_matrix.shape)
+
+
+	# 	NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, J_max-J_min+1*self.wave_factor+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
+	# 	# print(NEW_K_cdf)
+	# 	mu = DX[:,NEW_K_cdf]
+	# 	sigma = DX_disp_final[:,NEW_K_cdf]
+	# 	cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
+	# 	gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+	# 	# plt.imshow(gaussian_matrix[14], origin = 'lower')
+	# 	# plt.show()
+	# 	# print(gaussian_matrix.shape)
+	# 	return gaussian_matrix
+
+	# def get_beam_cutout(self, wave_min, wave_max, wave_space, grism_full):
+	# 	'''
+	# 		get cutout of the full grism spectrum from wave_min to wave_max
+	# 		in the implementation these can be taken by finding wave_min and wave_max on the observed 2D image
+
+	# 	'''
+
+	# 	j_min, j_max = self.compute_wave_index(jnp.array([wave_min, wave_max]), wave_space)
+	# 	j_min = 360
+	# 	j_max = 370
+	# 	self.grism_cutout = grism_full[:, j_min:j_max]
+
+	# 	return self.grism_cutout
+
+	# def set_sensitivity(self):
+	
+
+	# 	self.sensitivity = self.f_sens(self.wave_space)
+	# 	self.compute_lsf()
+
+	# def set_wavelength(self, wavelength):
+
+	# 	self.wavelength = wavelength
+
+	# def set_wave_scale(self, scale):
+
 		'''
-			Add explanation here
+			Sets the scale of the grism image to 'scale'. Modifies all relevant parameters in the class so that when the disperse function is called, 
+			the grism wavelength space has the appropriate scale
+
+			Parameters
+			----------
+
+			Returns
+			----------
 		'''
 
-		# print('V: ', V)
-		# print('D: ', D)
-		#compute the dispersion dx0 of the central pixel 
-		# print(self.wave_space.shape, self.disp_space.shape)
-		# dx0 = jnp.interp(self.wavelength*(1  + V/(c/1000) ), self.wave_space[jnp.argsort(self.disp_space)], self.disp_space[jnp.argsort(self.disp_space)])
-		dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
-		DX = self.detector_position - self.xcenter_detector + dx0 
-		# print(DX.type(), self.disp_space.type(), self.wave_space.type())
+		self.wave_scale = scale
+		self.sh_beam = (self.sh[0],((self.WRANGE[1]-self.WRANGE[0])/self.wave_scale).astype(int))
+		#full grism array
+		self.grism_full = jnp.zeros(self.sh_beam)
 
-		# J = self.compute_disp_index(DX, self.disp_space)
-		# J0 = self.compute_disp_index(dx0, self.disp_space)
+		self.get_trace()
 
-		# J= jnp.argmin(jnp.abs(self.disp_space - DX[:,:, None]), axis = 2)
-		# J0 = jnp.argmin(jnp.abs(self.disp_space - dx0[:,:, None]),axis =2)
+		self.compute_lsf()
 
-		J_min = self.index_min
-		J_max = self.index_max
-
-		# J = (jnp.rint(J)).astype(int)
-		# J0 = (jnp.rint(J0)).astype(int)
-
-		# print(J)
-
-
-		#compute the dispersion due to the LSF
-		D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		# print('D_LSF = ', D_LSF)
-
-		#add the LSF to the dispersion: 
-		CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
-		DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
-		DX_disp_final = self.detector_position - self.xcenter_detector + DX_disp - DX
-
-
-
-		NEW_J, NEW_K = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor-1, J_max-J_min+1*self.wave_factor))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-		# print(NEW_J)
-		# grism_full = jnp.zeros(self.sh_beam)
-		# print(self.sh_beam)
-
-		# mu = self.wave_space[J[:,NEW_K]]
-		# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
-
-		# sigma = CORR_D[:, NEW_K]/(c/1000)*self.wave_space[J[:,NEW_K]]
-		# compute the edges of the disp_space array
-
-		disp_space_edges_prov= self.disp_space[1:] - jnp.diff(self.disp_space)/2
-		disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(self.disp_space)[0])
-		disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(self.disp_space)[-1])
-
-		# print(disp_space_edges)
-		# cdf = 0.5* (1 + special.erf( (self.wave_space[NEW_J] - mu)/ (sigma*math.sqrt(2.)) ))
-		# prev_wave = self.wave_space[NEW_J] - self.wave_scale
-		# cdf_prev = 0.5* (1 + special.erf( (prev_wave - mu)/ (sigma*math.sqrt(2.)) ))
-		# gaussian_matrix = cdf[:,NEW_K,NEW_J-J_min] - cdf_prev[:,NEW_K,NEW_J-J_min]
-		# print(self.disp_space[NEW_J].shape)
-		# print(mu.shape)
-		# print(sigma.shape)
-
-		# compute the gaussian matrix in 10 times higher resolution and then sample it down
-
-		# dx0 = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + V/(c/1000) )), *self.w_opt)
-		# DX = self.detector_position - self.xcenter_detector + dx0 
-
-		# J_min = self.index_min
-		# J_max = self.index_max
-
-		# D_LSF = self.sigma_v_lsf*jnp.ones_like(V)
-		# # print('D_LSF = ', D_LSF)
-
-		# #add the LSF to the dispersion: 
-		# CORR_D = jnp.sqrt( D**2 +  D_LSF**2)
-		# DX_disp = self.grism_dispersion((self.xcenter_detector, self.ycenter_detector, self.wavelength*(1  + (V+CORR_D)/(c/1000) )), *self.w_opt)
-		# DX_disp_final = self.detector_position - self.xcenter_detector + DX_disp - DX
-
-		# disp_space_high = jnp.linspace(self.disp_space[0], self.disp_space[-1], 10*self.disp_space.shape[0])
-		# disp_space_edges_prov= disp_space_high[1:] - jnp.diff(disp_space_high)/2
-		# disp_space_edges_prov2 = jnp.insert(disp_space_edges_prov, 0, disp_space_edges_prov[0] - jnp.diff(disp_space_high)[0])
-		# disp_space_edges = jnp.append(disp_space_edges_prov2, disp_space_edges_prov2[-1] + jnp.diff(disp_space_high)[-1])
-
-
-		# NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, 34*self.wave_factor*10+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-		# mu = DX[:,NEW_K_cdf]
-		# sigma = DX_disp_final[:,NEW_K_cdf]
-		# cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
-		# gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		# # gaussian_matrix_low = np.zeros((14,14,34))
-		# # for i in range(14):
-		# # 	blocks = gaussian_matrix[i].reshape(int(gaussian_matrix[i].shape[0]/(1)), 1, int(gaussian_matrix[i].shape[1]/10), 10)
-		# # 	gaussian_matrix_low[i] = jnp.sum(blocks, axis=(1,3))
-		# plt.imshow(gaussian_matrix[1])
-		# plt.show()
-		# # print('Gauss shape pre :' ,gaussian_matrix.shape)
-		# blocks = gaussian_matrix.reshape((V.shape[0],V.shape[0], int(gaussian_matrix.shape[2]/10), 10))
-		# gaussian_matrix = jnp.sum(blocks, axis=-1)
-		# # print('Gauss shape post :' ,gaussian_matrix.shape)
-
-
-		NEW_J_cdf, NEW_K_cdf = jnp.meshgrid( (jnp.rint(jnp.linspace(J_min, J_max+1*self.wave_factor, J_max-J_min+1*self.wave_factor+1))).astype(int) ,  (jnp.rint(jnp.linspace(0, V.shape[1]-1, V.shape[1]))).astype(int)  )
-		# print(NEW_K_cdf)
-		mu = DX[:,NEW_K_cdf]
-		sigma = DX_disp_final[:,NEW_K_cdf]
-		cdf = 0.5* (1 + special.erf( (disp_space_edges[NEW_J_cdf] - mu)/ (sigma*math.sqrt(2.)) ))
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
-		# plt.imshow(gaussian_matrix[14], origin = 'lower')
-		# plt.show()
-		# print(gaussian_matrix.shape)
-		return gaussian_matrix
-
-	def get_beam_cutout(self, wave_min, wave_max, wave_space, grism_full):
-		'''
-			get cutout of the full grism spectrum from wave_min to wave_max
-			in the implementation these can be taken by finding wave_min and wave_max on the observed 2D image
-
-		'''
-
-		j_min, j_max = self.compute_wave_index(jnp.array([wave_min, wave_max]), wave_space)
-		j_min = 360
-		j_max = 370
-		self.grism_cutout = grism_full[:, j_min:j_max]
-
-		return self.grism_cutout
+		self.set_sensitivity()

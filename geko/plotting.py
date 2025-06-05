@@ -316,7 +316,7 @@ def compute_r90(n, r_eff):
     return result.root if result.converged else None
 
 
-def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
+def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
 	# plt.show()
 
 	fig = plt.figure(constrained_layout=True)
@@ -580,7 +580,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	flux_map_ax = fig.add_subplot(gs0[1,2])
 
-	cp = flux_map_ax.pcolormesh(X, Y,np.where(mask ==1, fluxes_mean, np.nan), shading='nearest', cmap = 'BuPu')
+	cp = flux_map_ax.pcolormesh(X, Y,fluxes_mean, shading='nearest', cmap = 'BuPu')
 	# plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
 	# plt.ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
 	flux_map_ax.axis('off')
@@ -643,7 +643,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		alpha = 0.1,
 		max_n_ticks=3)
 	bin_factor = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-	figure = corner.corner(inf_data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0',  'PA_morph','amplitude', 'n', 'r_eff', 'xc_morph', 'yc_morph'],
+	figure = corner.corner(inf_data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0',  'PA_morph','amplitude', 'n', 'r_eff', 'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel'],
 						color='palevioletred', hist_bin_factor = 4, weights = np.ones_like(inf_data.prior['sigma0'].values[0])*2, **CORNER_KWARGS)
 	CORNER_KWARGS = dict(
 		smooth=2,
@@ -656,25 +656,25 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=False,
-		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]', r'$x_{0}$ [px]', r'$y_{0}$ [px]'],
-		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$'],
+		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]', r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]'],
+		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$', r'$x_{0, v}$', r'$y_{0,v}$'],
 		max_n_ticks=3,
 		divergences=False,
 		linewidth=2,
 		title_fmt = '.1f')
 	# truths = { 'PA': PA, 'i': i, 'Va': Va,
 	# 					  'r_t': r_t, 'sigma0': sigma0}
-	corner_range = [0.999, 0.999,[-600,0], [0,10], [60,170], 0.999, 0.999, 0.999,[1,6], 0.999, [14,15.5]]
-	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph','amplitude', 'n', 'r_eff', 'xc_morph', 'yc_morph'],truths = None, truth_color='blue',
-						color='royalblue', fig = figure, hist_bin_factor = 4,range = corner_range,  **CORNER_KWARGS)
+	# corner_range = [0.999, 0.999,[-600,0], [0,10], [60,170], 0.999, 0.999, 0.999,[1,6], 0.999, [14,15.5]]
+	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph','amplitude', 'n', 'r_eff', 'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel'],truths = None, truth_color='blue',
+						color='royalblue', fig = figure, hist_bin_factor = 4, **CORNER_KWARGS) #range = corner_range, 
 
 	
 	#overplot a posteriors colored in green for the last six paramters
 	# corner.overplot(figure, inf_data, group='posterior', var_names=['r_eff', 'xc_morph', 'yc_morph', 'PA_morph', 'amplitude', 'n'], color = 'green', range = corner_range, **CORNER_KWARGS)
 	#set the axis ratio
 	# plt.gca().set(box_aspect=1)
-	plt.savefig('cornerplot.png',	dpi=300)
-	figure_image = plt.imread('cornerplot.png')
+	plt.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png', dpi=300)
+	figure_image = plt.imread('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png')
 	corner_ax.imshow(figure_image, origin = 'upper')
 	corner_ax.axis('off')
 	corner_ax.text(0.6,0.8, r'$\sigma_0 = $' + str(round(sigma0_50,1)) + r'$^{+' + str(round(sigma0_84- sigma0_50, 1)) + r'}' +  r'_{-' + str(round(sigma0_50- sigma0_16, 1)) + r'}$' + r' km/s', transform=corner_ax.transAxes, fontsize=10, va='top', color='black')
@@ -695,6 +695,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# 		fig.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
 	# 	fig.savefig('summary_plots/CONGRESS/' + save_to_folder.split('/')[0] + '_' + name + '.png', dpi=500)
 	# plt.show()
+	fig.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot_text' + '.png', dpi=300)
 	plt.close()
 
 	return ymin,ymax
