@@ -480,10 +480,13 @@ class Disk():
 		unscaled_sigma0 = numpyro.sample('unscaled_sigma0', dist.Uniform())
 		sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*self.D_max)
 
-		y0_vel = 0
-		
 
-		x0_vel = 0
+		unscaled_x0_vel = numpyro.sample('unscaled_x0_vel', dist.Normal())
+		x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.xc_std + self.xc_morph)
+
+
+		unscaled_y0_vel = numpyro.sample('unscaled_y0_vel', dist.Normal())
+		y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.yc_std + self.yc_morph)  
 
 		unscaled_v0 = numpyro.sample('unscaled_v0', dist.Normal())
 		v0 = numpyro.deterministic('v0', unscaled_v0*50)
@@ -499,8 +502,8 @@ class Disk():
 		"""
 
 		self.PA_mean = jnp.array(inference_data.posterior['PA'].median(dim=["chain", "draw"]))
-		self.y0_vel_mean = 15 
-		self.x0_vel_mean = 15 
+		self.y0_vel_mean = jnp.array(inference_data.posterior['y0_vel'].median(dim=["chain", "draw"]))
+		self.x0_vel_mean = jnp.array(inference_data.posterior['x0_vel'].median(dim=["chain", "draw"]))
 		self.v0_mean = jnp.array(inference_data.posterior['v0'].median(dim=["chain", "draw"]))
 		self.r_t_mean = jnp.array(inference_data.posterior['r_t'].median(dim=["chain", "draw"]))
 		self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'].median(dim=["chain", "draw"]))
@@ -518,6 +521,11 @@ class Disk():
 		self.sigma0_84 = jnp.array(inference_data.posterior['sigma0'].quantile(0.84, dim=["chain", "draw"]))
 		self.Va_16 = jnp.array(inference_data.posterior['Va'].quantile(0.16, dim=["chain", "draw"]))
 		self.Va_84 = jnp.array(inference_data.posterior['Va'].quantile(0.84, dim=["chain", "draw"]))
+
+		self.x0_vel_16 = jnp.array(inference_data.posterior['x0_vel'].quantile(0.16, dim=["chain", "draw"]))
+		self.x0_vel_84 = jnp.array(inference_data.posterior['x0_vel'].quantile(0.84, dim=["chain", "draw"]))
+		self.y0_vel_16 = jnp.array(inference_data.posterior['y0_vel'].quantile(0.16, dim=["chain", "draw"]))
+		self.y0_vel_84 = jnp.array(inference_data.posterior['y0_vel'].quantile(0.84, dim=["chain", "draw"]))
 
 		return  self.PA_mean,self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
 
@@ -666,8 +674,8 @@ class DiskModel(KinModels):
 		# print(image_shape//2)
 		# x= jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape)
 		# y = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape)
-		x= jnp.linspace(0 - xc_morph, image_shape - xc_morph - 1, image_shape)
-		y = jnp.linspace(0 - yc_morph, image_shape - yc_morph - 1, image_shape)
+		x= jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape)
+		y = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape)
 		X, Y = jnp.meshgrid(x,y)
 
 		X_grid = image.resize(X, (int(X.shape[0]*grism_object.factor), int(X.shape[1]*grism_object.factor)), method='linear')
@@ -755,10 +763,10 @@ class DiskModel(KinModels):
 		self.r_t_84 = self.disk.r_t_84
 		self.sigma0_16 = self.disk.sigma0_16
 		self.sigma0_84 = self.disk.sigma0_84
-		# self.y0_vel_16 = self.disk.y0_vel_16
-		# self.y0_vel_84 = self.disk.y0_vel_84
-		# self.x0_vel_16 = self.disk.x0_vel_16
-		# self.x0_vel_84 = self.disk.x0_vel_84
+		self.y0_vel_16 = self.disk.y0_vel_16
+		self.y0_vel_84 = self.disk.y0_vel_84
+		self.x0_vel_16 = self.disk.x0_vel_16
+		self.x0_vel_84 = self.disk.x0_vel_84
 		self.v0_16 = self.disk.v0_16
 		self.v0_84 = self.disk.v0_84
 
@@ -778,8 +786,8 @@ class DiskModel(KinModels):
 		self.model_flux = self.fluxes_mean_high
 
 		image_shape =  self.im_shape[0]
-		x= jnp.linspace(0 - self.xc_morph_mean, image_shape - self.xc_morph_mean - 1, image_shape)
-		y = jnp.linspace(0 - self.yc_morph_mean, image_shape - self.yc_morph_mean - 1, image_shape)
+		x= jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape)
+		y = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape)
 		X, Y = jnp.meshgrid(x,y)
 
 		X_grid = image.resize(X, (int(X.shape[0]*grism_object.factor), int(X.shape[1]*grism_object.factor)), method='nearest')
@@ -911,6 +919,11 @@ class DiskModel(KinModels):
 	def log_posterior(self, grism_object, obs_map, obs_error,values = {}):
 		return -(self.log_likelihood(grism_object, obs_map, obs_error,values) + self.log_prior(values))
 	def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None, v_re = None, PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
+		obs_radius = self.r_eff_mean
+		ellip = self.ellip_mean
+		theta_Ha = self.PA_morph_mean
+		n = self.n_mean
+
 		ymin,ymax = plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, v_re, self.fluxes_mean, inf_data, wave_space, x0 = self.x0, y0 = self.y0, factor = 1, direct_image_size = self.im_shape[0], save_to_folder = save_to_folder, name = name, PA = PA, i = i, Va = Va, r_t = r_t, sigma0 = sigma0, obs_radius = obs_radius, ellip = ellip, theta_obs = theta_obs, theta_Ha =theta_Ha, n = n)
 		return ymin, ymax
 
