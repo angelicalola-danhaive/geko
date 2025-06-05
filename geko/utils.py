@@ -369,7 +369,7 @@ def save_fits_image(image, masked_indices, inference_data, filename):
     hdul.writeto(filename, overwrite=True)
     
 
-def load_psf( filter, y_factor, size = 9, psf_folder = '/Users/lola/ASTRO/JWST/grism_project/mpsf_gds/'):
+def load_psf( filter, y_factor, size = 9, psf_folder = 'mpsf_gds/'):
     psf_fits = fits.open(psf_folder + 'mpsf_' + str(filter).lower() + '.fits') 
     psf_full = np.array(psf_fits[0].data)
 

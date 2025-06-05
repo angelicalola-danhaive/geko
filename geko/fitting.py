@@ -176,18 +176,18 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 	num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor = pre.run_full_preprocessing(output, master_cat, line)
 	
 	if parametric:
-		with open('/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output + 'config_real.yaml', 'r') as file:
+		with open('fitting_results/' + output + 'config_real.yaml', 'r') as file:
 			input = yaml.load(file, Loader=yaml.FullLoader)
 		ID = input[0]['Data']['ID']
 		#get the redshift from the master catalog
 		try:
-			pysersic_summary = Table.read('/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
+			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
 		except:
-			pysersic_summary = Table.read('/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output + 'summary_' + str(ID) + '_image_F115W_svi.cat', format='ascii')
+			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F115W_svi.cat', format='ascii')
 		try:	
-			pysersic_grism_summary = Table.read('/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output + 'summary_' + str(ID) + '_grism_F356W_svi.cat', format='ascii')
+			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F356W_svi.cat', format='ascii')
 		except:
-			pysersic_grism_summary = Table.read('/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output + 'summary_' + str(ID) + '_grism_F444W_svi.cat', format='ascii')
+			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F444W_svi.cat', format='ascii')
 
 		kin_model.disk.set_parametric_priors(pysersic_summary, pysersic_grism_summary, z_spec, wavelength, delta_wave)
 	else:
@@ -213,7 +213,7 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 	inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
 
 	# no ../ because the open() function reads from terminal directory (not module directory)
-	inf_data.to_netcdf('/Users/lola/ASTRO/JWST/grism_project/fitting_results/' + output + 'output')
+	inf_data.to_netcdf('fitting_results/' + output + 'output')
 
 	#figure out how to make this work well
 	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric)
