@@ -297,11 +297,11 @@ class Disk():
 		 #because the F115W is fit with the 0.03 resolution, the centroids are twice too big
 		xc_morph = py_table['xc_q50'][0]/2
 		xc_err = ((py_table['xc_q84'][0] - py_table['xc_q50'][0]) + (py_table['xc_q50'][0] - py_table['xc_q16'][0]))/4
-		xc_std = xc_err*2
+		xc_std = xc_err*4 #boosting the uncertainties on the centroids to have a looser prior
 
 		yc_morph = py_table['yc_q50'][0]/2
 		yc_err = ((py_table['yc_q84'][0] - py_table['yc_q50'][0]) + (py_table['yc_q50'][0] - py_table['yc_q16'][0]))/4
-		yc_std = yc_err*2
+		yc_std = yc_err*4 #boosting the uncertainties on the centroids to have a looser prior
 
 		print('Setting parametric priors: ', PA, inclination, r_eff_Ha, n, amplitude, xc_morph, yc_morph)
 
@@ -468,7 +468,7 @@ class Disk():
 
 
 		unscaled_PA = numpyro.sample('unscaled_PA', dist.Normal())
-		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std + self.PA_morph_mu)
+		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std*4 + self.PA_morph_mu) #giving more freedom to the kinematic PA! it's really the morph one that has to be well constrained
 
 		unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())  #* (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
 		Va = numpyro.deterministic('Va', unscaled_Va*(2*self.V_max) - self.V_max)
