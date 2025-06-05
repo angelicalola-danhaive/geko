@@ -180,6 +180,7 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 			input = yaml.load(file, Loader=yaml.FullLoader)
 		ID = input[0]['Data']['ID']
 		#get the redshift from the master catalog
+
 		try:
 			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
 		except:
