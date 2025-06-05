@@ -169,28 +169,9 @@ class Fit_Numpyro():
 		return new_mask
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
-#command line inputs
-parser = argparse.ArgumentParser()
-parser.add_argument('--output', type=str, default='',
-                    help='output folder name')
-parser.add_argument('--line', type=str, default='H_alpha',
-		    		help='line to fit')
-parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_catalog.cat',
-		    		help='master catalog file name')	
-parser.add_argument('--parametric', type=bool, default=False,
-		    		help='parametric flux model or not')		
+def run_geko_fit(output, master_cat, line, parametric=False):
 
-if __name__ == "__main__":
-
-
-	args = parser.parse_args()
-	output = args.output + '/'
-	master_cat = args.master_cat
-	line = args.line
-	parametric = args.parametric
-
-	print('Running geko for the galaxy ID: ', output, ' with the line: ', line, ' and the master catalog: ', master_cat, ' and parametric: ', parametric)
-
+	# ----------------------------------------------------------preprocessing the data------------------------------------------------------------------------
 	z_spec, wavelength,  obs_map, obs_error, model_name, kin_model, grism_object,\
 	num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor = pre.run_full_preprocessing(output, master_cat, line)
 	
@@ -236,6 +217,8 @@ if __name__ == "__main__":
 
 	#figure out how to make this work well
 	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric)
+
+
 
 
 #==============================EXTRA STUFF = NEED TO PUT SOMEWHERE ELSE==================================================
