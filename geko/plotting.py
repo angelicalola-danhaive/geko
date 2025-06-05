@@ -316,7 +316,7 @@ def compute_r90(n, r_eff):
     return result.root if result.converged else None
 
 
-def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
+def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
 	# plt.show()
 
 	fig = plt.figure(constrained_layout=True)
@@ -580,7 +580,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	flux_map_ax = fig.add_subplot(gs0[1,2])
 
-	cp = flux_map_ax.pcolormesh(X, Y,np.where(mask ==1, fluxes_mean, np.nan), shading='nearest', cmap = 'BuPu')
+	cp = flux_map_ax.pcolormesh(X, Y,fluxes_mean, shading='nearest', cmap = 'BuPu')
 	# plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
 	# plt.ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
 	flux_map_ax.axis('off')

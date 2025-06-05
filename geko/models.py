@@ -142,7 +142,6 @@ class KinModels:
 
 		
 
-
 	def set_main_bounds(self, factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism):
 		"""
 		Set the bounds for the model parameters by reading the ones from the config file.
@@ -912,8 +911,7 @@ class DiskModel(KinModels):
 	def log_posterior(self, grism_object, obs_map, obs_error,values = {}):
 		return -(self.log_likelihood(grism_object, obs_map, obs_error,values) + self.log_prior(values))
 	def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None, v_re = None, PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
-
-		ymin,ymax = plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, v_re, self.fluxes_mean, inf_data, wave_space, self.mask, x0 = self.x0, y0 = self.y0, factor = 1, direct_image_size = self.im_shape[0], save_to_folder = save_to_folder, name = name, PA = PA, i = i, Va = Va, r_t = r_t, sigma0 = sigma0, obs_radius = obs_radius, ellip = ellip, theta_obs = theta_obs, theta_Ha =theta_Ha, n = n)
+		ymin,ymax = plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, v_re, self.fluxes_mean, inf_data, wave_space, x0 = self.x0, y0 = self.y0, factor = 1, direct_image_size = self.im_shape[0], save_to_folder = save_to_folder, name = name, PA = PA, i = i, Va = Va, r_t = r_t, sigma0 = sigma0, obs_radius = obs_radius, ellip = ellip, theta_obs = theta_obs, theta_Ha =theta_Ha, n = n)
 		return ymin, ymax
 
 
