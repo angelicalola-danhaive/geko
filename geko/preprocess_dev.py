@@ -481,12 +481,6 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	y0_vel = icenter
 
 
-
-	len_wave = int(
-		(wave_space[len(wave_space)-1]-wave_space[0])/(delta_wave/wave_factor))
-	wave_space = jnp.linspace(
-		wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
-
 	# take x0 and y0 from the pre-processing unless specified otherwise in the config file
 	x0 = None
 	y0 = None
@@ -516,7 +510,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	PA_morph = None
 	kin_model.set_bounds((obs_map.shape[0], obs_map.shape[0]), factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism)
 
-	return redshift, wavelength, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor
+	return redshift, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor
 
 
 ########## unused functions bins below - typically relevant for the non-parametric fitting but useless in the parametric!! ###########

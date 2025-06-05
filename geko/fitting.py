@@ -172,7 +172,7 @@ class Fit_Numpyro():
 def run_geko_fit(output, master_cat, line, parametric=False):
 
 	# ----------------------------------------------------------preprocessing the data------------------------------------------------------------------------
-	z_spec, wavelength,  obs_map, obs_error, model_name, kin_model, grism_object,\
+	z_spec, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,\
 	num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor = pre.run_full_preprocessing(output, master_cat, line)
 	
 	if parametric:
@@ -216,7 +216,7 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 	inf_data.to_netcdf('fitting_results/' + output + 'output')
 
 	#figure out how to make this work well
-	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric)
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric, ID = ID)
 
 
 

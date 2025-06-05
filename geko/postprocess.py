@@ -141,14 +141,14 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	plt.savefig('fitting_results/' + output + 'v_sigma_corner.png', dpi=300)
 
 
-def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False):
+def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None):
 	"""
 		Main function that automatically post-processes the inference data and saves all of the relevant plots
 		Returns the main data products so that data can be analyzed separately
 	"""
 
 	#pre-process the galaxy data
-	z_spec, wavelength, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor  = pre.run_full_preprocessing(output, master_cat, line, mock_params)
+	z_spec, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor  = pre.run_full_preprocessing(output, master_cat, line, mock_params)
 
 	#load inference data
 	if mock_params is None:
@@ -196,7 +196,7 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	
 	#save the best fit parameters in a table
 
-	save_fit_results(output, inf_data, kin_model, z_spec, grism_object.ID, v_re_med, v_re_16, v_re_84)
+	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84)
 	
 	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med)
 
