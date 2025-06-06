@@ -210,7 +210,7 @@ def initialize_grism(mock_image, psf, image_shape):
 
 	#initialize grism object
 
-	grism_object = grism_dev.Grism(image_shape, 0.0629/factor, icenter = y0_grism, jcenter = x0_grism, wavelength = wavelength, wave_space = wave_space_oversampled, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
+	grism_object = grism_dev.Grism(image_shape*factor, 0.0629/factor, icenter = y0_grism, jcenter = x0_grism, wavelength = wavelength, wave_space = wave_space_oversampled, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
 					   grism_filter = grism_filter, grism_module = 'A', grism_pupil = 'R', PSF = PSF)
 
 	return grism_object, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min 
@@ -313,7 +313,7 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 	fig, axs = plt.subplots(2, 1, figsize=(5, 6))
 
 	# Define the X and Y axes
-	X = np.linspace(3.5 - delta_wave_cutoff, 3.5 + delta_wave_cutoff, grism_spectrum.shape[1] + 1)
+	X = np.linspace(4.5 - delta_wave_cutoff, 4.5 + delta_wave_cutoff, grism_spectrum.shape[1] + 1)
 	Y = np.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape + 1)*0.06
 
 	# First subplot: Mock 2D Grism Spectrum
@@ -364,7 +364,7 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 	print('Integrated S/N:', integrated_sn)
 
 	#plot the 1D spectrum
-	x_axis = np.linspace(3.5 - delta_wave_cutoff, 3.5 + delta_wave_cutoff, grism_spectrum.shape[1])
+	x_axis = np.linspace(4.5 - delta_wave_cutoff, 4.5 + delta_wave_cutoff, grism_spectrum.shape[1])
 	fig, ax = plt.subplots(1, 1, figsize=(5, 3))
 	ax.plot(x_axis, extracted_1d, label='Extracted 1D Spectrum')
 	ax.plot(x_axis, noise_1d, label='Noise 1D Spectrum')
