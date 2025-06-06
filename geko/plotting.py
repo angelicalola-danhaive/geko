@@ -600,7 +600,13 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	# fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=15, fontweight='bold')
 	# fig.savefig('FrescoHa/GoldSummaries/' + str(save_to_folder) + '.png', dpi=500)
-	fig.savefig('fitting_results/' + str(save_to_folder) + '/summary' + '.png', dpi=300)
+
+	if save_to_folder != None:
+		if name == 'summary':
+			fig.savefig('fitting_results/' + save_to_folder + '/summary.png', dpi=300)
+		else:
+			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
+
 
 	# gs1 = gs0[2,:]
 
@@ -673,8 +679,17 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# corner.overplot(figure, inf_data, group='posterior', var_names=['r_eff', 'xc_morph', 'yc_morph', 'PA_morph', 'amplitude', 'n'], color = 'green', range = corner_range, **CORNER_KWARGS)
 	#set the axis ratio
 	# plt.gca().set(box_aspect=1)
-	plt.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png', dpi=300)
-	figure_image = plt.imread('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png')
+	if save_to_folder != None:
+		if name == 'summary':
+			plt.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png', dpi=300)
+			figure_image = plt.imread('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png')
+		elif name == 'pretty':
+			plt.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
+			figure_image = plt.imread('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png')
+		else:
+			plt.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
+			figure_image = plt.imread('testing/' + save_to_folder + '/' + name + '_corner.png')
+
 	corner_ax.imshow(figure_image, origin = 'upper')
 	corner_ax.axis('off')
 	corner_ax.text(0.6,0.8, r'$\sigma_0 = $' + str(round(sigma0_50,1)) + r'$^{+' + str(round(sigma0_84- sigma0_50, 1)) + r'}' +  r'_{-' + str(round(sigma0_50- sigma0_16, 1)) + r'}$' + r' km/s', transform=corner_ax.transAxes, fontsize=10, va='top', color='black')
@@ -686,16 +701,18 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	corner_ax.title.set_position([.5, 0.9])
 	fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=10, fontweight='bold')
 
-	# if save_to_folder != None:
-	# 	if name == 'summary':
-	# 			fig.savefig('fitting_results/' + str(save_to_folder) + '/summary_corner' + '.png', dpi=300)
-	# 	elif name == 'pretty':
-	# 		fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
-	# 	else:
-	# 		fig.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
-	# 	fig.savefig('summary_plots/CONGRESS/' + save_to_folder.split('/')[0] + '_' + name + '.png', dpi=500)
+	if save_to_folder != None:
+		if name == 'summary':
+				fig.savefig('fitting_results/' + str(save_to_folder) + '/summary_corner' + '.png', dpi=300)
+		elif name == 'pretty':
+			fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
+		else:
+			fig.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
+		# fig.savefig('summary_plots/CONGRESS/' + save_to_folder.split('/')[0] + '_' + name + '.png', dpi=500)
+	else:
+		raise ValueError('Please provide a folder to save the corner plot')
 	# plt.show()
-	fig.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot_text' + '.png', dpi=300)
+	# fig.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot_text' + '.png', dpi=300)
 	plt.close()
 
 	return ymin,ymax
