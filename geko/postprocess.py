@@ -69,8 +69,8 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	v_circ_84 = jnp.array(inf_data.posterior['v_circ'].quantile(0.84, dim=["chain", "draw"]))
 
 	#save results to a file
-	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', 'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', 'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84']
-	t_empty = np.zeros((len(params), 3))
+	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', 'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', 'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84', 'x0_vel_16', 'x0_vel_50', 'x0_vel_84', 'y0_vel_16', 'y0_vel_50', 'y0_vel_84']
+	t_empty = np.zeros((len(params), 1))
 	res = Table(t_empty.T, names=params)
 	res['ID'] = ID
 	res['PA_50'] = kin_model.PA_mean
@@ -115,6 +115,14 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	res['ellip_50'] = kin_model.ellip_mean
 	res['ellip_16'] = kin_model.ellip_16
 	res['ellip_84'] = kin_model.ellip_84
+
+	res['x0_vel_16'] = kin_model.x0_vel_16
+	res['x0_vel_50'] = kin_model.x0_vel_mean
+	res['x0_vel_84'] = kin_model.x0_vel_84
+
+	res['y0_vel_16'] = kin_model.y0_vel_16
+	res['y0_vel_50'] = kin_model.y0_vel_mean
+	res['y0_vel_84'] = kin_model.y0_vel_84
 
 	res.write('fitting_results/' + output + 'results', format='ascii', overwrite=True)
 	
