@@ -336,9 +336,9 @@ class Disk():
 		self.n_mu = n 
 		self.n_std = n_std
 		self.xc_morph = xc_morph
-		self.xc_std = xc_std
+		self.xc_std = 5
 		self.yc_morph = yc_morph
-		self.yc_std = yc_std
+		self.yc_std = 5
 	
 
 	def set_parametric_priors_test(self,priors):
