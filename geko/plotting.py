@@ -294,7 +294,7 @@ def make_mask(im, sigma_rms, save_to_folder):
     ax[1].imshow(segment_map, origin='lower', cmap='tab20', interpolation='nearest')
     ax[1].set_title('Segmentation map')
     plt.tight_layout()
-    plt.savefig('fitting_results/' + save_to_folder + '/bbox.png', dpi=300)
+    # plt.savefig('fitting_results/' + save_to_folder + '/bbox.png', dpi=300)
     # plt.show()
     # plt.close()
     return im_conv, segment_map, bbox
@@ -397,7 +397,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	res = Table(t_empty.T, names=params)
 	res['r_eff'] = re_50
 	res['r_obs'] = obs_radius
-	res.write('fitting_results/' + save_to_folder + '/radii', format='ascii', overwrite=True)
+
+
+	# res.write('fitting_results/' + save_to_folder + '/radii', format='ascii', overwrite=True)
 
 	ax_obs.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=ax_obs.transAxes)
 	ax_obs.text(0.18, 0.5, '0.5"', color = 'black', fontsize = 10, ha='center', va='center', rotation = 90, transform=ax_obs.transAxes)
