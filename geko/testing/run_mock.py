@@ -5,7 +5,6 @@ from geko import postprocess as post
 from geko import utils
 from geko import plotting
 from geko import models
-from geko import fitting
 
 from geko.fitting import Fit_Numpyro
 from numpyro.infer import Predictive
@@ -546,16 +545,16 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, Va, r_t, s
 	#post process inference data
 
 	inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object, parametric = parametric)	
-	#save the masks in a fit file
-	#create list 
-	hdul = fits.HDUList()
-	primary_hdu = fits.PrimaryHDU(kin_model.mask)
-	primary_hdu.name = '2D_MASK'
-	hdul.append(primary_hdu)
-	mask_hdu = fits.ImageHDU(kin_model.masked_indices)
-	mask_hdu.name = 'MASKED_IND'
-	hdul.append(mask_hdu)
-	hdul.writeto('testing/' + str(test) + '/' + str(j)+ '_masks', overwrite=True)	
+	# #save the masks in a fit file
+	# #create list 
+	# hdul = fits.HDUList()
+	# primary_hdu = fits.PrimaryHDU(kin_model.mask)
+	# primary_hdu.name = '2D_MASK'
+	# hdul.append(primary_hdu)
+	# mask_hdu = fits.ImageHDU(kin_model.masked_indices)
+	# mask_hdu.name = 'MASKED_IND'
+	# hdul.append(mask_hdu)
+	# hdul.writeto('testing/' + str(test) + '/' + str(j)+ '_masks', overwrite=True)	
 	#save everything
 	if parametric:
 		plotting.plot_pp_cornerplot(inf_data,  kin_model = kin_model, choice = 'real', save_to_folder = str(test), name = str(j) + '_cornerplot_real', PA = PA_grism[j], i = i[j], Va = Va[j], r_t = r_t[j], sigma0 = sigma0[j])
@@ -588,15 +587,15 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, Va, r_t, s
 	kin_model.plot_summary(grism_spectrum_noise, grism_error, inf_data, wave_space[index_min:index_max+1], save_to_folder = str(test), name = str(j) + '_summary', v_re = v_re_med,  PA = PA_grism[j], i = i[j], Va = Va[j], r_t = r_t[j], sigma0 = sigma0[j])
 	#plot and save delta map of the fluxes
 	plt.close('all')
-	median = np.where(kin_model.mask == 1, kin_model.fluxes_mean, 0.0)
-	truth = np.where(kin_model.mask == 1, intrinsic_image, 0.0)
-	chi = (median - truth)/kin_model.flux_error
-	plt.imshow(chi, origin = 'lower', cmap = 'coolwarm')
-	plt.colorbar()
-	plt.title('Flux Chi')
-	plt.savefig('testing/' + str(test) + '/' + str(j)+ '_fluxchi.png', dpi=500)
-	plt.show()
-	plt.close()
+	# median = np.where(kin_model.mask == 1, kin_model.fluxes_mean, 0.0)
+	# truth = np.where(kin_model.mask == 1, intrinsic_image, 0.0)
+	# chi = (median - truth)/kin_model.flux_error
+	# plt.imshow(chi, origin = 'lower', cmap = 'coolwarm')
+	# plt.colorbar()
+	# plt.title('Flux Chi')
+	# plt.savefig('testing/' + str(test) + '/' + str(j)+ '_fluxchi.png', dpi=500)
+	# plt.show()
+	# plt.close()
 
 	# #plot MAP:
 	
