@@ -310,12 +310,18 @@ def make_mask(im, sigma_rms, save_to_folder):
 	# Compute Euclidean distance from centroid
 	r_max = np.max(np.sqrt((xx - xc_obj)**2 + (yy - yc_obj)**2))
 
+
+	# Projected radial extent along y-axis
+	y_extent = np.max(np.abs(yy - yc_obj))
+
 	#plot the image and the segmentation map
 	fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 	ax[0].imshow(im_conv, origin='lower', cmap='Greys_r', interpolation='nearest')
 	ax[0].set_title('Data')
 	#plot the r_max
 	ax[0].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
+	#plot a line of length y_extent along the y axis starting from the center
+	ax[0].plot([xc_obj, xc_obj], [yc_obj - y_extent, yc_obj + y_extent], color='red', lw=2, label='y_extent')
 
 	ax[1].imshow(closest_segm, origin='lower', cmap='tab20', interpolation='nearest')
 	ax[1].set_title('Segmentation map')
@@ -326,7 +332,7 @@ def make_mask(im, sigma_rms, save_to_folder):
 	plt.savefig('bboxes/' + str(save_to_folder) + '_bbox.png', dpi=300)
 	# plt.show()
 	plt.close()
-	return im_conv, segment_map, r_max
+	return im_conv, segment_map, r_max, y_extent
 
 
 def sersic_radius_fraction(r_frac, n, r_eff, frac=0.9):
@@ -393,16 +399,12 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	#fit the observed data with photutils to get its radius
 	# make segmentation map and identify sources
-	im_conv, segment_map, rmax = make_mask(obs_map, 5, save_to_folder)
+	im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 5, save_to_folder)
 
 	# get the source properties
 	obs_radius = rmax #already computed in the make_mask function 
-	# obs_radius = 4.5/np.cos(np.pi/2-theta_Ha) # compute_r90(n, obs_radius)  #3 /np.cos(np.pi/2-theta_obs) #
-	obs_rad_minor = obs_radius*(1-ellip) #/np.cos(np.pi/2-theta_obs)
-	obs_rad_minor = compute_r90(n, obs_rad_minor)
-	# print(theta_obs)
-	# print(np.abs(np.cos(theta_obs)))
-	obs_radius_proj = obs_radius*np.cos(np.pi/2-theta_Ha) #np.maximum(obs_radius*np.abs(np.cos(np.pi/2-theta_Ha)), obs_rad_minor)
+
+	obs_radius_proj = rmax_proj
 	obs_radius_ax_scale = obs_radius_proj/obs_map.shape[0]
 
 	re_50 = float(inf_data.posterior['r_eff'].quantile(0.5, dim=["chain", "draw"]).values)
