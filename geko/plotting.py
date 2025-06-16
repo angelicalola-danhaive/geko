@@ -326,7 +326,7 @@ def make_mask(im, sigma_rms, save_to_folder):
 	plt.savefig('bboxes/' + str(save_to_folder) + '_bbox.png', dpi=300)
 	# plt.show()
 	plt.close()
-	return im_conv, segment_map
+	return im_conv, segment_map, r_max
 
 
 def sersic_radius_fraction(r_frac, n, r_eff, frac=0.9):
@@ -393,18 +393,10 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	#fit the observed data with photutils to get its radius
 	# make segmentation map and identify sources
-	im_conv, segment_map, bbox = make_mask(obs_map, 5, save_to_folder)
-	segm_deblend = deblend_sources(im_conv, segment_map, npixels=10, nlevels=50, contrast=1, progress_bar=False) #contrast=0.001
-	source_cat = SourceCatalog(obs_map, segm_deblend, convolved_data=im_conv, error=obs_error)
-	source_tbl = source_cat.to_table()
-
-	# identify main label
-	main_label = segm_deblend.data[int(0.5*obs_map.shape[0]), int(0.5*obs_map.shape[1])]
-
+	im_conv, segment_map, rmax = make_mask(obs_map, 5, save_to_folder)
 
 	# get the source properties
-	idx_signifcant = (source_tbl['label']==main_label)
-	obs_radius = np.maximum(bbox.shape[0], bbox.shape[1]) / 2
+	obs_radius = rmax #already computed in the make_mask function 
 	# obs_radius = 4.5/np.cos(np.pi/2-theta_Ha) # compute_r90(n, obs_radius)  #3 /np.cos(np.pi/2-theta_obs) #
 	obs_rad_minor = obs_radius*(1-ellip) #/np.cos(np.pi/2-theta_obs)
 	obs_rad_minor = compute_r90(n, obs_rad_minor)
