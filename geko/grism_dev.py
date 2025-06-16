@@ -317,6 +317,13 @@ class Grism:
 		#returning R for testing purposes
 		return R
 
+
+	def effective_sigma(self,kernel):
+		"""Estimate the effective standard deviation of a normalized LSF kernel."""
+		x = jnp.arange(kernel.shape[0]) - kernel.shape[0] // 2  # symmetric axis
+		mean = jnp.sum(x * kernel)
+		variance = jnp.sum(((x - mean) ** 2) * kernel)
+		return jnp.sqrt(variance)
 	def compute_lsf_new(self):   
 		'''
 			New LSF computed by Fengwu from new data - sum of two Gaussians
@@ -333,14 +340,41 @@ class Grism:
 		sigma_1 = fwhm_1/(2*math.sqrt(2*math.log(2)))
 		sigma_2 = fwhm_2/(2*math.sqrt(2*math.log(2)))
 
-		self.sigma_lsf = math.sqrt(frac_1*sigma_1**2 + (1-frac_1)*sigma_2**2)*0.617
+		#compute the LSF kernel as the sum of the two gaussians
+		kernel_size = int(6*max(sigma_1, sigma_2)/self.wave_scale) + 1 #in pixels, 6 sigma is the full width of the kernel
+		#the std is divided by the wavelength/pixel to get it in units of pixels
+		lsf_kernel = jnp.array(float(frac_1)*Gaussian1DKernel(float(sigma_1/self.wave_scale), x_size = kernel_size) + float(1-frac_1)*Gaussian1DKernel(float(sigma_2/self.wave_scale), x_size = kernel_size)) #make it into a jax array so it is jax-compatible
+		#normalize the kernel to sum = 1
+		self.lsf_kernel = lsf_kernel/jnp.sum(lsf_kernel)
+
+		#compute the effective LSF for testing purposes
+		self.sigma_lsf = self.effective_sigma(lsf_kernel)* self.wave_scale #in microns
+		print(self.sigma_lsf, ' microns')
 
 		self.sigma_v_lsf = self.sigma_lsf/(self.wavelength/(c/1000))
 
 		R =self.wavelength/(self.sigma_lsf*(2*math.sqrt(2*math.log(2))))
 
+		# Plot the resulting LSF
+		x = np.arange(kernel_size) - kernel_size // 2
+		#convert x from pixels to velocity space 
+		vel_space  = x*self.wave_scale/(self.wavelength/(c/1000)) #in km/s
+
+		# plt.figure(figsize=(6, 3))
+		# plt.plot(vel_space, lsf_kernel, label='Composite LSF')
+		# #plot the effective LSF 
+		# # plt.axvline(x=0, color='k', linestyle='--', label='Central Pixel')
+		# # plt.axvline(x=-self.sigma_lsf/self.wave_scale, color='r', linestyle='--', label='Effective LSF')
+		# plt.xlabel('Pixels')
+		# plt.ylabel('Amplitude')
+		# plt.title('Instrument Line Spread Function (Sum of Gaussians)')
+		# plt.legend()
+		# plt.tight_layout()
+		# plt.show()
+
+
 		#returning R for testing purposes
-		return R
+		return float(R)
 	
 	def compute_PSF(self, PSF):
 
@@ -361,17 +395,7 @@ class Grism:
 		# plt.show()
 		self.PSF =  self.oversampled_PSF[:,:, jnp.newaxis]
 
-		# velocity_space = jnp.linspace(-1000, 1000, 2001)
-		# self.velocity_space = jnp.broadcast_to(velocity_space[:, jnp.newaxis, jnp.newaxis], (velocity_space.size, self.im_shape, self.im_shape))
-		gaussian_kernel = Gaussian1DKernel(float(self.sigma_lsf/self.wave_scale))
-		LSF = gaussian_kernel.array
-		LSF = LSF[LSF.shape[0]//2 - 5:LSF.shape[0]//2 + 5]
-		#normalize LSF kernel to sum = 1
-		LSF = LSF/jnp.sum(LSF)
-		# print(LSF)
-		# create a 3D kernel with 2D PSF and 1D LSF
-		# self.full_kernel = np.array(self.PSF) * np.broadcast_to(np.array(LSF)[:, np.newaxis,np.newaxis],(np.array(LSF).size,np.array(self.PSF).shape[0],np.array(self.PSF).shape[0]))
-		self.full_kernel = jnp.array(self.PSF) * LSF
+		self.full_kernel = jnp.array(self.PSF) * self.lsf_kernel
 
 	
 	def disperse(self, F, V, D):
@@ -389,7 +413,8 @@ class Grism:
 		sigma_LSF = self.sigma_lsf
 
 		#set the effective dispersion which also accounts for the LSF
-		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
+		# wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
+		wave_sigmas_eff = wave_sigmas
 
 		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
@@ -407,7 +432,7 @@ class Grism:
 
 		cube = F[:,:,jnp.newaxis]*gaussian_matrix
 
-		psf_cube = fftconvolve(cube, self.PSF, mode='same') 
+		psf_cube = fftconvolve(cube, self.full_kernel, mode='same') 
 		#collapse across the x axis
 		grism_full = jnp.sum(psf_cube, axis = 1) 
 		return grism_full
