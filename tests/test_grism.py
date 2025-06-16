@@ -1,4 +1,4 @@
-from geko.grism_dev import *
+from geko.grism import *
 import pytest
 import numpy as np
 import matplotlib.pyplot as plt

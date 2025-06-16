@@ -10,7 +10,7 @@ __all__ = ['run_full_preprocessing', 'prep_grism']
 
 #imports
 from . import  utils
-from . import  grism_dev #just for now since in active dev
+from . import  grism#just for now since in active dev
 from . import  models
 # import run_pysersic as py
 
