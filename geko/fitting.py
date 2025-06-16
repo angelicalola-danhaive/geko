@@ -4,7 +4,7 @@ __all__ = ["Fit_Numpyro"]
 
 # importing my own modules
 # from . import grism_dev
-from . import preprocess_dev as pre
+from . import preprocess as pre
 from . import postprocess as post
 
 import os

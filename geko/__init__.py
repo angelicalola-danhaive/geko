@@ -1,9 +1,9 @@
 from .fitting import *
-from .grism_dev import *
+from .grism import *
 from .models import *
 from .plotting import *
 from .postprocess import *
-from .preprocess_dev import *
+from .preprocess import *
 from .utils import *
 
 

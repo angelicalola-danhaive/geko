@@ -1,4 +1,4 @@
-from geko.preprocess_dev import *
+from geko.preprocess import *
 import pytest
 import numpy as np
 
