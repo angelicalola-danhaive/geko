@@ -14,12 +14,13 @@ from matplotlib import gridspec
 from scipy.constants import c, pi
 from jax import image
 # import smplotlib
-from photutils.segmentation import detect_sources, deblend_sources, make_2dgaussian_kernel, SourceCatalog
+from photutils.segmentation import detect_sources, deblend_sources, make_2dgaussian_kernel, SourceCatalog, SegmentationImage
 from photutils.background import Background2D
 from astropy.convolution import convolve
 from astropy.table import Table
 from scipy.special import gammainc, gamma
 from scipy.optimize import root_scalar
+
 
 
 
@@ -94,32 +95,32 @@ def plot_image_residual(image, model, errors, x0, y0, direct_size,save_to_folder
 	plt.close()
 
 def plot_velocities_nice(kin_model):
-    fig, vel_map_ax = plt.subplots(1, 1, figsize=(6, 5))
+	fig, vel_map_ax = plt.subplots(1, 1, figsize=(6, 5))
 	#plot the velocity field 
-    factor = 1
-    x = np.linspace(0 - 15, 31 - 1 - 15, 31)
-    y = np.linspace(0 - 15, 31 - 1 - 15, 31)
-    X, Y = np.meshgrid(x, y)
-    X *= 0.0629/factor#put it in arcseconds
-    Y *= 0.0629/factor
+	factor = 1
+	x = np.linspace(0 - 15, 31 - 1 - 15, 31)
+	y = np.linspace(0 - 15, 31 - 1 - 15, 31)
+	X, Y = np.meshgrid(x, y)
+	X *= 0.0629/factor#put it in arcseconds
+	Y *= 0.0629/factor
 
 	#find the coordinates of the velocity centroid from model_velocities
-    # model_velocities = image.resize(kin_model.model_velocities_low, (direct.shape[0]*2, direct.shape[1]*2), method='nearest')
-    model_velocities = kin_model.model_velocities_low
-    grad_x, grad_y = np.gradient(model_velocities)
-    center = np.nanargmax(np.sqrt(grad_y**2 + grad_x**2))
-    center = np.unravel_index(center, model_velocities.shape)
-    velocites_center = model_velocities[center[0], center[1]]
-    # cp = plt.pcolormesh(X[5:26,5:26], Y[5:26,5:26],(model_velocities-velocites_center)[5:26,5:26], shading='nearest', cmap = 'RdBu_r')
-    cp = vel_map_ax.pcolormesh(X[5:26,5:26], Y[5:26,5:26],(model_velocities-velocites_center)[5:26,5:26], shading='nearest', cmap = 'RdBu_r')
-    vel_map_ax.set_xlabel(r'$\Delta$ RA ["]',fontsize = 5)
-    vel_map_ax.set_ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
-    vel_map_ax.tick_params(axis='both', which='major', labelsize=5)
-    cbar = fig.colorbar(cp, ax = vel_map_ax)
-    cbar.ax.set_ylabel('velocity [km/s]', fontsize = 15)
-    cbar.ax.tick_params(labelsize = 15)
-    vel_map_ax.set_title('Velocity map') #, $v_{rot} = $') # + str(np.round(v_rot)) + ' km/s', fontsize=10)
-    # plt.show()
+	# model_velocities = image.resize(kin_model.model_velocities_low, (direct.shape[0]*2, direct.shape[1]*2), method='nearest')
+	model_velocities = kin_model.model_velocities_low
+	grad_x, grad_y = np.gradient(model_velocities)
+	center = np.nanargmax(np.sqrt(grad_y**2 + grad_x**2))
+	center = np.unravel_index(center, model_velocities.shape)
+	velocites_center = model_velocities[center[0], center[1]]
+	# cp = plt.pcolormesh(X[5:26,5:26], Y[5:26,5:26],(model_velocities-velocites_center)[5:26,5:26], shading='nearest', cmap = 'RdBu_r')
+	cp = vel_map_ax.pcolormesh(X[5:26,5:26], Y[5:26,5:26],(model_velocities-velocites_center)[5:26,5:26], shading='nearest', cmap = 'RdBu_r')
+	vel_map_ax.set_xlabel(r'$\Delta$ RA ["]',fontsize = 5)
+	vel_map_ax.set_ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
+	vel_map_ax.tick_params(axis='both', which='major', labelsize=5)
+	cbar = fig.colorbar(cp, ax = vel_map_ax)
+	cbar.ax.set_ylabel('velocity [km/s]', fontsize = 15)
+	cbar.ax.tick_params(labelsize = 15)
+	vel_map_ax.set_title('Velocity map') #, $v_{rot} = $') # + str(np.round(v_rot)) + ' km/s', fontsize=10)
+	# plt.show()
 
 def plot_grism_residual(map, model, errors, y0, direct_size, wave_space,save_to_folder = None, name = None):
 	x = wave_space
@@ -274,46 +275,80 @@ def plot_summary(image, image_model, image_error, map, map_model, map_error, x0,
 	plt.close()
 	
 def make_mask(im, sigma_rms, save_to_folder):
-    im_conv = convolve(im, make_2dgaussian_kernel(3.0, size=5))
-    # print('pre-bckg')
-    bkg = Background2D(im_conv, (15, 15), filter_size=(3, 3), exclude_percentile=90.0)
-    segment_map = detect_sources(im_conv, sigma_rms*bkg.background_rms, npixels=10)
-    # print('post-bckg')
-	#plot the image and the segmentation map
-    fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-    ax[0].imshow(im_conv, origin='lower', cmap='Greys_r', interpolation='nearest')
-    ax[0].set_title('Data')
-    #compute and plot the bounding box of the segmentation map
-    bbox = segment_map.bbox[0]
-    # ax[1].plot([bbox.ixmin, bbox.ixmin, bbox.ixmax, bbox.ixmax, bbox.ixmin],
-	#        			   [bbox.iymin, bbox.iymax, bbox.iymax, bbox.iymin, bbox.iymin],
-	# 				  	       			   color='red', lw=2)
+	im_conv = convolve(im, make_2dgaussian_kernel(3.0, size=5))
+	# print('pre-bckg')
+	bkg = Background2D(im_conv, (15, 15), filter_size=(3, 3), exclude_percentile=90.0)
+	segment_map = detect_sources(im_conv, sigma_rms*bkg.background_rms, npixels=10)
 
-    ax[1].add_patch(bbox.as_artist(facecolor='none', edgecolor='red',
-             lw=2.0))
-    ax[1].imshow(segment_map, origin='lower', cmap='tab20', interpolation='nearest')
-    ax[1].set_title('Segmentation map')
-    plt.tight_layout()
-    plt.savefig('fitting_results/' + save_to_folder + '/bbox.png', dpi=300)
-    # plt.show()
-    # plt.close()
-    return im_conv, segment_map, bbox
+	ny, nx = segment_map.shape
+	yc, xc = ny / 2, nx / 2
+
+	# Get source properties
+	catalog = SourceCatalog(im,segment_map)
+
+	# Step 1: Find segment closest to image center
+	min_dist = np.inf
+	closest_label = None
+	closest_obj = None
+
+	for obj in catalog:
+		y, x = obj.ycentroid, obj.xcentroid
+		dist = np.sqrt((x - xc)**2 + (y - yc)**2)
+		if dist < min_dist:
+			min_dist = dist
+			closest_label = obj.label
+			closest_obj = obj
+
+	# Step 2: Create segmentation map with only the closest segment
+	closest_segm_array = np.where(segment_map.data == closest_label, closest_label, 0)
+	closest_segm = SegmentationImage(closest_segm_array)
+
+	# Step 3: Compute max radius from centroid
+	yc_obj, xc_obj = closest_obj.ycentroid, closest_obj.xcentroid
+	yy, xx = np.where(closest_segm.data == closest_label)
+
+	# Compute Euclidean distance from centroid
+	r_max = np.max(np.sqrt((xx - xc_obj)**2 + (yy - yc_obj)**2))
+
+
+	# Projected radial extent along y-axis
+	y_extent = np.max(np.abs(yy - yc_obj))
+
+	#plot the image and the segmentation map
+	fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+	ax[0].imshow(im_conv, origin='lower', cmap='Greys_r', interpolation='nearest')
+	ax[0].set_title('Data')
+	#plot the r_max
+	ax[0].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
+	#plot a line of length y_extent along the y axis starting from the center
+	ax[0].plot([xc_obj, xc_obj], [yc_obj - y_extent, yc_obj + y_extent], color='red', lw=2, label='y_extent')
+
+	ax[1].imshow(closest_segm, origin='lower', cmap='tab20', interpolation='nearest')
+	ax[1].set_title('Segmentation map')
+
+	#plot the r_max
+	ax[1].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
+	plt.tight_layout()
+	plt.savefig('bboxes/' + str(save_to_folder) + '_bbox.png', dpi=300)
+	# plt.show()
+	plt.close()
+	return im_conv, segment_map, r_max, y_extent
 
 
 def sersic_radius_fraction(r_frac, n, r_eff, frac=0.9):
-    """Solve for r_frac such that it encloses the given light fraction."""
-    # Compute b_n, the Sersic coefficient
-    b_n = 2 * n - 1 / 3 + 4 / (405 * n) + 46 / (25515 * n**2)  # Approximation
-    
-    # Compute the light fraction enclosed
-    enclosed_frac = gammainc(2 * n, b_n * (r_frac / r_eff) ** (1 / n))
-    
-    return enclosed_frac - frac  # Find root where this is zero
+	"""Solve for r_frac such that it encloses the given light fraction."""
+	# Compute b_n, the Sersic coefficient
+	b_n = 2 * n - 1 / 3 + 4 / (405 * n) + 46 / (25515 * n**2)  # Approximation
+	
+	# Compute the light fraction enclosed
+	enclosed_frac = gammainc(2 * n, b_n * (r_frac / r_eff) ** (1 / n))
+	
+	return enclosed_frac - frac  # Find root where this is zero
 
 def compute_r90(n, r_eff):
-    """Find the radius that encloses 90% of the total light."""
-    result = root_scalar(sersic_radius_fraction, args=(n, r_eff, 0.9), bracket=[r_eff, 10 * r_eff])
-    return result.root if result.converged else None
+	"""Find the radius that encloses 90% of the total light."""
+	result = root_scalar(sersic_radius_fraction, args=(n, r_eff, 0.9), bracket=[r_eff, 10 * r_eff])
+	return result.root if result.converged else None
 
 
 def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
@@ -364,24 +399,12 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	#fit the observed data with photutils to get its radius
 	# make segmentation map and identify sources
-	im_conv, segment_map, bbox = make_mask(obs_map, 3, save_to_folder)
-	segm_deblend = deblend_sources(im_conv, segment_map, npixels=10, nlevels=50, contrast=1, progress_bar=False) #contrast=0.001
-	source_cat = SourceCatalog(obs_map, segm_deblend, convolved_data=im_conv, error=obs_error)
-	source_tbl = source_cat.to_table()
-
-    # identify main label
-	main_label = segm_deblend.data[int(0.5*obs_map.shape[0]), int(0.5*obs_map.shape[1])]
-
+	im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 5, save_to_folder)
 
 	# get the source properties
-	idx_signifcant = (source_tbl['label']==main_label)
-	obs_radius = np.maximum(bbox.shape[0], bbox.shape[1]) / 2
-	# obs_radius = 4.5/np.cos(np.pi/2-theta_Ha) # compute_r90(n, obs_radius)  #3 /np.cos(np.pi/2-theta_obs) #
-	obs_rad_minor = obs_radius*(1-ellip) #/np.cos(np.pi/2-theta_obs)
-	obs_rad_minor = compute_r90(n, obs_rad_minor)
-	# print(theta_obs)
-	# print(np.abs(np.cos(theta_obs)))
-	obs_radius_proj = obs_radius*np.cos(np.pi/2-theta_Ha) #np.maximum(obs_radius*np.abs(np.cos(np.pi/2-theta_Ha)), obs_rad_minor)
+	obs_radius = rmax #already computed in the make_mask function 
+
+	obs_radius_proj = rmax_proj
 	obs_radius_ax_scale = obs_radius_proj/obs_map.shape[0]
 
 	re_50 = float(inf_data.posterior['r_eff'].quantile(0.5, dim=["chain", "draw"]).values)
@@ -397,7 +420,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	res = Table(t_empty.T, names=params)
 	res['r_eff'] = re_50
 	res['r_obs'] = obs_radius
-	res.write('fitting_results/' + save_to_folder + '/radii', format='ascii', overwrite=True)
+
+
+	# res.write('fitting_results/' + save_to_folder + '/radii', format='ascii', overwrite=True)
 
 	ax_obs.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=ax_obs.transAxes)
 	ax_obs.text(0.18, 0.5, '0.5"', color = 'black', fontsize = 10, ha='center', va='center', rotation = 90, transform=ax_obs.transAxes)
@@ -600,7 +625,13 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	# fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=15, fontweight='bold')
 	# fig.savefig('FrescoHa/GoldSummaries/' + str(save_to_folder) + '.png', dpi=500)
-	fig.savefig('fitting_results/' + str(save_to_folder) + '/summary' + '.png', dpi=300)
+
+	if save_to_folder != None:
+		if name == 'summary':
+			fig.savefig('fitting_results/' + save_to_folder + '/summary.png', dpi=300)
+		else:
+			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
+
 
 	# gs1 = gs0[2,:]
 
@@ -620,10 +651,10 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	v_re_50 = float(inf_data.posterior['v_re'].quantile(0.5, dim=["chain", "draw"]).values)
 	v_re_16 = float(inf_data.posterior['v_re'].quantile(0.16, dim=["chain", "draw"]).values)
 	v_re_84 = float(inf_data.posterior['v_re'].quantile(0.84, dim=["chain", "draw"]).values)
-    
+	
 	v_sigma_min = 0.5*v_sigma_16
 	v_sigma_max = 1.5*v_sigma_84
-        
+		
 	sigma0_min = 0.5*sigma0_16
 	sigma0_max = 1.5*sigma0_84
 
@@ -673,8 +704,17 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# corner.overplot(figure, inf_data, group='posterior', var_names=['r_eff', 'xc_morph', 'yc_morph', 'PA_morph', 'amplitude', 'n'], color = 'green', range = corner_range, **CORNER_KWARGS)
 	#set the axis ratio
 	# plt.gca().set(box_aspect=1)
-	plt.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png', dpi=300)
-	figure_image = plt.imread('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png')
+	if save_to_folder != None:
+		if name == 'summary':
+			plt.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png', dpi=300)
+			figure_image = plt.imread('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png')
+		elif name == 'pretty':
+			plt.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
+			figure_image = plt.imread('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png')
+		else:
+			plt.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
+			figure_image = plt.imread('testing/' + save_to_folder + '/' + name + '_corner.png')
+
 	corner_ax.imshow(figure_image, origin = 'upper')
 	corner_ax.axis('off')
 	corner_ax.text(0.6,0.8, r'$\sigma_0 = $' + str(round(sigma0_50,1)) + r'$^{+' + str(round(sigma0_84- sigma0_50, 1)) + r'}' +  r'_{-' + str(round(sigma0_50- sigma0_16, 1)) + r'}$' + r' km/s', transform=corner_ax.transAxes, fontsize=10, va='top', color='black')
@@ -686,16 +726,18 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	corner_ax.title.set_position([.5, 0.9])
 	fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=10, fontweight='bold')
 
-	# if save_to_folder != None:
-	# 	if name == 'summary':
-	# 			fig.savefig('fitting_results/' + str(save_to_folder) + '/summary_corner' + '.png', dpi=300)
-	# 	elif name == 'pretty':
-	# 		fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
-	# 	else:
-	# 		fig.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
-	# 	fig.savefig('summary_plots/CONGRESS/' + save_to_folder.split('/')[0] + '_' + name + '.png', dpi=500)
+	if save_to_folder != None:
+		if name == 'summary':
+				fig.savefig('fitting_results/' + str(save_to_folder) + '/summary_corner' + '.png', dpi=300)
+		elif name == 'pretty':
+			fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
+		else:
+			fig.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
+		# fig.savefig('summary_plots/CONGRESS/' + save_to_folder.split('/')[0] + '_' + name + '.png', dpi=500)
+	else:
+		raise ValueError('Please provide a folder to save the corner plot')
 	# plt.show()
-	fig.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot_text' + '.png', dpi=300)
+	# fig.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot_text' + '.png', dpi=300)
 	plt.close()
 
 	return ymin,ymax
