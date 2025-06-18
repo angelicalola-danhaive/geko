@@ -179,18 +179,29 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 		with open('fitting_results/' + output + 'config_real.yaml', 'r') as file:
 			input = yaml.load(file, Loader=yaml.FullLoader)
 		ID = input[0]['Data']['ID']
-		#get the redshift from the master catalog
+		#get the field 
+		field = input[0]['Data']['field']
 
 		try:
 			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
 		except:
-			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F115W_svi.cat', format='ascii')
+			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F150W_svi.cat', format='ascii')
 		try:	
 			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F356W_svi.cat', format='ascii')
 		except:
 			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F444W_svi.cat', format='ascii')
-
-		kin_model.disk.set_parametric_priors(pysersic_summary, pysersic_grism_summary, z_spec, wavelength, delta_wave)
+		
+		#based on the field, set the correction rotation to match JADES to the grism survey
+		if field == 'GOODS-S-FRESCO':
+			theta_rot = jnp.radians(0)
+		elif field == 'GOODS-N': #fresco
+			theta_rot = jnp.radians(230.5098)
+		elif field == 'GOODS-N-CONGRESS':
+			theta_rot = jnp.radians(228.22379)
+		else:
+			raise ValueError("Field not recognized. Please check the field name in the config file.")
+ 
+		kin_model.disk.set_parametric_priors(pysersic_summary, pysersic_grism_summary, z_spec, wavelength, delta_wave, theta_rot, shape = obs_map.shape[0])
 	else:
 		#raise non-parametric fitting not implemented error
 		raise ValueError("Non-parametric fitting is not implemented yet. Please set --parametric to True to use the parametric fitting.")

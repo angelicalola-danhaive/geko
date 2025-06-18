@@ -223,27 +223,15 @@ class Disk():
 		print('y0_vel --- Truncated Normal w/ mu: ' + str(self.mu_y0_vel) + ' and sigma: ' + str(self.y0_std) + ' and bounds: ' + str(self.y_low) + ' ' + str(self.y_high))
 		print('v0 --- Normal w/ mu: 0 and sigma: 100')
 
-	def set_parametric_priors(self,py_table, py_grism_table, redshift, wavelength, delta_wave):
+	def set_parametric_priors(self,py_table, py_grism_table, redshift, wavelength, delta_wave, theta_rot = 0.0, shape = 31):
 		"""
 		Set the priors for the parametric model
+
+		theta_rot = the angle (in RADIANS) by which the rotate the image COUNTERCLOCKWISE in order to match the grism observations
 		"""
 		#need to set sizes in kpc before converting to arcsecs then pxs
 		arcsec_per_kpc = cosmo.arcsec_per_kpc_proper(z=redshift).value
 		kpc_per_pixel = 0.06/arcsec_per_kpc
-
-		theta = py_table['theta_q50'][0]
-		PA = (theta-jnp.pi/2) * (180/jnp.pi) #convert to degrees
-		if PA < 0:
-			print('Converting pysersic PA from ', PA, ' to ', PA + 180, ' degrees')
-			PA += 180
-		elif PA > 180:
-			print('Converting pysersic PA from ', PA, ' to ', PA - 180, ' degrees')
-			PA -= 180
-		PA = 90 - PA #for the kinematics
-		if PA < 0:
-			PA += 180
-		PA_mean_err = ((py_table['theta_q84'][0] - py_table['theta_q50'][0]) + (py_table['theta_q50'][0] - py_table['theta_q16'][0]))/2
-		PA_std = (PA_mean_err*2)*(180/jnp.pi) #convert to degrees
 
 		ellip = py_table['ellip_q50'][0] 
 		# inclination = jnp.arccos(1-ellip)*180/jnp.pi
@@ -303,6 +291,26 @@ class Disk():
 		yc_err = ((py_table['yc_q84'][0] - py_table['yc_q50'][0]) + (py_table['yc_q50'][0] - py_table['yc_q16'][0]))/4
 		yc_std = yc_err*4 #boosting the uncertainties on the centroids to have a looser prior
 
+		#rotate the prior according to theta rot
+		xc,yc = (shape-1)/2, (shape-1)/2
+		xc_morph_rot, yc_morph_rot = utils.rotate_coords(xc_morph, yc_morph, xc, yc, theta_rot)
+
+		theta = py_table['theta_q50'][0]
+		#rotate the prior according to theta rot 
+		theta_rot = (theta + theta_rot) % 360 #it's a + because the rotation is counter-clockwise and the PA is also defined in a CCW way in Pysersic
+
+		PA = (theta_rot-jnp.pi/2) * (180/jnp.pi) #convert to degrees
+		if PA < 0:
+			print('Converting pysersic PA from ', PA, ' to ', PA + 180, ' degrees')
+			PA += 180
+		elif PA > 180:
+			print('Converting pysersic PA from ', PA, ' to ', PA - 180, ' degrees')
+			PA -= 180
+		PA = 90 - PA #for the kinematics
+		if PA < 0:
+			PA += 180
+		PA_mean_err = ((py_table['theta_q84'][0] - py_table['theta_q50'][0]) + (py_table['theta_q50'][0] - py_table['theta_q16'][0]))/2
+		PA_std = (PA_mean_err*2)*(180/jnp.pi) #convert to degrees
 		print('Setting parametric priors: ', PA, inclination, r_eff_Ha, n, amplitude, xc_morph, yc_morph)
 
 		#compute velocity bounds using the grism size
@@ -335,10 +343,10 @@ class Disk():
 		self.amplitude_std = amplitude_std
 		self.n_mu = n 
 		self.n_std = n_std
-		self.xc_morph = xc_morph
-		self.xc_std = 5
-		self.yc_morph = yc_morph
-		self.yc_std = 5
+		self.xc_morph = xc_morph_rot
+		self.xc_std = xc_std
+		self.yc_morph = yc_morph_rot
+		self.yc_std = yc_std
 	
 
 	def set_parametric_priors_test(self,priors):
