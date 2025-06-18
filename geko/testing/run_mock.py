@@ -1,6 +1,6 @@
 # importing my own modules
-from geko import grism_dev
-from geko import preprocess_dev as pre
+from geko import grism
+from geko import preprocess as pre
 from geko import postprocess as post
 from geko import utils
 from geko import plotting
@@ -209,7 +209,7 @@ def initialize_grism(mock_image, psf, image_shape):
 
 	#initialize grism object
 
-	grism_object = grism_dev.Grism(image_shape*factor, 0.0629/factor, icenter = y0_grism, jcenter = x0_grism, wavelength = wavelength, wave_space = wave_space_oversampled, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
+	grism_object = grism.Grism(image_shape*factor, 0.0629/factor, icenter = y0_grism, jcenter = x0_grism, wavelength = wavelength, wave_space = wave_space_oversampled, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
 					   grism_filter = grism_filter, grism_module = 'A', grism_pupil = 'R', PSF = PSF)
 
 	return grism_object, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min 
