@@ -438,7 +438,7 @@ def main_lola_images():
 
     filter_list = ['F150W']
     alternate_filter_list = ['F182M']
-    sigma_rms = 1
+    sigma_rms = 3
 
     psf = None
 
@@ -464,27 +464,36 @@ def main_lola_images():
             
 
                 err = jnp.array(file['ERR'].data)
-                sig = err
-                sig =jnp.where(np.isnan(im)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
+
+                #crop the image and error so the cutout is 30x30
+                shape = int(im.shape[0]/2)
+                size = 20
+                im_crop = im[shape-size:shape+size,shape-size:shape+size]
+                err_crop = err[shape-size:shape+size,shape-size:shape+size]
+                sig = err_crop
+                sig =jnp.where(np.isnan(im_crop)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
 
                 #load the psf
-                if psf == None:
-                    if field[count] == 'GOODS-S-FRESCO':
-                        bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/program_bithash.goodss.v1.0.0.fits'
-                        psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/'
-                    else:
-                        bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/program_bithash.goodsn.v1.0.0.fits'
-                        psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/'
+                if field[count] == 'GOODS-S-FRESCO':
+                    bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/program_bithash.goodss.v1.0.0.fits'
+                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/'
+                else:
+                    bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/program_bithash.goodsn.v1.0.0.fits'
+                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/'
 
-                    psf_path = utils.choose_mspf(bithash_file, psf_dir, RA[count], DEC[count], [im_path])[0]
-                    psf = fits.getdata(psf_path)
+                psf_path = utils.choose_mspf(bithash_file, psf_dir, RA[count], DEC[count], [im_path])[0]
+                psf = fits.getdata(psf_path)
 
-                fit_data(filter, id, path_output=path_output,  im = im , sig =sig, psf = psf,
+                #downsample it down to the grism resolution
+                psf = utils.downsample_psf_centered(psf, size = 15)
+
+                fit_data(filter, id, path_output=path_output,  im = im_crop , sig =sig, psf = psf,
                         fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=True, plot=True, sigma_rms = sigma_rms)
                 
                 inc, PA, r_eff, x_c, y_c = get_params(path_output, id, filter, type = 'image')
                 # print(inc, PA, r_eff, x_c, y_c)
                 write_catalog(path_output, id, filter, type = 'image')
+
         except Exception as e:
             print('Error in iteration ' + str(count) + ' with ID ' + str(id) + ' and filter ' + str(filter))
             print(e)
@@ -557,5 +566,5 @@ def main_lola_grism():
 
 
 if __name__=="__main__":
-    main_lola_grism()
+    main_lola_images()
 
