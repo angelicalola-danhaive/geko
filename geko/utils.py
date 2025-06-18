@@ -50,6 +50,12 @@ from scipy import stats as st
 
 from . import  models
 
+import os
+
+from pathlib import Path
+
+from astropy.wcs import WCS
+
 
 
 def oversample(image_low_res, factor_y, factor_x, method='nearest'):
@@ -868,40 +874,77 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
           for index in xi:
             #print(f"Bit: {i} Field: {decoder['image'][index]}")
             obs_dict[i].append(decoder['image'][index])
-
     #for each image in image_list, copy the dictionary, remove values that correspond to other images (ie filters),
     #and choose the preferred mpsf files from the pared-down dictionary
     nimgs = len(image_list)
 
     for k in range(nimgs):
 
-        obs_dict_copy = obs_dict
+###############  OLD VERSION ###################
+        # obs_dict_copy = obs_dict
         
-        #remove key/value pairs for filters we don't want right now
-        for key, value in obs_dict_copy.items():
+        # #remove key/value pairs for filters we don't want right now
+        # for key, value in obs_dict_copy.items():
 
-            #nominally, let's grab the main mpsf which does NOT end in 'a' or 'b' and
-            #so should have the same exact ending as the image file itself
-            basename = os.path.basename(image_list[k])
-            filter_lower = basename.split('_')[1].lower()
-            obs_dict_copy[key] = [v for v in value if v.endswith(filter_lower)]
+        #     #nominally, let's grab the main mpsf which does NOT end in 'a' or 'b' and
+        #     #so should have the same exact ending as the image file itself
+        #     basename = os.path.basename(image_list[k])
+        #     filter_lower = basename.split('_')[1].lower()
+        #     obs_dict_copy[key] = [v for v in value if v.endswith(filter_lower)]
 
-            #but if that leaves us nothing, then we open up to 'a' and 'b' options
-            if not obs_dict_copy[key]:
-                obs_dict_copy[key] = [v for v in value if filter_lower[:-5] in v]
-        #remove any keys with empty lists, easier to remove now
-        obs_dict_copy = {k:v for k,v in obs_dict_copy.items() if v != []}
+        #     #but if that leaves us nothing, then we open up to 'a' and 'b' options
+        #     if not obs_dict_copy[key]:
+        #         obs_dict_copy[key] = [v for v in value if filter_lower[:-5] in v]
+
+        # #remove any keys with empty lists, easier to remove now
+        # obs_dict_copy = {k:v for k,v in obs_dict_copy.items() if v != []}
         
-        #prioritize the 3215 psf if possible
+        # #prioritize the 3215 psf if possible
+        # if 8 in obs_dict_copy.keys():
+        #     mpsf_file = obs_dict_copy[8][0].split('/')[-1]
+        # else:
+        #     #min bit is likely 0 or 1, which is 1180
+        #     min_obs = min(obs_dict_copy.keys())
+        #     mpsf_file = obs_dict_copy[min_obs][0].split('/')[-1]
+
+#################################################
+
+        #look through the obs_dict in order and stop when you find a program with the needed filter
+        basename = os.path.basename(image_list[k])
+        filter_lower = basename.split('_')[1].lower()
+        #re-order the obs_dict so the keys are from smallest to largest
+        obs_dict_copy = dict(sorted(obs_dict.items()))
+
         if 8 in obs_dict_copy.keys():
+            #if we have a 3215 psf, use it
             mpsf_file = obs_dict_copy[8][0].split('/')[-1]
+            psf_path = f'{psf_dir}/mpsf_{mpsf_file}'
         else:
-            #min bit is likely 0 or 1, which is 1180
-            min_obs = min(obs_dict_copy.keys())
-            mpsf_file = obs_dict_copy[min_obs][0].split('/')[-1]
+            #look through the rest
+            for key, value in obs_dict_copy.items():
+                #extract the program name from the full title 
+                program = value[0].split('/')[-1].split('.')[0]
+                #check if that program has a psf in the required filter
+                # Set the directory to search in
+                search_dir = Path(psf_dir)
+
+                # Multiple words (all must be present)
+                words = [program, filter_lower]
+                print(words)
+                matching_files = [
+                    f for f in search_dir.rglob("*")
+                    if f.is_file() and all(word in f.name for word in words)
+                ]
+
+                #if matching_files is not empty, we have a match
+                if matching_files:
+                    #print(f"Found matching file for {program} in filter {filter_lower}: {matching_files[0]}")
+                    print(matching_files[0])
+                    psf_path = str(matching_files[0])
+                    break
 
         #change psf_path according to field / lux location
-        psf_path = f'{psf_dir}/mpsf_{mpsf_file}'
+        # psf_path = f'{psf_dir}/mpsf_{mpsf_file}'
         if 'dec' in psf_path:
             psf_path = psf_path.replace('dec', 'oct')
 
