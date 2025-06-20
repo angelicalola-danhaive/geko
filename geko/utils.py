@@ -901,7 +901,7 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
                 search_dir = Path(psf_dir)
                 # Multiple words (all must be present)
                 words = [program, filter_lower]
-                print(words)
+                # print(words)
                 matching_files = [
                     f for f in search_dir.rglob("*")
                     if f.is_file() and all(word in f.name for word in words)
@@ -929,7 +929,7 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
                     search_dir = Path(psf_dir)
                     # Multiple words (all must be present)
                     words = [program, filter_lower_flex]
-                    print(words)
+                    # print(words)
                     matching_files = [
                         f for f in search_dir.rglob("*")
                         if f.is_file() and all(word in f.name for word in words)
@@ -938,9 +938,20 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
                     #if matching_files is not empty, we have a match
                     if matching_files:
                         #print(f"Found matching file for {program} in filter {filter_lower}: {matching_files[0]}")
-                        print(matching_files[0])
+                        # print(matching_files[0])
                         psf_path = str(matching_files[0])
                         break
+                try:
+                    psf_path
+                except NameError:
+                    #if there is still no match, use the general mpsf for that filter and field
+                    print(f"No matching file found for {program} in filter {filter_lower_flex}, using general mpsf")
+                    # Set the directory to search in
+                    search_dir = Path(psf_dir)
+                    # Multiple words (all must be present)
+                    # print(words)
+                    psf_path = str(search_dir) + f'/mpsf_{filter_lower}'
+                    print(f"Using general mpsf: {psf_path}")
 
         #change psf_path according to field / lux location
         # psf_path = f'{psf_dir}/mpsf_{mpsf_file}'
