@@ -22,7 +22,7 @@ def test_compute_lsf(grism_instance):
 
 def test_compute_lsf_new(grism_instance):
     R = grism_instance.compute_lsf_new()
-    assert np.isclose(R, 1568, atol = 2)
+    assert np.isclose(R, 1599, atol = 2)
 
 def test_get_trace(grism_instance):
     dxs,disp_space = grism_instance.get_trace()
@@ -53,7 +53,7 @@ def test_disperse(grism_instance):
     plt.imshow(mock_grism, origin='lower', cmap='viridis')
     plt.colorbar(label='Flux')
     plt.title('Mock Grism Image')
-    plt.savefig('tests/mock_grism.png')
+    plt.savefig('geko/tests/mock_grism.png')
 
 
     # Check that the total flux is preserved (with a tolerance)

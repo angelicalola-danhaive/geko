@@ -2,6 +2,7 @@
 # load modules
 
 from geko import utils
+from geko import preprocess
 
 import os
 import numpy as np 
@@ -10,6 +11,8 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.table import Table
 from astropy.convolution import convolve
+from astropy.wcs import WCS                                                            
+
 
 from pysersic import check_input_data, FitSingle, FitMulti, PySersicMultiPrior
 from pysersic.priors import autoprior
@@ -23,13 +26,18 @@ from jax import random
 import jax.numpy as jnp
 from pysersic.rendering import HybridRenderer
 
+
+import traceback
+
+import sys
+
 import asdf 
 
 import matplotlib
 
 import smplotlib
 
-# matplotlib.use('Agg')
+matplotlib.use('Agg')
 
 # define key functions
 
@@ -69,7 +77,7 @@ def prepare_data(im, sig,psf, fit_multi=False, perform_masking=False, plot=False
 
     # make segmentation map and identify sources
     im_conv, segment_map = make_mask(im, sigma_rms)
-    segm_deblend = deblend_sources(im_conv, segment_map, npixels=5, nlevels = 64,  contrast=0.5, progress_bar=False) #contrast=0.001nlevels=50,
+    segm_deblend = deblend_sources(im_conv, segment_map, npixels=5, nlevels = 50,  contrast=1, progress_bar=False) #contrast=0.001nlevels=50,
     source_cat = SourceCatalog(im, segm_deblend, convolved_data=im_conv, error=sig)
     source_tbl = source_cat.to_table()
 
@@ -203,7 +211,7 @@ def fit_data(filter, id, path_output=None, im = None, sig = None, psf = None,
             axs[i].set_xticks([])
             axs[i].set_yticks([])
             axs[i].contour(mask, levels=[0.5], colors='crimson', linewidths=1.5)
-        plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_paperplot' + post_name + '.pdf'), bbox_inches='tight', dpi=300)
+        plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_paperplot' + post_name + '.png'), bbox_inches='tight', dpi=1000)
         plt.show()
 
         # # save figures
@@ -216,12 +224,13 @@ def fit_data(filter, id, path_output=None, im = None, sig = None, psf = None,
         #reduce the separation between the subplots
         fig.tight_layout()
 
-        plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_residual_svi' + post_name + '.pdf'), bbox_inches='tight')
+        plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_residual_svi' + post_name + '.png'), bbox_inches='tight', dpi=1000)
         plt.show()
         fig = fitter.svi_results.corner(color='C0') 
-        plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_corner_svi' + post_name + '.pdf'), bbox_inches='tight')        # save results
+        plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_corner_svi' + post_name + '.png'), bbox_inches='tight',  dpi = 1000)        # save results
         plt.show()
         fitter.svi_results.save_result(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_svi' + post_name + '.asdf'))
+        plt.close()
 
     if do_sampling:
         # setup fitter
@@ -258,6 +267,7 @@ def fit_data(filter, id, path_output=None, im = None, sig = None, psf = None,
         plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_corner_sampling' + post_name + '.pdf'), bbox_inches='tight')
         # # save results
         fitter.sampling_results.save_result(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_sampling' + post_name + '.asdf'))
+        plt.close()
 
     print("=============================================================================")
     return phot_PA
@@ -307,90 +317,39 @@ def get_params(path_output, id, filter, type = 'image'):
 
 def write_catalog(path_output, id, filter, type = 'image'):
     af = asdf.open(os.path.join(path_output, str(id) + "_" + str(type) + "_" + filter.upper() + "_svi.asdf"))
-    
     ii =0
     params_single = list(af['posterior'].keys())
     all_params_single = [[i + "_q16", i + "_q50", i + "_q84"] for i in params_single]
     cat_col = np.append(["ID"], np.concatenate(all_params_single))
     t_empty = np.zeros((len(cat_col), 1))
-    t_empty[0, :] = str(id)
+    # t_empty[0, :] = str(id)
     t = Table(t_empty.T, names=cat_col)
 
     for ii_p in params_single:
-        t[ii_p + "_q16"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16)
-        t[ii_p + "_q50"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 50)
-        t[ii_p + "_q84"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84)
+        #for the PA, check for divergences
+        if ii_p == 'theta':
+            if np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84) - np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16) > 0.3:
+                print('Warning: PA is diverging for galaxy', id, 'and filter', filter, 'with type', type)
+                #instead of using the median, use the maximum with an arbitrary sensible error
+                t[ii_p + "_q50"] = np.max(np.concatenate(af['posterior'][ii_p][:]))
+                t[ii_p + "_q16"] = np.max(np.concatenate(af['posterior'][ii_p][:])) - 0.1
+                t[ii_p + "_q84"] = np.max(np.concatenate(af['posterior'][ii_p][:])) + 0.1
+                print('Setting PA to max value: ', t[ii_p + "_q50"])
+            else:
+                t[ii_p + "_q16"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16)
+                t[ii_p + "_q50"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 50)
+                t[ii_p + "_q84"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84)
+        else:
+            t[ii_p + "_q16"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16)
+            t[ii_p + "_q50"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 50)
+            t[ii_p + "_q84"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84)
 
-        t['ID'] = t['ID'].astype(int)
+        # t['ID'] = t['ID'].astype(int)
 
         for ii in t.keys()[1:]:
             t[ii].info.format = '.3f'
 
     t.write(os.path.join(path_output, "summary_" + str(id) + "_" + str(type) + "_" + filter.upper() + "_svi.cat"), format='ascii', overwrite = True)
-
-def main():
-
-    # id_file = fits.open('/Users/lola/Downloads/BJ_IDs.fits')
-    # IDs = np.array(id_file[1].data).flatten() #[1][0]
-
-    # id_file = Table.read('/Users/lola/Downloads/gabe_refit.txt', format='ascii')
-    # IDs = id_file['ID']
-    # remask = id_file['Remask']
-
-    # IDs_run = IDs[remask == 'TRUE']
-
-    # print(IDs_run)
-
-
-    IDs_lucy = [10612,6355]
-
-    for count,id in enumerate(IDs_lucy):
-
-        # if remask[count] == 'FALSE':
-        #     continue
-            
-        try:
-
-            #print the number of iterations we are at out of the total ones to run
-            print('Running iteration ' + str(count) + ' out of ' + str(len(IDs_lucy)) + ' with ID ' + str(id))
-
-                
-            for filter in ['F444W']: #
-                if filter == 'F150W':
-                    sigma_rms = 1
-                elif filter == 'F356W':
-                    sigma_rms = 1
-                elif filter == 'F444W':
-                    sigma_rms = 5
-                path_output = '/Users/lola/Desktop/lucy_pysersic_fits/'
-                file = fits.open('/Users/lola/Downloads/' + str(id) + '_NIRCam_' + filter + '_crop.fits')
-                im = jnp.array(file[0].data)
-                file_err = fits.open('/Users/lola/Downloads/' + str(id) + '_NIRCam_' + filter + '_error_crop.fits')
-                wht = file_err[0].data
-
-                #crop the image from 167x167 to 51x51
-                # im = im[58:109, 58:109]
-                # wht = wht[58:109, 58:109]
-                # im = im[38:129, 38:129]
-                # wht = wht[38:129, 38:129]
-                
-                # sig = 1/np.sqrt(wht)
-                sig = jnp.array(wht)
-                sig =jnp.where(np.isnan(im)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
-                # id = 10339
-                # psf = fits.getdata('/Users/lola/ASTRO/JWST/grism_project/gdn_mpsf_F356W_small.fits',0)
-                psf= utils.load_psf(filter=filter, y_factor=2)
-                # c = im.shape[0]//2
-                fit_data(filter, id, path_output=path_output,  im = im , sig =sig, psf = psf,
-                        fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=True, plot=True, sigma_rms = sigma_rms)
-                inc, PA, r_eff, x_c, y_c = get_params(path_output, id, filter, type = 'image')
-                # print(inc, PA, r_eff, x_c, y_c)
-                write_catalog(path_output, id, filter, type = 'image')
-        except Exception as e:
-            print('Error in iteration ' + str(count) + ' with ID ' + str(id) + ' and filter ' + str(filter))
-            print(e)
-            continue
-
 
 def run_pysersic_fit(filter, id, path_output, im, sig, psf, fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=True, plot=True, type = 'image', sigma_rms = 3.0):
     phot_PA = fit_data(filter, id, path_output=path_output,  im = im, sig =sig, psf = psf,
@@ -400,7 +359,262 @@ def run_pysersic_fit(filter, id, path_output, im, sig, psf, fit_multi=False, pos
     write_catalog(path_output, id, filter, type = type)
     return inc, PA, phot_PA, r_eff, x_c, y_c
 
+def prepare_grism(grism_path,wavelength):
+    grism_spectrum_fits = fits.open(grism_path)
+    #from 2D spectrum, extract wave_space (and the separate things like WRANGE, w_scale, and size), and aperture radius (to be used above)
+    wave_first = grism_spectrum_fits['SPEC2D'].header['WAVE_1']
+    d_wave = grism_spectrum_fits['SPEC2D'].header['D_WAVE']
+    naxis_x = grism_spectrum_fits['SPEC2D'].header['NAXIS1']
+    naxis_y = grism_spectrum_fits['SPEC2D'].header['NAXIS2']
+    # print(wave_first, d_wave, naxis_x, naxis_y)
+
+    wave_space = wave_first + jnp.arange(0, naxis_x, 1) * d_wave
+
+    #calculate the delta_wave_cutoff such that the image is square
+    delta_wave_cutoff = (naxis_y-1)*d_wave/2 
+    #crop and continuum subtract the grism spectrum
+    grism_spectrum = grism_spectrum_fits['SPEC2D'].data
+    grism_spectrum_error = grism_spectrum_fits['WHT2D'].data
+    obs_map, obs_error, index_min, index_max = preprocess.prep_grism(grism_spectrum,grism_spectrum_error, wavelength, delta_wave_cutoff, wave_first, d_wave)
+
+    print('obs_map shape:', obs_map.shape, 'obs_error shape:', obs_error.shape)
+
+    return obs_map, obs_error
+
+def main_callum():
+
+    IDs_run =  ['ZD4' ] 
+    #done: 'ALT-41799', 'BULLSEYE2-E','BULLSEYE2-W', 'BULLSEYE3', 'BULLSEYE4','BULLSEYE5','YD1','YD4','YD6','YD7-E','YD7-W','YD8','z8-2','ZD1', 'ZD2','ZD1', 'ZD2','ZD3','ZD6', 'ZD12-W', 's1' ,'ZD4',
+    # didn't work: 'PC6','ZD12-E',
+    path_output = '/Users/lola/Downloads/CallumCutouts/'
+    path_cutouts = '/Users/lola/Downloads/CallumCutouts/'
+    
+    filter_list = ['F150W']
+    sigma_rms = 1
+
+    psf_path = '/Users/lola/Downloads/CallumCutouts/PSF_NIRCam_in_flight_opd_filter_F150W.fits'
+    psf = fits.getdata(psf_path)
+
+    #crop the psf to 50x50 size
+    psf_crop = psf[psf.shape[0]//2-25:psf.shape[0]//2+25, psf.shape[1]//2-25:psf.shape[1]//2+25]
+
+    #resample the psf down to the pixel scale of the images
+    psf_lowres = utils.resample(psf_crop, 5,5)
+
+
+    for count,id in enumerate(IDs_run):
+            
+        try:
+
+            #print the number of iterations we are at out of the total ones to run
+            print('Running iteration ' + str(count) + ' out of ' + str(len(IDs_run)) + ' with ID ' + str(id))
+
+                
+            for filter in filter_list: #
+
+                file = fits.open(path_cutouts + str(id) + '_' + filter + '_flux.fits')
+                im = jnp.array(file[0].data)
+                file_err = fits.open(path_cutouts + str(id) + '_' + filter + '_error.fits')
+                wht = file_err[0].data
+
+
+                
+                # sig = 1/np.sqrt(wht)
+                sig = jnp.array(wht)
+                sig =jnp.where(np.isnan(im)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
+                #crop the image to 15x15 pixels
+                im = im[im.shape[0]//2-7:im.shape[0]//2+8, im.shape[1]//2-7:im.shape[1]//2+8]
+                sig = sig[sig.shape[0]//2-7:sig.shape[0]//2+8, sig.shape[1]//2-7:sig.shape[1]//2+8]
+
+                fit_data(filter, id, path_output=path_output,  im = im , sig =sig, psf = psf_lowres,
+                        fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=False, plot=True, sigma_rms = sigma_rms)
+                inc, PA, r_eff, x_c, y_c = get_params(path_output, id, filter, type = 'image')
+                # print(inc, PA, r_eff, x_c, y_c)
+                write_catalog(path_output, id, filter, type = 'image')
+
+        except Exception as e:
+            print('Error in iteration ' + str(count) + ' with ID ' + str(id) + ' and filter ' + str(filter))
+            print(e)
+            continue
+
+
+def main_lola_images():
+
+    #load my catalog
+    cat = Table.read('/Users/lola/ASTRO/JWST/grism_project/catalogs/Gold_Silver_Unres_FRESCO_CONGRESS.txt', format = 'ascii')
+
+    IDs_rerun = []
+
+
+    IDs_run = cat['ID']
+    RA = cat['RA']
+    DEC = cat['DEC']
+    field = cat['field']
+
+    path_output = '/Users/lola/ASTRO/JWST/grism_project/PysersicFits_v1/'
+    path_cutouts = '/Users/lola/ASTRO/JWST/grism_project/cutouts_v1/'
+
+    filter_list = ['F150W']
+    alternate_filter_list = ['F182M']
+    sigma_rms = 2
+
+    psf = None
+
+    bad_150w = ['1089292', '1089274', '1094903', '1098616', '1022983']
+
+    for count,id in enumerate(IDs_rerun):
+
+        id_mask = (IDs_run == int(id))
+        #check if the file doesn't already exist
+        file_name = os.path.join(path_output, str(id) + '_image_F150W_corner_svi.png')
+        other_file_name = os.path.join(path_output, str(id) + '_image_F182M_corner_svi.png')
+    # --------------------------- check if the file already exists and if the PA uncertainty is small enough---------------------------
+        # try:
+        #     file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F150W_svi.cat'), format='ascii')
+        #     print(file['theta_q84']-file['theta_q16'])
+        #     if file['theta_q84']-file['theta_q16']>0.5:
+        #         print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+        #     else:
+        #         print('File ' + file_name + ' already exists, skipping this iteration.')
+        #         continue    
+        # except Exception as e:
+        #     try:
+        #         file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F182M_svi.cat'), format='ascii')
+        #         if file['theta_q84']-file['theta_q16']>0.5:
+        #             print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+        #         else:
+        #             print('File ' + file_name + ' already exists, skipping this iteration.')
+        #             continue
+        #     except Exception as e:
+        #         print('No file found for ID ' + str(id))
+        #         continue
+        # # if os.path.exists(file_name) or os.path.exists(other_file_name):
+        # #     print('File ' + file_name + ' already exists, skipping this iteration.')
+        # #     continue
+    # ---------------------------------------------------------------------------------------------------------------------------------
+            
+        try:
+
+            #print the number of iterations we are at out of the total ones to run
+            print('Running iteration ' + str(count) + ' out of ' + str(len(IDs_run)) + ' with ID ' + str(id))
+
+                
+            for i,filter in enumerate(filter_list): 
+            
+                im_path = path_cutouts + str(id) + '_' + filter + '.fits'
+                file = fits.open(im_path)
+                im = jnp.array(file['SCI'].data)
+                #check if the image file is all zero
+                if np.all(im == 0) or str(id) in bad_150w:
+                    filter = alternate_filter_list[i]
+                    im_path = path_cutouts + str(id) + '_' + filter + '.fits'
+                    file = fits.open(im_path)
+                    im = jnp.array(file['SCI'].data)
+            
+
+                err = jnp.array(file['ERR'].data)
+
+                #crop the image and error so the cutout is 30x30
+                shape = int(im.shape[0]/2)
+                size = 20
+                im_crop = im[shape-size:shape+size,shape-size:shape+size]
+                err_crop = err[shape-size:shape+size,shape-size:shape+size]
+                sig = err_crop
+                sig =jnp.where(np.isnan(im_crop)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
+
+                #load the psf
+                if field[id_mask] == 'GOODS-S-FRESCO':
+                    bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/program_bithash.goodss.v1.0.0.fits'
+                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/'
+                else:
+                    bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/program_bithash.goodsn.v1.0.0.fits'
+                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/'
+                print(RA[id_mask], DEC[id_mask])
+                psf_path = utils.choose_mspf(bithash_file, psf_dir, RA[id_mask], DEC[id_mask], [im_path])[0]
+                psf = fits.getdata(psf_path)
+
+                #downsample it down to the grism resolution
+                psf = utils.downsample_psf_centered(psf, size = 15)
+
+                fit_data(filter, id, path_output=path_output,  im = im_crop , sig =sig, psf = psf,
+                        fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=True, plot=True, sigma_rms = sigma_rms)
+                
+                inc, PA, r_eff, x_c, y_c = get_params(path_output, id, filter, type = 'image')
+                # print(inc, PA, r_eff, x_c, y_c)
+                write_catalog(path_output, id, filter, type = 'image')
+
+        except Exception as e:
+            print('Error in iteration ' + str(count) + ' with ID ' + str(id) + ' and filter ' + str(filter))
+            traceback.print_exc()
+            # sys.exit()
+            continue
+
+
+
+def main_lola_grism():
+
+    #load my catalog
+    cat = Table.read('/Users/lola/ASTRO/JWST/grism_project/catalogs/Gold_Silver_Unres_FRESCO_CONGRESS.txt', format = 'ascii')
+
+    IDs_run = cat['ID']
+    RA = cat['RA']
+    DEC = cat['DEC']
+    field = cat['field']
+    z_spec = cat['z_spec']
+
+    #calculate the Ha observed wavelength for each object
+    wavelength = 0.65646 * (1 + z_spec) #in microns
+
+    path_output = '/Users/lola/ASTRO/JWST/grism_project/PysersicFits_v1_grism/'
+    path_cutouts = '/Users/lola/ASTRO/JWST/grism_project/fitting_results/'
+
+    sigma_rms = 1
+
+
+    for count,id in enumerate(IDs_run):
+            
+        try:
+
+            #print the number of iterations we are at out of the total ones to run
+            print('Running iteration ' + str(count) + ' out of ' + str(len(IDs_run)) + ' with ID ' + str(id))
+
+            #load the psf
+            if field[count] == 'GOODS-S-FRESCO':
+                psf_path = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/mpsf_jw018950.gs.f444w.fits' #fresco
+                filter = 'F444W'
+                grism_str = 'FRESCO'
+            elif field[count] == 'GDN-FRESCO':
+                psf_path = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/mpsf_jw018950.gn.f444w.fits' #fresco
+                filter = 'F444W'
+                grism_str = 'GDN'
+            else:
+                psf_path = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/mpsf_jw035770.f356w.fits' #congress
+                filter = 'F356W'
+                grism_str = 'GDN'
+
+            psf = fits.getdata(psf_path)
+
+            #downsample it down to the grism resolution
+            psf = utils.downsample_psf_centered(psf, size = 15)
+            
+            im_path = path_cutouts + str(id) + '/spec_2d_' + grism_str + '_' + filter + '_ID' + str(id) + '_comb.fits'
+            im, err = prepare_grism(im_path, wavelength[count])
+
+            sig = err
+            sig =jnp.where(np.isnan(im)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
+
+            fit_data(filter, id, path_output=path_output,  im = im , sig =sig, psf = psf,
+                    fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=True, plot=True, sigma_rms = sigma_rms, type = 'grism')
+            
+            inc, PA, r_eff, x_c, y_c = get_params(path_output, id, filter, type = 'grism')
+            # print(inc, PA, r_eff, x_c, y_c)
+            write_catalog(path_output, id, filter, type = 'grism')
+        except Exception as e:
+            print('Error in iteration ' + str(count) + ' with ID ' + str(id) + ' and filter ' + str(filter))
+            traceback.print_exc()
+            sys.exit()
+
+
 if __name__=="__main__":
-    # print('hi')
-    main()
+    main_lola_images()
 

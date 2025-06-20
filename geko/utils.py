@@ -50,6 +50,12 @@ from scipy import stats as st
 
 from . import  models
 
+import os
+
+from pathlib import Path
+
+from astropy.wcs import WCS
+
 
 
 def oversample(image_low_res, factor_y, factor_x, method='nearest'):
@@ -368,6 +374,24 @@ def save_fits_image(image, masked_indices, inference_data, filename):
 
     hdul.writeto(filename, overwrite=True)
     
+def downsample_psf_centered(psf_full, size):
+    psf_crop = np.array(psf_full[psf_full.shape[0]//2 - size:psf_full.shape[0]//2 + size + 1, \
+                                            psf_full.shape[1]//2 - size:psf_full.shape[1]//2 + size + 1])
+
+
+    #downsample the psf by a factor of 2
+    psf_downsampled = np.zeros(((psf_crop.shape[0]-1)//2 , (psf_crop.shape[0]-1)//2))
+
+    print(psf_downsampled.shape)
+    #each pixel in the downsized image is equal to the sum of its original pizel plus half of each of the 4 neighboring pixel
+    # for i in np.linspace(1, (psf_crop.shape[0]-1)//2, (psf_crop.shape[0]-1)//2):
+    #     for j in np.linspace(1, (psf_crop.shape[0]-1)//2, (psf_crop.shape[0]-1)//2):
+    i= jnp.linspace(0, (psf_crop.shape[0]-1)//2 -1, (psf_crop.shape[0]-1)//2).astype(int)
+    j= jnp.linspace(0, (psf_crop.shape[0]-1)//2 -1, (psf_crop.shape[0]-1)//2).astype(int)   
+    i,j = jnp.meshgrid(i,j)
+    psf_downsampled[i,j] = psf_crop[2*i + 1,2*j + 1] + 0.5*(psf_crop[2*i + 2,2*j + 1] + psf_crop[2*i,2*j + 1] + psf_crop[2*i + 1,2*j + 2] + psf_crop[2*i + 1,2*j])
+
+    return psf_downsampled
 
 def load_psf( filter, y_factor, size = 9, psf_folder = 'mpsf_gds/'):
     psf_fits = fits.open(psf_folder + 'mpsf_' + str(filter).lower() + '.fits') 
@@ -375,23 +399,8 @@ def load_psf( filter, y_factor, size = 9, psf_folder = 'mpsf_gds/'):
 
     print(psf_full.shape)
     if y_factor == 1: #then you have to resample it down to 0.063 resolution
-        psf_crop = np.array(psf_full[psf_full.shape[0]//2 - size:psf_full.shape[0]//2 + size + 1, \
-                                             psf_full.shape[1]//2 - size:psf_full.shape[1]//2 + size + 1])
 
-
-        #downsample the psf by a factor of 2
-        psf_downsampled = np.zeros(((psf_crop.shape[0]-1)//2 , (psf_crop.shape[0]-1)//2))
-
-        print(psf_downsampled.shape)
-        #each pixel in the downsized image is equal to the sum of its original pizel plus half of each of the 4 neighboring pixel
-        # for i in np.linspace(1, (psf_crop.shape[0]-1)//2, (psf_crop.shape[0]-1)//2):
-        #     for j in np.linspace(1, (psf_crop.shape[0]-1)//2, (psf_crop.shape[0]-1)//2):
-        i= jnp.linspace(0, (psf_crop.shape[0]-1)//2 -1, (psf_crop.shape[0]-1)//2).astype(int)
-        j= jnp.linspace(0, (psf_crop.shape[0]-1)//2 -1, (psf_crop.shape[0]-1)//2).astype(int)   
-        i,j = jnp.meshgrid(i,j)
-        psf_downsampled[i,j] = psf_crop[2*i + 1,2*j + 1] + 0.5*(psf_crop[2*i + 2,2*j + 1] + psf_crop[2*i,2*j + 1] + psf_crop[2*i + 1,2*j + 2] + psf_crop[2*i + 1,2*j])
-
-        psf = psf_downsampled
+        psf = downsample_psf_centered(psf_full, size)
     else:
         #make cutout of the psf to size = size
         psf = psf_full[psf_full.shape[0]//2 - size//2:psf_full.shape[0]//2 + size//2 + 1, \
@@ -816,3 +825,140 @@ def Ie_to_flux(Ie,n,r_e,ellip):
     total_flux = Ie* (r_e**2 * q * 2*jnp.pi * n * jnp.exp(bn) * bn**(-2*n) * G2n )
     return total_flux
 
+
+def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
+    '''
+    Inpiuts: the bithash file - need to download this
+    the directory where the PSFs are stored
+    the RA and DEC of the object in the catalog
+    a list (with 1 entry) of the image in the wanted filter so the code can read info from the header
+
+    Returns: a 1-item list of the path of the PSF to use for this object!!!
+
+    => based on which program has the most exposures for that object 
+    '''
+
+    #initialize empty psf_list for this object
+    psf_list = []
+
+    #load bithash file
+    bitheader = fits.getheader(bithash_file, 'BITHASH')
+    bitmap = fits.getdata(bithash_file, 'BITHASH')
+    w = WCS(bitheader)
+
+    #match object coordinates to find bithash
+    xx, yy = w.world_to_pixel_values(RA, DEC)
+    bithash = bitmap[int(yy), int(xx)]
+
+    #get decoder table
+    decoder = fits.getdata(bithash_file,'DECODER')
+
+    #get bithash to decode
+    bithash = np.int64(bithash)
+
+    #get binary rep of bit hash
+    bin = np.binary_repr(bithash)
+
+    #print(f'Bithash to decode: {bithash}')
+
+    n = len(bin)
+
+    #create dictionary of bits associated with program fits files
+    obs_dict = {}
+
+    for i in range(n):
+      if(int(bin[n-1-i])==1):
+        if(int(bin[n-1-i])==1):
+          xi = np.where(decoder['bit']==i)[0]
+          obs_dict[i] = []
+          for index in xi:
+            #print(f"Bit: {i} Field: {decoder['image'][index]}")
+            obs_dict[i].append(decoder['image'][index])
+    #for each image in image_list, copy the dictionary, remove values that correspond to other images (ie filters),
+    #and choose the preferred mpsf files from the pared-down dictionary
+    nimgs = len(image_list)
+
+    for k in range(nimgs):
+
+        #look through the obs_dict in order and stop when you find a program with the needed filter
+        basename = os.path.basename(image_list[k])
+        filter_lower = basename.split('_')[1].lower()
+        #re-order the obs_dict so the keys are from smallest to largest
+        obs_dict_copy = dict(sorted(obs_dict.items()))
+
+        if 8 in obs_dict_copy.keys():
+            #if we have a 3215 psf, use it
+            mpsf_file = obs_dict_copy[8][0].split('/')[-1]
+            psf_path = f'{psf_dir}/mpsf_{mpsf_file}'
+        else:
+            #look through the rest
+            for key, value in obs_dict_copy.items():
+                #extract the program name from the full title 
+                program = value[0].split('/')[-1].split('.')[0]
+                #check if that program has a psf in the required filter
+
+                # Set the directory to search in
+                search_dir = Path(psf_dir)
+                # Multiple words (all must be present)
+                words = [program, filter_lower]
+                print(words)
+                matching_files = [
+                    f for f in search_dir.rglob("*")
+                    if f.is_file() and all(word in f.name for word in words)
+                ]
+
+                #if matching_files is not empty, we have a match
+                if matching_files:
+                    #print(f"Found matching file for {program} in filter {filter_lower}: {matching_files[0]}")
+                    print(matching_files[0])
+                    psf_path = str(matching_files[0])
+                    break
+            try:
+                psf_path
+            except NameError:
+                #if we didn't find a match, allow for module specific PSFs
+                print(f"No matching file found for {program} in filter {filter_lower}, using module specific PSF")
+                #remove the .fits from the filter name
+                filter_lower_flex = filter_lower[:-5]
+                for key, value in obs_dict_copy.items():
+                    #extract the program name from the full title 
+                    program = value[0].split('/')[-1].split('.')[0]
+                    #check if that program has a psf in the required filter
+
+                    # Set the directory to search in
+                    search_dir = Path(psf_dir)
+                    # Multiple words (all must be present)
+                    words = [program, filter_lower_flex]
+                    print(words)
+                    matching_files = [
+                        f for f in search_dir.rglob("*")
+                        if f.is_file() and all(word in f.name for word in words)
+                    ]
+
+                    #if matching_files is not empty, we have a match
+                    if matching_files:
+                        #print(f"Found matching file for {program} in filter {filter_lower}: {matching_files[0]}")
+                        print(matching_files[0])
+                        psf_path = str(matching_files[0])
+                        break
+
+        #change psf_path according to field / lux location
+        # psf_path = f'{psf_dir}/mpsf_{mpsf_file}'
+        if 'dec' in psf_path:
+            psf_path = psf_path.replace('dec', 'oct')
+
+        psf_list.append(psf_path)
+
+    return psf_list
+
+def rotate_coords(x,y,xc,yc,theta):
+    '''
+    Xc,Yc is the center of the image
+    Angle is in RADIANS, and the rotation is counter-clockwise
+    '''
+    # Rotate (x0, y0) around (xc, yc)
+    dx, dy = x - xc, y - yc
+    x_rot = xc + jnp.cos(theta) * dx - jnp.sin(theta) * dy
+    y_rot = yc + jnp.sin(theta) * dx + jnp.cos(theta) * dy
+
+    return x_rot, y_rot
