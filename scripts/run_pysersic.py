@@ -27,8 +27,9 @@ import jax.numpy as jnp
 from pysersic.rendering import HybridRenderer
 
 
+import traceback
 
-
+import sys
 
 import asdf 
 
@@ -76,7 +77,7 @@ def prepare_data(im, sig,psf, fit_multi=False, perform_masking=False, plot=False
 
     # make segmentation map and identify sources
     im_conv, segment_map = make_mask(im, sigma_rms)
-    segm_deblend = deblend_sources(im_conv, segment_map, npixels=10, nlevels = 64,  contrast=0.001, progress_bar=False) #contrast=0.001nlevels=50,
+    segm_deblend = deblend_sources(im_conv, segment_map, npixels=5, nlevels = 50,  contrast=1, progress_bar=False) #contrast=0.001nlevels=50,
     source_cat = SourceCatalog(im, segm_deblend, convolved_data=im_conv, error=sig)
     source_tbl = source_cat.to_table()
 
@@ -316,7 +317,6 @@ def get_params(path_output, id, filter, type = 'image'):
 
 def write_catalog(path_output, id, filter, type = 'image'):
     af = asdf.open(os.path.join(path_output, str(id) + "_" + str(type) + "_" + filter.upper() + "_svi.asdf"))
-    
     ii =0
     params_single = list(af['posterior'].keys())
     all_params_single = [[i + "_q16", i + "_q50", i + "_q84"] for i in params_single]
@@ -326,9 +326,23 @@ def write_catalog(path_output, id, filter, type = 'image'):
     t = Table(t_empty.T, names=cat_col)
 
     for ii_p in params_single:
-        t[ii_p + "_q16"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16)
-        t[ii_p + "_q50"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 50)
-        t[ii_p + "_q84"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84)
+        #for the PA, check for divergences
+        if ii_p == 'theta':
+            if np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84) - np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16) > 0.3:
+                print('Warning: PA is diverging for galaxy', id, 'and filter', filter, 'with type', type)
+                #instead of using the median, use the maximum with an arbitrary sensible error
+                t[ii_p + "_q50"] = np.max(np.concatenate(af['posterior'][ii_p][:]))
+                t[ii_p + "_q16"] = np.max(np.concatenate(af['posterior'][ii_p][:])) - 0.1
+                t[ii_p + "_q84"] = np.max(np.concatenate(af['posterior'][ii_p][:])) + 0.1
+                print('Setting PA to max value: ', t[ii_p + "_q50"])
+            else:
+                t[ii_p + "_q16"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16)
+                t[ii_p + "_q50"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 50)
+                t[ii_p + "_q84"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84)
+        else:
+            t[ii_p + "_q16"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16)
+            t[ii_p + "_q50"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 50)
+            t[ii_p + "_q84"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 84)
 
         # t['ID'] = t['ID'].astype(int)
 
@@ -429,21 +443,55 @@ def main_lola_images():
     #load my catalog
     cat = Table.read('/Users/lola/ASTRO/JWST/grism_project/catalogs/Gold_Silver_Unres_FRESCO_CONGRESS.txt', format = 'ascii')
 
+    IDs_rerun = []
+
+
     IDs_run = cat['ID']
     RA = cat['RA']
     DEC = cat['DEC']
     field = cat['field']
+
     path_output = '/Users/lola/ASTRO/JWST/grism_project/PysersicFits_v1/'
     path_cutouts = '/Users/lola/ASTRO/JWST/grism_project/cutouts_v1/'
 
     filter_list = ['F150W']
     alternate_filter_list = ['F182M']
-    sigma_rms = 3
+    sigma_rms = 2
 
     psf = None
 
+    bad_150w = ['1089292', '1089274', '1094903', '1098616', '1022983']
 
-    for count,id in enumerate(IDs_run):
+    for count,id in enumerate(IDs_rerun):
+
+        id_mask = (IDs_run == int(id))
+        #check if the file doesn't already exist
+        file_name = os.path.join(path_output, str(id) + '_image_F150W_corner_svi.png')
+        other_file_name = os.path.join(path_output, str(id) + '_image_F182M_corner_svi.png')
+    # --------------------------- check if the file already exists and if the PA uncertainty is small enough---------------------------
+        # try:
+        #     file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F150W_svi.cat'), format='ascii')
+        #     print(file['theta_q84']-file['theta_q16'])
+        #     if file['theta_q84']-file['theta_q16']>0.5:
+        #         print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+        #     else:
+        #         print('File ' + file_name + ' already exists, skipping this iteration.')
+        #         continue    
+        # except Exception as e:
+        #     try:
+        #         file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F182M_svi.cat'), format='ascii')
+        #         if file['theta_q84']-file['theta_q16']>0.5:
+        #             print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+        #         else:
+        #             print('File ' + file_name + ' already exists, skipping this iteration.')
+        #             continue
+        #     except Exception as e:
+        #         print('No file found for ID ' + str(id))
+        #         continue
+        # # if os.path.exists(file_name) or os.path.exists(other_file_name):
+        # #     print('File ' + file_name + ' already exists, skipping this iteration.')
+        # #     continue
+    # ---------------------------------------------------------------------------------------------------------------------------------
             
         try:
 
@@ -457,9 +505,10 @@ def main_lola_images():
                 file = fits.open(im_path)
                 im = jnp.array(file['SCI'].data)
                 #check if the image file is all zero
-                if np.all(im == 0):
+                if np.all(im == 0) or str(id) in bad_150w:
                     filter = alternate_filter_list[i]
-                    file = fits.open(path_cutouts + str(id) + '_' + filter + '.fits')
+                    im_path = path_cutouts + str(id) + '_' + filter + '.fits'
+                    file = fits.open(im_path)
                     im = jnp.array(file['SCI'].data)
             
 
@@ -474,14 +523,14 @@ def main_lola_images():
                 sig =jnp.where(np.isnan(im_crop)| np.isnan(sig) | np.isinf(sig), 1e10, sig)	
 
                 #load the psf
-                if field[count] == 'GOODS-S-FRESCO':
+                if field[id_mask] == 'GOODS-S-FRESCO':
                     bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/program_bithash.goodss.v1.0.0.fits'
                     psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/'
                 else:
                     bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/program_bithash.goodsn.v1.0.0.fits'
                     psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/'
-
-                psf_path = utils.choose_mspf(bithash_file, psf_dir, RA[count], DEC[count], [im_path])[0]
+                print(RA[id_mask], DEC[id_mask])
+                psf_path = utils.choose_mspf(bithash_file, psf_dir, RA[id_mask], DEC[id_mask], [im_path])[0]
                 psf = fits.getdata(psf_path)
 
                 #downsample it down to the grism resolution
@@ -496,7 +545,8 @@ def main_lola_images():
 
         except Exception as e:
             print('Error in iteration ' + str(count) + ' with ID ' + str(id) + ' and filter ' + str(filter))
-            print(e)
+            traceback.print_exc()
+            # sys.exit()
             continue
 
 
@@ -561,8 +611,8 @@ def main_lola_grism():
             write_catalog(path_output, id, filter, type = 'grism')
         except Exception as e:
             print('Error in iteration ' + str(count) + ' with ID ' + str(id) + ' and filter ' + str(filter))
-            print(e)
-            continue
+            traceback.print_exc()
+            sys.exit()
 
 
 if __name__=="__main__":
