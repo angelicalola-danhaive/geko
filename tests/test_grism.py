@@ -22,7 +22,7 @@ def test_compute_lsf(grism_instance):
 
 def test_compute_lsf_new(grism_instance):
     R = grism_instance.compute_lsf_new()
-    assert np.isclose(R, 1568, atol = 2)
+    assert np.isclose(R, 1599, atol = 2)
 
 def test_get_trace(grism_instance):
     dxs,disp_space = grism_instance.get_trace()

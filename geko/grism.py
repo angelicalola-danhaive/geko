@@ -317,13 +317,7 @@ class Grism:
 		#returning R for testing purposes
 		return R
 
-
-	def effective_sigma(self,kernel):
-		"""Estimate the effective standard deviation of a normalized LSF kernel."""
-		x = jnp.arange(kernel.shape[0]) - kernel.shape[0] // 2  # symmetric axis
-		mean = jnp.sum(x * kernel)
-		variance = jnp.sum(((x - mean) ** 2) * kernel)
-		return jnp.sqrt(variance)
+	
 	def compute_lsf_new(self):   
 		'''
 			New LSF computed by Fengwu from new data - sum of two Gaussians
@@ -346,14 +340,11 @@ class Grism:
 		lsf_kernel = jnp.array(float(frac_1)*Gaussian1DKernel(float(sigma_1/self.wave_scale), x_size = kernel_size) + float(1-frac_1)*Gaussian1DKernel(float(sigma_2/self.wave_scale), x_size = kernel_size)) #make it into a jax array so it is jax-compatible
 		#normalize the kernel to sum = 1
 		self.lsf_kernel = lsf_kernel/jnp.sum(lsf_kernel)
+		fwhm_lsf = np.sum(self.lsf_kernel >= np.max(self.lsf_kernel) / 2) * np.diff(self.wave_space)[0]
 
-		#compute the effective LSF for testing purposes
-		self.sigma_lsf = self.effective_sigma(lsf_kernel)* self.wave_scale #in microns
-		print(self.sigma_lsf, ' microns')
+		# self.sigma_v_lsf = self.sigma_lsf/(self.wavelength/(c/1000))
 
-		self.sigma_v_lsf = self.sigma_lsf/(self.wavelength/(c/1000))
-
-		R =self.wavelength/(self.sigma_lsf*(2*math.sqrt(2*math.log(2))))
+		R = self.wavelength/fwhm_lsf    #self.wavelength/(self.sigma_lsf*(2*math.sqrt(2*math.log(2))))
 
 		# Plot the resulting LSF
 		x = np.arange(kernel_size) - kernel_size // 2
@@ -410,7 +401,7 @@ class Grism:
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
 		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
 
-		sigma_LSF = self.sigma_lsf
+		# sigma_LSF = self.sigma_lsf
 
 		#set the effective dispersion which also accounts for the LSF
 		# wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
