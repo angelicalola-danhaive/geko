@@ -37,7 +37,7 @@ import matplotlib
 
 import smplotlib
 
-matplotlib.use('Agg')
+# matplotlib.use('Agg')
 
 # define key functions
 
@@ -334,7 +334,6 @@ def write_catalog(path_output, id, filter, type = 'image'):
                 t[ii_p + "_q50"] = np.max(np.concatenate(af['posterior'][ii_p][:]))
                 t[ii_p + "_q16"] = np.max(np.concatenate(af['posterior'][ii_p][:])) - 0.1
                 t[ii_p + "_q84"] = np.max(np.concatenate(af['posterior'][ii_p][:])) + 0.1
-                print('Setting PA to max value: ', t[ii_p + "_q50"])
             else:
                 t[ii_p + "_q16"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 16)
                 t[ii_p + "_q50"] = np.percentile(np.concatenate(af['posterior'][ii_p][:]), 50)
@@ -443,8 +442,6 @@ def main_lola_images():
     #load my catalog
     cat = Table.read('/Users/lola/ASTRO/JWST/grism_project/catalogs/Gold_Silver_Unres_FRESCO_CONGRESS.txt', format = 'ascii')
 
-    IDs_rerun = []
-
 
     IDs_run = cat['ID']
     RA = cat['RA']
@@ -462,35 +459,35 @@ def main_lola_images():
 
     bad_150w = ['1089292', '1089274', '1094903', '1098616', '1022983']
 
-    for count,id in enumerate(IDs_rerun):
+    for count,id in enumerate(IDs_run):
 
         id_mask = (IDs_run == int(id))
         #check if the file doesn't already exist
         file_name = os.path.join(path_output, str(id) + '_image_F150W_corner_svi.png')
         other_file_name = os.path.join(path_output, str(id) + '_image_F182M_corner_svi.png')
     # --------------------------- check if the file already exists and if the PA uncertainty is small enough---------------------------
-        # try:
-        #     file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F150W_svi.cat'), format='ascii')
-        #     print(file['theta_q84']-file['theta_q16'])
-        #     if file['theta_q84']-file['theta_q16']>0.5:
-        #         print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
-        #     else:
-        #         print('File ' + file_name + ' already exists, skipping this iteration.')
-        #         continue    
-        # except Exception as e:
-        #     try:
-        #         file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F182M_svi.cat'), format='ascii')
-        #         if file['theta_q84']-file['theta_q16']>0.5:
-        #             print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
-        #         else:
-        #             print('File ' + file_name + ' already exists, skipping this iteration.')
-        #             continue
-        #     except Exception as e:
-        #         print('No file found for ID ' + str(id))
-        #         continue
-        # # if os.path.exists(file_name) or os.path.exists(other_file_name):
-        # #     print('File ' + file_name + ' already exists, skipping this iteration.')
-        # #     continue
+        try:
+            file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F150W_svi.cat'), format='ascii')
+            if file['theta_q84']-file['theta_q16']>0.5:
+                print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+            else:
+                print('File ' + file_name + ' already exists, skipping this iteration.')
+                continue    
+        except Exception as e:
+            try:
+                file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F182M_svi.cat'), format='ascii')
+                if file['theta_q84']-file['theta_q16']>0.5:
+                    print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+                else:
+                    print('File ' + file_name + ' already exists, skipping this iteration.')
+                    continue
+            except Exception as e:
+                print('No file found for ID ' + str(id))
+                # continue
+
+        # if os.path.exists(file_name) or os.path.exists(other_file_name):
+        #     print('File ' + file_name + ' already exists, skipping this iteration.')
+        #     continue
     # ---------------------------------------------------------------------------------------------------------------------------------
             
         try:
@@ -529,7 +526,6 @@ def main_lola_images():
                 else:
                     bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/program_bithash.goodsn.v1.0.0.fits'
                     psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/'
-                print(RA[id_mask], DEC[id_mask])
                 psf_path = utils.choose_mspf(bithash_file, psf_dir, RA[id_mask], DEC[id_mask], [im_path])[0]
                 psf = fits.getdata(psf_path)
 
