@@ -10,7 +10,7 @@ __all__ = ['run_full_preprocessing', 'prep_grism']
 
 #imports
 from . import  utils
-from . import  grism#just for now since in active dev
+from . import  grism #just for now since in active dev
 from . import  models
 # import run_pysersic as py
 
@@ -472,7 +472,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 		#the input index_max should be the index of the last element of the array +1 (since that is how array cropping works)
 		#setting by default the dispersion center at the center of the image in its original resolution 
 		icenter = jcenter = obs_map.shape[0]//2
-		grism_object = grism_dev.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
+		grism_object = grism.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
 					   grism_filter = grism_filter, grism_module = module, grism_pupil = 'R', PSF = PSF)
 
 
