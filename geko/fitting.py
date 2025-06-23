@@ -183,14 +183,14 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 		field = input[0]['Data']['field']
 
 		try:
-			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
+			pysersic_summary = Table.read('PysersicFits_v1/summary_' + str(ID) + '_image_F150W_svi.cat', format='ascii')
 		except:
-			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F150W_svi.cat', format='ascii')
-
+			pysersic_summary = Table.read('PysersicFits_v1/summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
+		master_cat_table =Table.read(master_cat, format="ascii")
 		#load the prior for the total emission line flux 
-		log_int_flux = master_cat['fit_flux_cgs'][master_cat['ID'] == ID][0] #in log(ergs/s/cm2)
+		log_int_flux = master_cat_table['fit_flux_cgs'][master_cat_table['ID'] == ID][0] #in log(ergs/s/cm2)
 		int_flux = 10**log_int_flux #in ergs/s/cm2
-		log_int_flux_err = master_cat['fit_flux_cgs_e'][master_cat['ID'] == ID][0] #in log(ergs/s/cm2)
+		log_int_flux_err = master_cat_table['fit_flux_cgs_e'][master_cat_table['ID'] == ID][0] #in log(ergs/s/cm2)
 		int_flux_err_high = 10**(log_int_flux + log_int_flux_err) - 10**log_int_flux #in ergs/s/cm2
 		int_flux_err_low = 10**log_int_flux - 10**(log_int_flux - log_int_flux_err) #in ergs/s/cm2
 		int_flux_err = np.mean([int_flux_err_high, int_flux_err_low]) #in ergs/s/cm2
