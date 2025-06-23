@@ -117,7 +117,7 @@ def read_config_file(input, output, master_cat_path, line):
 	target_accept_prob = inference['Inference']['target_accept_prob']
 	
 	#return all of the parameters
-	return ID, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,  flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
+	return ID, field, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,  flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
 def renormalize_image(direct,direct_error, obs_map):
@@ -432,7 +432,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 			input = yaml.load(file, Loader=yaml.FullLoader)
 		print('Read inputs successfully')
 		#load of all the parameters from the configuration file
-		ID, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds,\
+		ID, field, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds,\
 		sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
 		#preprocess the images and the grism spectrum
 		if field == 'ALT':
@@ -448,9 +448,18 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 		obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
 				wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object = preprocess_mock_data(mock_params)
 
+	#load the PSF that corresponds to the grism program 
+	if field == 'GOODS-N':
+		psf_path = 'mpsf_v1/mpsf_jw018950.gn.f444w.fits' 
+	elif field == 'GOODS-N-CONGRESS':
+		psf_path = 'mpsf_v1/mpsf_jw035770.f356w.fits' 
+	elif field == 'GOODS-S-FRESCO':
+		psf_path = 'mpsf_v1/mpsf_jw018950.gs.f444w.fits' 
 
-	PSF = utils.load_psf(filter = grism_filter, y_factor = 1) #y_factor = 1 because putting it at grism resolution and then will be oversampled accordingly in the grism module
+	PSF = fits.getdata(psf_path)
 
+	#downsample it down to the grism resolution
+	PSF = utils.downsample_psf_centered(PSF, size = 15)
 	#run pysersic fit to get morphological parameters
 	if mock_params == None:
 		path_output = 'fitting_results/' + output
