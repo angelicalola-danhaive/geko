@@ -280,11 +280,14 @@ class Disk():
 
 		#central pixel from image
 		 #because the F115W is fit with the 0.03 resolution, the centroids are twice too big
-		xc_morph = py_table['xc_q50'][0]/2
+		 #but also, the fit is done on a 40x40 image and we want the center on a 31x31 image 
+		xc_morph_py = py_table['xc_q50'][0]/2
+		xc_morph = xc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		xc_err = ((py_table['xc_q84'][0] - py_table['xc_q50'][0]) + (py_table['xc_q50'][0] - py_table['xc_q16'][0]))/4
 		xc_std = xc_err*4 #boosting the uncertainties on the centroids to have a looser prior
 
-		yc_morph = py_table['yc_q50'][0]/2
+		yc_morph_py = py_table['yc_q50'][0]/2
+		yc_morph = yc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		yc_err = ((py_table['yc_q84'][0] - py_table['yc_q50'][0]) + (py_table['yc_q50'][0] - py_table['yc_q16'][0]))/4
 		yc_std = yc_err*4 #boosting the uncertainties on the centroids to have a looser prior
 
