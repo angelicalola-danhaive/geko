@@ -186,10 +186,14 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
 		except:
 			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F150W_svi.cat', format='ascii')
-		try:	
-			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F356W_svi.cat', format='ascii')
-		except:
-			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F444W_svi.cat', format='ascii')
+
+		#load the prior for the total emission line flux 
+		log_int_flux = master_cat['fit_flux_cgs'][master_cat['ID'] == ID][0] #in log(ergs/s/cm2)
+		int_flux = 10**log_int_flux #in ergs/s/cm2
+		log_int_flux_err = master_cat['fit_flux_cgs_e'][master_cat['ID'] == ID][0] #in log(ergs/s/cm2)
+		int_flux_err_high = 10**(log_int_flux + log_int_flux_err) - 10**log_int_flux #in ergs/s/cm2
+		int_flux_err_low = 10**log_int_flux - 10**(log_int_flux - log_int_flux_err) #in ergs/s/cm2
+		int_flux_err = np.mean([int_flux_err_high, int_flux_err_low]) #in ergs/s/cm2
 		
 		#based on the field, set the correction rotation to match JADES to the grism survey
 		if field == 'GOODS-S-FRESCO':
@@ -201,7 +205,7 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 		else:
 			raise ValueError("Field not recognized. Please check the field name in the config file.")
  
-		kin_model.disk.set_parametric_priors(pysersic_summary, pysersic_grism_summary, z_spec, wavelength, delta_wave, theta_rot, shape = obs_map.shape[0])
+		kin_model.disk.set_parametric_priors(pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength, delta_wave, theta_rot, shape = obs_map.shape[0])
 	else:
 		#raise non-parametric fitting not implemented error
 		raise ValueError("Non-parametric fitting is not implemented yet. Please set --parametric to True to use the parametric fitting.")

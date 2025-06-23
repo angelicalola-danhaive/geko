@@ -973,3 +973,56 @@ def rotate_coords(x,y,xc,yc,theta):
     y_rot = yc + jnp.sin(theta) * dx + jnp.cos(theta) * dy
 
     return x_rot, y_rot
+
+
+def flux_lambda_to_nu(F_lambda, lambda_microm):
+    """
+    Convert flux density from erg/s/cm²/microm to erg/s/cm²/Hz.
+
+    Parameters:
+    -----------
+    F_lambda : float or array-like
+        Spectral flux density in erg/s/cm²/nm.
+    lambda_nm : float or array-like
+        Wavelength in nanometers (nm) corresponding to F_lambda.
+
+    Returns:
+    --------
+    F_nu : float or array-like
+        Spectral flux density in erg/s/cm²/Hz.
+    """
+    c = 2.99792458e10  # speed of light in cm/s
+    lambda_cm = lambda_microm * 1e-4  # convert microm to cm
+    F_nu = F_lambda * (lambda_cm**2) / c
+    return F_nu
+
+def fnu_to_mjy(f_nu):
+    """
+    Convert flux density from erg/s/cm²/Hz to mJy.
+
+    Parameters:
+    -----------
+    f_nu : float or array-like
+        Spectral flux density in erg/s/cm²/Hz.
+
+    Returns:
+    --------
+    f_mjy : float or array-like
+        Spectral flux density in mJy.
+    """
+    return f_nu * 1e26  # Convert from erg/s/cm²/Hz to mJy
+
+
+def int_flux_to_flux_density(int_flux, lambda_micron, delta_lambda_microm):
+    """
+    Convert integrated flux to flux density.
+
+    int_flux = total EL flux in erg/s/cm2
+    """
+    delta_lambda_cm = delta_lambda_microm * 1e-4  # convert microm to cm
+    int_flux_per_micron = int_flux / delta_lambda_cm  # in erg/s/cm²/cm
+    total_disp_flux = flux_lambda_to_nu(int_flux_per_micron, lambda_micron)  #in erg/s/cm²/Hz
+
+    flux_density = fnu_to_mjy(total_disp_flux)  # Convert to mJy
+
+    return flux_density

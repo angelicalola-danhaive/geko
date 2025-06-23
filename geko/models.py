@@ -223,10 +223,10 @@ class Disk():
 		print('y0_vel --- Truncated Normal w/ mu: ' + str(self.mu_y0_vel) + ' and sigma: ' + str(self.y0_std) + ' and bounds: ' + str(self.y_low) + ' ' + str(self.y_high))
 		print('v0 --- Normal w/ mu: 0 and sigma: 100')
 
-	def set_parametric_priors(self,py_table, py_grism_table, redshift, wavelength, delta_wave, theta_rot = 0.0, shape = 31):
+	def set_parametric_priors(self,py_table, flux_measurements, redshift, wavelength, delta_wave, theta_rot = 0.0, shape = 31):
 		"""
 		Set the priors for the parametric model
-
+		delta_wave = the pixel scale along the wavelength axis, in the native instrument resolution 
 		theta_rot = the angle (in RADIANS) by which the rotate the image COUNTERCLOCKWISE in order to match the grism observations
 		"""
 		#need to set sizes in kpc before converting to arcsecs then pxs
@@ -273,13 +273,10 @@ class Disk():
 		# n_err = ((py_grism_table['n_q84'][0] - py_grism_table['n_q50'][0]) + (py_grism_table['n_q50'][0] - py_grism_table['n_q16'][0]))/2
 		# n_std = n_err/2.36
 
-		#take the flux from the grism
-		flux = py_grism_table['flux_q50'][0]
-		amplitude = flux #utils.flux_to_Ie(flux,n, r_eff, ellip)
-		amplitude_high = py_grism_table['flux_q84'][0] #utils.flux_to_Ie(py_grism_table['flux_q84'][0],n, r_eff, ellip)
-		amplitude_low = py_grism_table['flux_q16'][0] #utils.flux_to_Ie(py_grism_table['flux_q16'][0],n, r_eff, ellip)
-		amplitude_err = ((amplitude_high - amplitude) + (amplitude - amplitude_low))/2
-		amplitude_std = amplitude_err #no x2 because this is an accurate measurement of the flux in the grism data!
+		#get the flux prior from the integrated line measurements
+		int_flux, int_flux_err = flux_measurements
+		amplitude =  utils.int_flux_to_flux_density(int_flux, delta_wave, wavelength) #convert the integrated flux to a flux density
+		amplitude_std = utils.int_flux_to_flux_density(int_flux_err, delta_wave, wavelength) #convert the integrated flux to a flux density uncertainty
 
 		#central pixel from image
 		 #because the F115W is fit with the 0.03 resolution, the centroids are twice too big
@@ -313,16 +310,7 @@ class Disk():
 		PA_std = (PA_mean_err*2)*(180/jnp.pi) #convert to degrees
 		print('Setting parametric priors: ', PA, inclination, r_eff_Ha, n, amplitude, xc_morph, yc_morph)
 
-		#compute velocity bounds using the grism size
-		r_eff_grism = py_grism_table['r_eff_q50'][0]
-		r_s_grism = r_eff_grism/1.676
-		r22_grism = 2.2*r_s_grism
-		PA_grism = py_grism_table['theta_q50'][0]
-		#project r22 on the x axis using the PA
-		r22_x = jnp.abs(r22_grism*jnp.cos(PA_grism))
-		#compute the velocity gradient
-		vel_pix_scale = (delta_wave/wavelength)*(c/1000) #put c in km/s
-		# self.V_max = r22_x*vel_pix_scale
+		#set velocity bounds
 		self.V_max = 800
 		self.D_max = 500
 
