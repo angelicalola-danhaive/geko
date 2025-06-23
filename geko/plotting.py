@@ -315,23 +315,23 @@ def make_mask(im, sigma_rms, save_to_folder):
 	y_extent = np.max(np.abs(yy - yc_obj))
 
 	#plot the image and the segmentation map
-	fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-	ax[0].imshow(im_conv, origin='lower', cmap='Greys_r', interpolation='nearest')
-	ax[0].set_title('Data')
-	#plot the r_max
-	ax[0].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
-	#plot a line of length y_extent along the y axis starting from the center
-	ax[0].plot([xc_obj, xc_obj], [yc_obj - y_extent, yc_obj + y_extent], color='red', lw=2, label='y_extent')
+	# fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+	# ax[0].imshow(im_conv, origin='lower', cmap='Greys_r', interpolation='nearest')
+	# ax[0].set_title('Data')
+	# #plot the r_max
+	# ax[0].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
+	# #plot a line of length y_extent along the y axis starting from the center
+	# ax[0].plot([xc_obj, xc_obj], [yc_obj - y_extent, yc_obj + y_extent], color='red', lw=2, label='y_extent')
 
-	ax[1].imshow(closest_segm, origin='lower', cmap='tab20', interpolation='nearest')
-	ax[1].set_title('Segmentation map')
+	# ax[1].imshow(closest_segm, origin='lower', cmap='tab20', interpolation='nearest')
+	# ax[1].set_title('Segmentation map')
 
-	#plot the r_max
-	ax[1].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
-	plt.tight_layout()
-	plt.savefig('bboxes/' + str(save_to_folder) + '_bbox.png', dpi=300)
-	# plt.show()
-	plt.close()
+	# #plot the r_max
+	# ax[1].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
+	# plt.tight_layout()
+	# plt.savefig('bboxes/' + str(save_to_folder) + '_bbox.png', dpi=300)
+	# # plt.show()
+	# plt.close()
 	return im_conv, segment_map, r_max, y_extent
 
 
@@ -487,21 +487,6 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	X, Y = np.meshgrid(x, y)
 	# X *= 0.0629/factor#put it in arcseconds
 	# Y *= 0.0629/factor
-
-	#compute the maximum velocity within the main label
-	#find y-pixel extend of the main label
-	ymin = np.min(np.where(segm_deblend.data == main_label)[0])
-	ymax = np.max(np.where(segm_deblend.data == main_label)[0])
-	#find the max velocity in the direct image within the main label
-	v_max = np.nanmax(np.abs(model_velocities)[ymin:ymax+1, :])
-	# print('v_max', v_max)
-	# #plot the velocity map with the upper and lower limits
-	# plt.imshow(model_velocities, origin = 'lower', cmap = 'RdBu_r')
-	# #horizonal line
-	# plt.plot([0, direct_image_size], [ymin, ymin], 'k-', lw=2)
-	# plt.plot([0, direct_image_size], [ymax, ymax], 'k-', lw=2)
-	# plt.show()
-
 
 	#find the coordinates of the velocity centroid from model_velocities
 	grad_x, grad_y = np.gradient(model_velocities)
