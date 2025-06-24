@@ -7,7 +7,7 @@
 
 __all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', 'compute_gal_props',
            'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile', 
-           'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux']
+           'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux', 'rotate_coords']
            
 # geko imports
 
@@ -972,7 +972,7 @@ def rotate_coords(x,y,xc,yc,theta):
     x_rot = xc + jnp.cos(theta) * dx - jnp.sin(theta) * dy
     y_rot = yc + jnp.sin(theta) * dx + jnp.cos(theta) * dy
 
-    return x_rot, y_rot
+    return float(x_rot), float(y_rot)
 
 
 def flux_lambda_to_nu(F_lambda, lambda_microm):
