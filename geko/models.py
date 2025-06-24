@@ -255,7 +255,7 @@ class Disk():
 		r_eff_Ha = r_eff_UV*nUV_to_Ha
 		r_eff_UV_err = ((py_table['r_eff_q84'][0] - py_table['r_eff_q50'][0]) + (py_table['r_eff_q50'][0] - py_table['r_eff_q16'][0]))/4
 		#combine the uncertainties from measurements and scaling relation
-		r_eff_std = r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)*2 #adding uncertainity of 2 to broaden prior
+		r_eff_std = 2 #r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)*2 #adding uncertainity of 2 to broaden prior
 
 		#compute hard bounds for r_eff in kpc to not be too small or too big
 		r_eff_min_kpc = 0.1 
@@ -266,7 +266,7 @@ class Disk():
 
 		n = py_table['n_q50'][0]
 		n_err = ((py_table['n_q84'][0] - py_table['n_q50'][0]) + (py_table['n_q50'][0] - py_table['n_q16'][0]))/2
-		n_std = n_err*2
+		n_std = 1
 
 		#try taking n from grism too
 		# n = py_grism_table['n_q50'][0]
@@ -275,8 +275,8 @@ class Disk():
 
 		#get the flux prior from the integrated line measurements
 		int_flux, int_flux_err = flux_measurements
-		amplitude =  utils.int_flux_to_flux_density(int_flux, delta_wave, wavelength) #convert the integrated flux to a flux density
-		amplitude_std = utils.int_flux_to_flux_density(int_flux_err, delta_wave, wavelength) #convert the integrated flux to a flux density uncertainty
+		amplitude =  utils.int_flux_to_flux_density(int_flux,wavelength, delta_wave) #convert the integrated flux to a flux density
+		amplitude_std = utils.int_flux_to_flux_density(int_flux,wavelength, delta_wave) #convert the integrated flux to a flux density uncertainty
 
 		#central pixel from image
 		 #because the F115W is fit with the 0.03 resolution, the centroids are twice too big
@@ -284,12 +284,13 @@ class Disk():
 		xc_morph_py = py_table['xc_q50'][0]/2
 		xc_morph = xc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		xc_err = ((py_table['xc_q84'][0] - py_table['xc_q50'][0]) + (py_table['xc_q50'][0] - py_table['xc_q16'][0]))/4
-		xc_std = xc_err*4 #boosting the uncertainties on the centroids to have a looser prior
+		#set the uncertainties in the scale of the effective radius
+		xc_std = r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
 
 		yc_morph_py = py_table['yc_q50'][0]/2
 		yc_morph = yc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		yc_err = ((py_table['yc_q84'][0] - py_table['yc_q50'][0]) + (py_table['yc_q50'][0] - py_table['yc_q16'][0]))/4
-		yc_std = yc_err*4 #boosting the uncertainties on the centroids to have a looser prior
+		yc_std = r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
 
 		#rotate the prior according to theta rot
 		xc,yc = (shape-1)/2, (shape-1)/2
@@ -530,8 +531,12 @@ class Disk():
 	def compute_parametrix_flux_posterior(self, inference_data):
 		#compute means for parametric flux model
 		self.amplitude_mean = jnp.array(inference_data.posterior['amplitude'].median(dim=["chain", "draw"]))
+		self.amplitude_16 = jnp.array(inference_data.posterior['amplitude'].quantile(0.16, dim=["chain", "draw"]))
+		self.amplitude_84 = jnp.array(inference_data.posterior['amplitude'].quantile(0.84, dim=["chain", "draw"]))
 		self.r_eff_mean = jnp.array(inference_data.posterior['r_eff'].median(dim=["chain", "draw"]))
 		self.n_mean = jnp.array(inference_data.posterior['n'].median(dim=["chain", "draw"]))
+		self.n_16 = jnp.array(inference_data.posterior['n'].quantile(0.16, dim=["chain", "draw"]))
+		self.n_84 = jnp.array(inference_data.posterior['n'].quantile(0.84, dim=["chain", "draw"]))
 		# self.ellip_mean = jnp.array(inference_data.posterior['ellip'].median(dim=["chain", "draw"]))
 		self.PA_morph_mean = jnp.array(inference_data.posterior['PA_morph'].median(dim=["chain", "draw"])) #- 45
 		#compute the inclination prior posterior and median from the ellipticity
@@ -772,6 +777,13 @@ class DiskModel(KinModels):
 
 		# self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
 		inference_data,self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
+
+		self.amplitude_16 = self.disk.amplitude_16
+		self.amplitude_84 = self.disk.amplitude_84
+
+		self.n_16 = self.disk.n_16
+		self.n_84 = self.disk.n_84
+
 		self.r_eff_16 = self.disk.r_eff_16
 		self.r_eff_84 = self.disk.r_eff_84
 
