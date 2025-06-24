@@ -84,9 +84,6 @@ class Fit_Numpyro():
 
 		self.parametric = parametric
 
-	def __str__(self):
-		# print all of the attributes of the class
-		return 'Fit_Numpyro Class: \n' + ' - factor = ' + str(self.factor) + '\n - wave_factor = ' + str(self.wave_factor) + '\n grism object = ' + str(grism_object)
 
 	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
 
@@ -104,7 +101,7 @@ class Fit_Numpyro():
 
 
 		self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
-						 num_warmup=num_warmup, num_chains=num_chains)
+						 num_warmup=100, num_chains=100)
 		self.rng_key = random.PRNGKey(100)
 
 		new_mask = self.create_mask()
@@ -169,7 +166,7 @@ class Fit_Numpyro():
 		return new_mask
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
-def run_geko_fit(output, master_cat, line, parametric=False):
+def run_geko_fit(output, master_cat, line, parametric=False, save_runs_path = 'fitting_results/'):
 
 	# ----------------------------------------------------------preprocessing the data------------------------------------------------------------------------
 	z_spec, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,\
@@ -229,10 +226,11 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 	inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
 
 	# no ../ because the open() function reads from terminal directory (not module directory)
-	inf_data.to_netcdf('fitting_results/' + output + 'output')
+	inf_data.to_netcdf(save_runs_path + str(ID) + '_output')
+	# inf_data.to_netcdf('fitting_results/' + output + 'output')
 
 	#figure out how to make this work well
-	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric, ID = ID)
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric, ID = ID, save_runs_path = save_runs_path)
 
 
 

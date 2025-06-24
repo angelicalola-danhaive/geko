@@ -38,7 +38,7 @@ import corner
 
 # import smplotlib
 
-def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84):
+def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84, save_runs_path):
 	''' 
 		Save all of the best-fit parameters in a table
 	'''
@@ -124,7 +124,13 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	res['y0_vel_50'] = kin_model.y0_vel_mean
 	res['y0_vel_84'] = kin_model.y0_vel_84
 
-	res.write('fitting_results/' + output + 'results', format='ascii', overwrite=True)
+	res['amplitude_16'] = kin_model.amplitude_16
+	res['amplitude_84'] = kin_model.amplitude_84
+
+	res['n_16'] = kin_model.n_16
+	res['n_84'] = kin_model.n_84
+
+	res.write(save_runs_path + str(ID) + '_results', format='ascii', overwrite=True)
 	
 	#save a cornerplot of the v_sigma and sigma posteriors
 	fig = plt.figure(figsize=(10, 10))
@@ -146,10 +152,10 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
 						color='dodgerblue', **CORNER_KWARGS)
 	plt.tight_layout()
-	plt.savefig('fitting_results/' + output + 'v_sigma_corner.png', dpi=300)
+	plt.savefig(save_runs_path + str(ID)+'_v_sigma_corner.png', dpi=300)
 
 
-def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None):
+def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None):
 	"""
 		Main function that automatically post-processes the inference data and saves all of the relevant plots
 		Returns the main data products so that data can be analyzed separately
@@ -161,7 +167,7 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	#load inference data
 	if mock_params is None:
 		# inf_data = az.InferenceData.from_netcdf('FrescoHa/Runs-Final/' + output + '/'+ 'output')
-		inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
+		inf_data = az.InferenceData.from_netcdf(save_runs_path + str(ID) + '_output')
 		j=0
 	else:
 		inf_data = az.InferenceData.from_netcdf('testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_'+ 'output')
@@ -204,9 +210,9 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	
 	#save the best fit parameters in a table
 
-	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84)
+	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84, save_runs_path = save_runs_path)
 	
-	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med)
+	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med, save_runs_path = save_runs_path)
 
 	return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
 
