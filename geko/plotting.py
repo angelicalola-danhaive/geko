@@ -488,14 +488,16 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# X *= 0.0629/factor#put it in arcseconds
 	# Y *= 0.0629/factor
 
-	#find the coordinates of the velocity centroid from model_velocities
-	grad_x, grad_y = np.gradient(model_velocities)
-	center = np.nanargmax(np.sqrt(grad_y**2 + grad_x**2))
-	center = np.unravel_index(center, model_velocities.shape)
+
 	v0 = inf_data.posterior['v0'].quantile(0.5, dim=["chain", "draw"]).values
+	x0_morph = inf_data.posterior['x0_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	y0_morph = inf_data.posterior['y0_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	x0_vel = inf_data.posterior['x0_vel'].quantile(0.5, dim=["chain", "draw"]).values
+	y0_vel = inf_data.posterior['y0_vel'].quantile(0.5, dim=["chain", "draw"]).values
+
 	#the center is the pixel whose value is closest to v0
 	# center = [15,16] #np.unravel_index(np.nanargmin(np.abs(model_velocities - v0)), model_velocities.shape)
-	velocites_center = model_velocities[center[0], center[1]]
+	velocites_center = model_velocities[x0_vel, y0_vel]
 	vel_map_ax = fig.add_subplot(gs0[1,0])
 	cp = vel_map_ax.pcolormesh(X, Y,(model_velocities - v0), shading='nearest', cmap = 'RdBu_r')
 	# plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
@@ -506,8 +508,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	from matplotlib.patches import Ellipse
 
 	# Define ellipse parameters
-	center_x = (center[1]-x0)  # Assuming the ellipse is centered at the median x position
-	center_y = (center[0]-y0) # If the galaxy is centered at y=0 in arcsec
+	center_x = (x0_morph-x0)  # Assuming the ellipse is centered at the median x position
+	center_y = (y0_morph-y0) # If the galaxy is centered at y=0 in arcsec
 	width = 2*obs_radius  # Major axis (r_obs is the semi-major axis)
 	height = 2 * (1 - ellip)*obs_radius  # Minor axis, where ellip is the ellipticity (ellip = 1 - b/a)
 	angle = -np.degrees(theta_Ha)  # Rotation angle in degrees
@@ -562,7 +564,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 
 
-	vel_map_ax.plot((center[1]-x0), (center[0]-y0), '+', markersize=10, label = 'velocity centroid', color = 'black') #*0.0629/factor
+	vel_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, label = 'velocity centroid', color = 'black') #*0.0629/factor
+	vel_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=20, color = 'crimson')
 	# vel_map_ax.legend(fontsize = 10, loc = 'lower right', borderaxespad = 2)
 
 	veldisp_map_ax = fig.add_subplot(gs0[1,1])
@@ -575,8 +578,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# cbar.ax.set_ylabel(r'$\sigma_v$ [km/s]', fontsize = 5)
 	veldisp_map_ax.axis('off')
 	veldisp_map_ax.set_title(r'$\sigma_0$ map', fontsize=10)
-	veldisp_map_ax.plot((center[1]-x0), (center[0]-y0), '+', markersize=10, label = 'velocity centroid', color = 'black')
-	veldisp_map_ax.legend(fontsize = 10, loc = 'lower right',borderaxespad = 2)
+	veldisp_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, label = 'velocity centroid', color = 'black')
+	veldisp_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=20, color = 'crimson')
+	veldisp_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
 
 	veldisp_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=veldisp_map_ax.transAxes)
 	veldisp_map_ax.text(0.2, 0.5, '0.5"', color = 'black', fontsize = 10, ha='center', va='center', rotation = 90, transform=veldisp_map_ax.transAxes)
@@ -598,7 +602,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# cbar.ax.set_ylabel('flux [Mjy?]', fontsize = 5)
 	# cbar.ax.tick_params(labelsize = 5)
 	flux_map_ax.set_title(r'H$\alpha$ map', fontsize=10)
-	flux_map_ax.plot((center[1]-x0), (center[0]-y0), '+', markersize=10, label = 'velocity centroid', color = 'black')
+	flux_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, color = 'black')
+	flux_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=20, label = 'flux centroid', color = 'crimson')
+	flux_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
 	# flux_map_ax.legend(fontsize = 10, loc = 'lower right',borderaxespad = 2)
 
 	flux_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=flux_map_ax.transAxes)
@@ -671,7 +677,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		plot_datapoints=False,
 		fill_contours=True,
 		plot_contours=True,
-		show_titles=False,
+		show_titles=True,
 		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]', r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]'],
 		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$', r'$x_{0, v}$', r'$y_{0,v}$'],
 		max_n_ticks=3,
@@ -725,7 +731,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# fig.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot_text' + '.png', dpi=300)
 	plt.close()
 
-	return ymin,ymax
+	return None,None
 
 
 def plot_merger_summary(obs_map, model_map, obs_error, model_velocities, v_rot, fluxes_mean, inf_data, wave_space, mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None):
