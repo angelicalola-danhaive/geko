@@ -399,7 +399,23 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	#fit the observed data with photutils to get its radius
 	# make segmentation map and identify sources
-	im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 5, save_to_folder)
+	try:
+		im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 5, save_to_folder)
+	except Exception as e:
+		try:
+			print("Error in make_mask, trying with lower sigma_rms")
+			im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 3, save_to_folder)
+		except Exception as e:
+			try:
+				print("Trying with lowest sigma_rms")
+				im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 1, save_to_folder)
+			except Exception as e:
+				print("Error in make_mask with all sigma_rms values, setting rmax = 0")
+				rmax = 0.0
+				rmax_proj = 0.0
+	
+
+
 
 	# get the source properties
 	obs_radius = rmax #already computed in the make_mask function 
