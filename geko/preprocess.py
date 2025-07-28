@@ -450,13 +450,19 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 
 	#load the PSF that corresponds to the grism program 
 	if field == 'GOODS-N':
-		psf_path = 'mpsf_v1/mpsf_jw018950.gn.f444w.fits' 
+		psf_path = 'mpsf_v1d/mpsf_jw018950.gn.f444w.fits' 
 	elif field == 'GOODS-N-CONGRESS':
-		psf_path = 'mpsf_v1/mpsf_jw035770.f356w.fits' 
+		psf_path = 'mpsf_v1d/mpsf_jw035770.f356w.fits' 
 	elif field == 'GOODS-S-FRESCO':
-		psf_path = 'mpsf_v1/mpsf_jw018950.gs.f444w.fits' 
+		psf_path = 'mpsf_v1d/mpsf_jw018950.gs.f444w.fits' 
+	
+	#manually set the psf path to what it was in the previous version 
+	#THIS IS FOR TESTING PURPOSES, REMOVE AFTER!
+	# psf_path = 'mpsf_gds/mpsf_' + str(grism_filter).lower() + '.fits'
 
 	PSF = fits.getdata(psf_path)
+
+	# PSF = utils.load_psf(grism_filter, 1, 9)
 
 	#downsample it down to the grism resolution
 	PSF = utils.downsample_psf_centered(PSF, size = 15)
