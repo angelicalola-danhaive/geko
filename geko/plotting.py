@@ -506,14 +506,14 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 
 	v0 = inf_data.posterior['v0'].quantile(0.5, dim=["chain", "draw"]).values
-	x0_morph = inf_data.posterior['x0_morph'].quantile(0.5, dim=["chain", "draw"]).values
-	y0_morph = inf_data.posterior['y0_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	x0_morph = inf_data.posterior['xc_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	y0_morph = inf_data.posterior['yc_morph'].quantile(0.5, dim=["chain", "draw"]).values
 	x0_vel = inf_data.posterior['x0_vel'].quantile(0.5, dim=["chain", "draw"]).values
 	y0_vel = inf_data.posterior['y0_vel'].quantile(0.5, dim=["chain", "draw"]).values
 
 	#the center is the pixel whose value is closest to v0
 	# center = [15,16] #np.unravel_index(np.nanargmin(np.abs(model_velocities - v0)), model_velocities.shape)
-	velocites_center = model_velocities[x0_vel, y0_vel]
+	velocites_center = model_velocities[int(x0_vel), int(y0_vel)]
 	vel_map_ax = fig.add_subplot(gs0[1,0])
 	cp = vel_map_ax.pcolormesh(X, Y,(model_velocities - v0), shading='nearest', cmap = 'RdBu_r')
 	# plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
@@ -581,7 +581,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 
 	vel_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, label = 'velocity centroid', color = 'black') #*0.0629/factor
-	vel_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=20, color = 'crimson')
+	vel_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, color = 'crimson')
 	# vel_map_ax.legend(fontsize = 10, loc = 'lower right', borderaxespad = 2)
 
 	veldisp_map_ax = fig.add_subplot(gs0[1,1])
@@ -595,7 +595,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	veldisp_map_ax.axis('off')
 	veldisp_map_ax.set_title(r'$\sigma_0$ map', fontsize=10)
 	veldisp_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, label = 'velocity centroid', color = 'black')
-	veldisp_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=20, color = 'crimson')
+	veldisp_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, color = 'crimson')
 	veldisp_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
 
 	veldisp_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=veldisp_map_ax.transAxes)
@@ -619,7 +619,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# cbar.ax.tick_params(labelsize = 5)
 	flux_map_ax.set_title(r'H$\alpha$ map', fontsize=10)
 	flux_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, color = 'black')
-	flux_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=20, label = 'flux centroid', color = 'crimson')
+	flux_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, label = 'flux centroid', color = 'crimson')
 	flux_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
 	# flux_map_ax.legend(fontsize = 10, loc = 'lower right',borderaxespad = 2)
 
@@ -632,12 +632,13 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	# fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=15, fontweight='bold')
 	# fig.savefig('FrescoHa/GoldSummaries/' + str(save_to_folder) + '.png', dpi=500)
-	fig.tight_layout()
+	# plt.tight_layout()
 	if save_to_folder != None:
 		if name == 'summary':
-			fig.savefig(save_runs_path + str(save_to_folder).split['/'][0] + '_summary.png', dpi=300)
+			fig.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_summary.png', dpi=300, bbox_inches="tight")
 		else:
 			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
+	plt.close()
 
 
 	# gs1 = gs0[2,:]
@@ -713,8 +714,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# plt.gca().set(box_aspect=1)
 	if save_to_folder != None:
 		if name == 'summary':
-			plt.savefig('fitting_results/' + str(save_to_folder).split['/'][0] + '/cornerplot' + '.png', dpi=300)
-			figure_image = plt.imread('fitting_results/' + str(save_to_folder).split['/'][0] + '_cornerplot' + '.png')
+			plt.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png', dpi=300)
+			figure_image = plt.imread(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png')
 		elif name == 'pretty':
 			plt.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
 			figure_image = plt.imread('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png')
@@ -735,7 +736,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	if save_to_folder != None:
 		if name == 'summary':
-				fig.savefig('fitting_results/' + str(save_to_folder).split['/'][0] + '_summary_corner' + '.png', dpi=300)
+				fig.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_summary_corner' + '.png', dpi=300)
 		elif name == 'pretty':
 			fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
 		else:
