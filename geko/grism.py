@@ -124,7 +124,7 @@ class Grism:
 
 		self.get_trace()
 
-		self.compute_lsf_new()
+		self.compute_lsf() #_new()
 
 		self.compute_PSF(PSF)
 
@@ -411,7 +411,7 @@ class Grism:
 		# plt.show()
 		self.PSF =  self.oversampled_PSF[:,:, jnp.newaxis]
 
-		self.full_kernel = jnp.array(self.PSF) * self.lsf_kernel
+		# self.full_kernel = jnp.array(self.PSF) * self.lsf_kernel
 
 	
 	def disperse(self, F, V, D):
@@ -426,11 +426,11 @@ class Grism:
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
 		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
 
-		# sigma_LSF = self.sigma_lsf
+		sigma_LSF = self.sigma_lsf
 
 		#set the effective dispersion which also accounts for the LSF
-		# wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
-		wave_sigmas_eff = wave_sigmas
+		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
+		# wave_sigmas_eff = wave_sigmas
 
 		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
@@ -649,24 +649,24 @@ class Grism:
 
 	# def set_wave_scale(self, scale):
 
-		'''
-			Sets the scale of the grism image to 'scale'. Modifies all relevant parameters in the class so that when the disperse function is called, 
-			the grism wavelength space has the appropriate scale
+		# '''
+		# 	Sets the scale of the grism image to 'scale'. Modifies all relevant parameters in the class so that when the disperse function is called, 
+		# 	the grism wavelength space has the appropriate scale
 
-			Parameters
-			----------
+		# 	Parameters
+		# 	----------
 
-			Returns
-			----------
-		'''
+		# 	Returns
+		# 	----------
+		# '''
 
-		self.wave_scale = scale
-		self.sh_beam = (self.sh[0],((self.WRANGE[1]-self.WRANGE[0])/self.wave_scale).astype(int))
-		#full grism array
-		self.grism_full = jnp.zeros(self.sh_beam)
+		# self.wave_scale = scale
+		# self.sh_beam = (self.sh[0],((self.WRANGE[1]-self.WRANGE[0])/self.wave_scale).astype(int))
+		# #full grism array
+		# self.grism_full = jnp.zeros(self.sh_beam)
 
-		self.get_trace()
+		# self.get_trace()
 
-		self.compute_lsf()
+		# self.compute_lsf()
 
-		self.set_sensitivity()
+		# self.set_sensitivity()
