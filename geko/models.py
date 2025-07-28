@@ -49,6 +49,96 @@ import xarray as xr
 jax.config.update('jax_enable_x64', True)
 numpyro.enable_validation()
 
+# ============================================================================
+# STANDALONE JIT-COMPILED FUNCTIONS (extracted from class methods)
+# ============================================================================
+
+@jax.jit
+def _v_rad_core(x, y, PA, i, Va, r_t, r):
+	"""Core computation for radial velocity (extracted from KinModels.v_rad)"""
+	return (2/pi)*Va*jnp.arctan(r/r_t)*jnp.sin(i)
+
+
+@jax.jit  
+def _vel1d_core(r, Va, r_t):
+	"""Core computation for 1D velocity profile (extracted from KinModels.vel1d)"""
+	r_t_safe = jnp.where(r_t != 0.0, r_t, 1.0)
+	r_safe = jnp.where(r != 0.0, r, 1.0)
+	v_out = jnp.where((r_t!=0.0) & (r!=0.0), (2.0/jnp.pi)*Va*jnp.arctan2(r_safe,r_t_safe), 0.0)
+	return jnp.array(v_out)
+
+
+@jax.jit
+def _v_core(x, y, PA, i, Va, r_t):
+	"""Core computation for velocity field (extracted from KinModels.v)"""
+	i_rad = i / 180 * jnp.pi
+	PA_rad = PA / 180 * jnp.pi
+	
+	# Precompute trigonometric values
+	sini = jnp.sin(i_rad)
+	cosi = jnp.cos(i_rad)
+	
+	# Rotate coordinates
+	x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
+	y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
+	
+	# Safeguard for cases where cosi is zero
+	i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
+	cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
+	
+	# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
+	r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
+	r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
+	r = jnp.sqrt(r_safe_squared)
+	
+	# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
+	r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
+	
+	# Calculate observed velocity using the standalone vel1d function
+	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(x_rot, Va, r_t))
+	
+	# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
+	vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
+	
+	return vel_obs_final
+
+
+@jax.jit
+def _v_int_core(x, y, PA, i, Va, r_t):
+	"""Core computation for integrated velocity field (extracted from KinModels.v_int)"""
+	i_rad = i / 180 * jnp.pi
+	PA_rad = PA / 180 * jnp.pi
+	
+	# Precompute trigonometric values
+	sini = jnp.sin(i_rad)
+	cosi = jnp.cos(i_rad)
+	
+	# Rotate coordinates
+	x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
+	y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
+	
+	# Safeguard for cases where cosi is zero
+	i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
+	cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
+	
+	# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
+	r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
+	r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
+	r = jnp.sqrt(r_safe_squared)
+	
+	# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
+	r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
+	
+	# Calculate observed velocity using the standalone vel1d function
+	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(x_rot, Va, r_t))
+	
+	# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
+	vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
+	
+	return vel_obs_final
+
+# ============================================================================
+
 class KinModels:
 	'''
 		This top level class only contains the functions to make the velocity maps. The rest will be specific to each sub class.
@@ -59,83 +149,23 @@ class KinModels:
 		print('New kinematic model created')
 	
 	def v_rad(self, x, y, PA, i, Va, r_t, r):
-		return (2/pi)*Va*jnp.arctan(r/r_t)*jnp.sin(i)
+		"""Radial velocity component"""
+		return _v_rad_core(x, y, PA, i, Va, r_t, r)
 
 
 	def v(self, x, y, PA, i, Va, r_t):
-		i_rad = i / 180 * jnp.pi
-		PA_rad = PA / 180 * jnp.pi
-		
-		# Precompute trigonometric values
-		sini = jnp.sin(i_rad)
-		cosi = jnp.cos(i_rad)
-		
-		# Rotate coordinates
-		x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
-		y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
-		
-		# Safeguard for cases where cosi is zero
-		i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
-		cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
-		
-		# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
-		r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
-		r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
-		r = jnp.sqrt(r_safe_squared)
-		
-		# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
-		r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
-		
-		# Calculate observed velocity
-		vel_obs = jnp.where(cosi != 0, self.vel1d(r_safe, Va, r_t) * sini, self.vel1d(x_rot, Va, r_t))
-		
-		# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
-		vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
-		
-		return vel_obs_final
+		"""2D velocity field calculation"""
+		return _v_core(x, y, PA, i, Va, r_t)
 	
 	def v_int(self, x, y, PA, i, Va, r_t):
-		i_rad = i / 180 * jnp.pi
-		PA_rad = PA / 180 * jnp.pi
-		
-		# Precompute trigonometric values
-		sini = jnp.sin(i_rad)
-		cosi = jnp.cos(i_rad)
-		
-		# Rotate coordinates
-		x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
-		y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
-		
-		# Safeguard for cases where cosi is zero
-		i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
-		cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
-		
-		# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
-		r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
-		r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
-		r = jnp.sqrt(r_safe_squared)
-		
-		# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
-		r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
-		
-		# Calculate observed velocity
-		vel_obs = jnp.where(cosi != 0, self.vel1d(r_safe, Va, r_t), self.vel1d(x_rot, Va, r_t))
-		
-		# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
-		vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
-		
-		return vel_obs_final
+		"""Integrated velocity field calculation"""
+		return _v_int_core(x, y, PA, i, Va, r_t)
 	
 
 
 	def vel1d(self, r, Va, r_t):
-		r_t_safe = jnp.where(r_t != 0.0, r_t, 1.0)
-		r_safe = jnp.where(r != 0.0, r, 1.0)
-		v_out = jnp.where((r_t!=0.0) & (r!=0.0), (2.0/jnp.pi)*Va*jnp.arctan2(r_safe,r_t_safe), 0.0)
-		# v_out = 40
-		# v_out = jnp.where(jnp.cos(r/r_t), (2.0/jnp.pi)*Va*jnp.arctan2(r,jnp.where(jnp.abs(r_t)>0, r_t, 1.0)), 0.0)
-
-		return jnp.array(v_out)
+		"""1D velocity profile"""
+		return _vel1d_core(r, Va, r_t)
 
 
 		# return dispersions
