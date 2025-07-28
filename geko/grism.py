@@ -43,6 +43,31 @@ import time
 import jax
 jax.config.update('jax_enable_x64', True)
 
+# ============================================================================
+# STANDALONE JIT-COMPILED FUNCTIONS (extracted from Grism class methods)
+# ============================================================================
+
+@jax.jit
+def _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges):
+	"""Core Gaussian computation for dispersion (extracted from Grism.disperse)"""
+	from jax.scipy import special
+	import math
+	
+	# Make 3D cube (spatial, spectral, wavelengths)
+	mu = wave_centers[:,:,jnp.newaxis]
+	sigma = wave_sigmas_eff[:,:,jnp.newaxis]
+	
+	# Compute CDF for Gaussian integration
+	cdf = 0.5 * (1 + special.erf((wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu) / (sigma * math.sqrt(2.0))))
+	gaussian_matrix = cdf[:,:,1:] - cdf[:,:,:-1]
+	
+	# Create spectral cube
+	cube = F[:,:,jnp.newaxis] * gaussian_matrix
+	
+	return cube
+
+# ============================================================================
+
 
 
 class Grism:
@@ -418,12 +443,12 @@ class Grism:
 		wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
 
 
-		cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+		# Use JIT-compiled core for Gaussian computation
+		cube = _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges)
 
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix
+		# psf_cube = fftconvolve(cube, self.full_kernel, mode='same') 
+		psf_cube = fftconvolve(cube, self.PSF, mode='same') 
 
-		psf_cube = fftconvolve(cube, self.full_kernel, mode='same') 
 		#collapse across the x axis
 		grism_full = jnp.sum(psf_cube, axis = 1) 
 		return grism_full
