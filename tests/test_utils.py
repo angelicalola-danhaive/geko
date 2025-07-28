@@ -41,6 +41,9 @@ def test_rotating_prior():
     plt.show()
     #rotate the image by 45 degrees
     x0_new, y0_new = rotate_coords(1,1,0,0,np.radians(45))
+    # Convert JAX arrays to Python floats for astropy
+    x0_new = float(x0_new)
+    y0_new = float(y0_new)
     print(f"New coordinates after rotation: x0={x0_new}, y0={y0_new}")
     theta_new = np.radians(45) + np.pi/2  # add pi/2 to the original theta
     print(f"New theta after rotation: {theta_new} radians")
