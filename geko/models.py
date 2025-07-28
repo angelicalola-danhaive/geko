@@ -261,7 +261,7 @@ class Disk():
 		"""
 		#need to set sizes in kpc before converting to arcsecs then pxs
 		arcsec_per_kpc = cosmo.arcsec_per_kpc_proper(z=redshift).value
-		kpc_per_pixel = 0.06/arcsec_per_kpc
+		kpc_per_pixel = 0.063/arcsec_per_kpc
 
 		ellip = py_table['ellip_q50'][0] 
 		# inclination = jnp.arccos(1-ellip)*180/jnp.pi
@@ -270,22 +270,16 @@ class Disk():
 		# inclination_err = (((jnp.arccos(1-py_table['ellip_q84'][0]) - jnp.arccos(1-py_table['ellip_q50'][0])) + (jnp.arccos(1-py_table['ellip_q50'][0]) - jnp.arccos(1-py_table['ellip_q16'][0])))/2)*180/jnp.pi
 		inclination_err = ( (utils.compute_inclination(ellip = py_table['ellip_q84'][0], q0 = 0.2) - inclination) + (inclination - utils.compute_inclination(ellip = py_table['ellip_q16'][0], q0 = 0.2)) )/2
 
-		inclination_std = inclination_err #no x2 bc this is an accurate measurement!
+		inclination_std = inclination_err*2 #no x2 bc this is an accurate measurement!
 		# ellip_std =   ellip_err/2.36
 
 		#because the F115W is fit with the 0.03 resolution, r_eff is twice too big
-		#also using Natalia's fit to convert from near-UV to Ha sizes and for the scatter/uncertainty
-		nUV_to_Ha = 1 #10**0.2
-		nUV_to_Ha_std = 0 #10**0.171
-		#put the r_eff in kpc
-		r_eff_kpc = py_table['r_eff_q50'][0]*kpc_per_pixel
-		r_eff_kpc_err = (((py_table['r_eff_q84'][0] - py_table['r_eff_q50'][0]) + (py_table['r_eff_q50'][0] - py_table['r_eff_q16'][0]))/2)*kpc_per_pixel
 
 		r_eff_UV = py_table['r_eff_q50'][0]/2
-		r_eff_Ha = r_eff_UV*nUV_to_Ha
+		r_eff_Ha = r_eff_UV
 		r_eff_UV_err = ((py_table['r_eff_q84'][0] - py_table['r_eff_q50'][0]) + (py_table['r_eff_q50'][0] - py_table['r_eff_q16'][0]))/4
 		#combine the uncertainties from measurements and scaling relation
-		r_eff_std = 2 #r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)*2 #adding uncertainity of 2 to broaden prior
+		r_eff_std = np.maximum(3,r_eff_Ha) #r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)*2 #adding uncertainity of 2 to broaden prior
 
 		#compute hard bounds for r_eff in kpc to not be too small or too big
 		r_eff_min_kpc = 0.1 
@@ -315,20 +309,21 @@ class Disk():
 		xc_morph = xc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		xc_err = ((py_table['xc_q84'][0] - py_table['xc_q50'][0]) + (py_table['xc_q50'][0] - py_table['xc_q16'][0]))/4
 		#set the uncertainties in the scale of the effective radius
-		xc_std = r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
+		xc_std = 0.25*r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
 
 		yc_morph_py = py_table['yc_q50'][0]/2
 		yc_morph = yc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		yc_err = ((py_table['yc_q84'][0] - py_table['yc_q50'][0]) + (py_table['yc_q50'][0] - py_table['yc_q16'][0]))/4
-		yc_std = r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
+		yc_std = 0.25*r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
 
 		#rotate the prior according to theta rot
 		xc,yc = (shape-1)/2, (shape-1)/2
 		xc_morph_rot, yc_morph_rot = utils.rotate_coords(xc_morph, yc_morph, xc, yc, theta_rot)
 
 		theta = py_table['theta_q50'][0]
-		#rotate the prior according to theta rot 
-		theta_rot = (theta + theta_rot) % 360 #it's a + because the rotation is counter-clockwise and the PA is also defined in a CCW way in Pysersic
+		#rotate the prior according to theta rot (still in radians)
+		print('Rotating the prior by ', theta_rot, ' radians, from ', theta, ' radians to ', theta - theta_rot, ' radians')
+		theta_rot = (theta - theta_rot) % (2*jnp.pi) #it's a - because the rotation is CLOCKWISE and the PA is also defined in a CCW way in Pysersic
 
 		PA = (theta_rot-jnp.pi/2) * (180/jnp.pi) #convert to degrees
 		if PA < 0:
@@ -341,7 +336,7 @@ class Disk():
 		if PA < 0:
 			PA += 180
 		PA_mean_err = ((py_table['theta_q84'][0] - py_table['theta_q50'][0]) + (py_table['theta_q50'][0] - py_table['theta_q16'][0]))/2
-		PA_std = (PA_mean_err*2)*(180/jnp.pi) #convert to degrees
+		PA_std = (PA_mean_err)*(180/jnp.pi) #convert to degrees
 		print('Setting parametric priors: ', PA, inclination, r_eff_Ha, n, amplitude, xc_morph, yc_morph)
 
 		#set velocity bounds
@@ -369,6 +364,9 @@ class Disk():
 		self.xc_std = xc_std
 		self.yc_morph = yc_morph_rot
 		self.yc_std = yc_std
+
+		self.xc_std_vel = 2*self.xc_std
+		self.yc_std_vel = 2*self.yc_std
 	
 
 	def set_parametric_priors_test(self,priors):
@@ -497,7 +495,7 @@ class Disk():
 		"""
 
 		unscaled_PA = numpyro.sample('unscaled_PA', dist.Normal())
-		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std*4 + self.PA_morph_mu) #giving more freedom to the kinematic PA! it's really the morph one that has to be well constrained
+		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std*2 + self.PA_morph_mu) #giving more freedom to the kinematic PA! it's really the morph one that has to be well constrained
 
 		unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())  #* (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
 		Va = numpyro.deterministic('Va', unscaled_Va*(2*self.V_max) - self.V_max)
@@ -511,11 +509,11 @@ class Disk():
 
 
 		unscaled_x0_vel = numpyro.sample('unscaled_x0_vel', dist.Normal())
-		x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.xc_std + self.xc_morph)
+		x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.xc_std_vel + self.xc_morph)
 
 
 		unscaled_y0_vel = numpyro.sample('unscaled_y0_vel', dist.Normal())
-		y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.yc_std + self.yc_morph)  
+		y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.yc_std_vel + self.yc_morph)  
 
 		unscaled_v0 = numpyro.sample('unscaled_v0', dist.Normal())
 		v0 = numpyro.deterministic('v0', unscaled_v0*50)
@@ -700,6 +698,10 @@ class DiskModel(KinModels):
 		fluxes,r_eff, i, xc_morph, yc_morph = self.disk.sample_fluxes_parametric() 
 		Pa, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params_parametric(r_eff=r_eff)      
 		# i = utils.compute_inclination(ellip = ellip) 
+
+		#set the velocity centroid to the morph one so that we don't have to fit for it!
+		x0_vel = xc_morph
+		y0_vel = yc_morph
 
 		fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
 
