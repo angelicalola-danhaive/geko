@@ -14,6 +14,7 @@ __all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', '
 # import run_pysersic as py
 
 #other imports
+import jax
 from jax import image
 import jax.numpy as jnp
 from jax.scipy.stats import norm
@@ -697,6 +698,7 @@ def resample_errors(error_map, factor, wave_factor):
     return resampled_errors
 
 
+@jax.jit
 def bn_approx(n):
     n_safe = jnp.where(n!=0, n, 0.00001)
     bn_value = 2 * n_safe - 1 / 3 + 4 / (405 * n_safe) + 46 / (25515 * n_safe**2) + 131 / (1148175 * n_safe**3) - 2194697 / (30690717750 * n_safe**4)
@@ -704,6 +706,7 @@ def bn_approx(n):
     return jnp.where(n != 0, bn_value, 0.0)  # Still use jnp.where to return 0 for n=0
 
 
+@jax.jit
 def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
         
     # import tensorflow_probability as tfp
@@ -729,6 +732,7 @@ def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
         
     return jnp.where((n_safe>0) & ((x_maj>0) | (x_min>0)) & (b_safe!=0) & (r_eff>0), amplitude * jnp.exp(-bn * (z ** (1 / n_safe) - 1.0)), amplitude * jnp.exp(bn))
 
+@jax.jit
 def compute_adaptive_sersic_profile(x, y,intensity , r_eff, n, x0, y0, ellip, PA_sersic):
     '''
         Notes about inputs:
@@ -885,6 +889,7 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
         filter_lower = basename.split('_')[1].lower()
         #re-order the obs_dict so the keys are from smallest to largest
         obs_dict_copy = dict(sorted(obs_dict.items()))
+        print(obs_dict_copy)
 
         if 8 in obs_dict_copy.keys():
             #if we have a 3215 psf, use it
@@ -962,17 +967,17 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
 
     return psf_list
 
-def rotate_coords(x,y,xc,yc,theta):
+@jax.jit
+def rotate_coords(x, y, xc, yc, theta):
     '''
-    Xc,Yc is the center of the image
-    Angle is in RADIANS, and the rotation is counter-clockwise
+    Rotate (x, y) around (xc, yc) by angle theta (in radians).
+    Rotation is CLOCKWISE.
     '''
-    # Rotate (x0, y0) around (xc, yc)
     dx, dy = x - xc, y - yc
-    x_rot = xc + jnp.cos(theta) * dx - jnp.sin(theta) * dy
-    y_rot = yc + jnp.sin(theta) * dx + jnp.cos(theta) * dy
+    x_rot = xc + jnp.cos(theta) * dx + jnp.sin(theta) * dy
+    y_rot = yc - jnp.sin(theta) * dx + jnp.cos(theta) * dy
 
-    return float(x_rot), float(y_rot)
+    return x_rot, y_rot
 
 
 def flux_lambda_to_nu(F_lambda, lambda_microm):
