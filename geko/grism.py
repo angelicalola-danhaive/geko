@@ -41,7 +41,7 @@ from jax.scipy.signal import fftconvolve
 #import time
 import time 
 import jax
-jax.config.update('jax_enable_x64', True)
+# jax.config.update('jax_enable_x64', True)  # Already set in fitting.py
 
 # ============================================================================
 # STANDALONE JIT-COMPILED FUNCTIONS (extracted from Grism class methods)

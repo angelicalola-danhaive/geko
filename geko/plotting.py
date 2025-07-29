@@ -654,6 +654,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	sigma0_16 = float(inf_data.posterior['sigma0'].quantile(0.16, dim=["chain", "draw"]).values)
 	sigma0_84 = float(inf_data.posterior['sigma0'].quantile(0.84, dim=["chain", "draw"]).values)
+	
 	sigma0_50 = float(inf_data.posterior['sigma0'].quantile(0.5, dim=["chain", "draw"]).values)
 
 	v_re_50 = float(inf_data.posterior['v_re'].quantile(0.5, dim=["chain", "draw"]).values)
@@ -715,14 +716,16 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	if save_to_folder != None:
 		if name == 'summary':
 			plt.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png', dpi=300)
+			plt.close()
 			figure_image = plt.imread(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png')
 		elif name == 'pretty':
 			plt.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
+			plt.close()
 			figure_image = plt.imread('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png')
 		else:
 			plt.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
+			plt.close()
 			figure_image = plt.imread('testing/' + save_to_folder + '/' + name + '_corner.png')
-
 	corner_ax.imshow(figure_image, origin = 'upper')
 	corner_ax.axis('off')
 	corner_ax.text(0.6,0.8, r'$\sigma_0 = $' + str(round(sigma0_50,1)) + r'$^{+' + str(round(sigma0_84- sigma0_50, 1)) + r'}' +  r'_{-' + str(round(sigma0_50- sigma0_16, 1)) + r'}$' + r' km/s', transform=corner_ax.transAxes, fontsize=10, va='top', color='black')

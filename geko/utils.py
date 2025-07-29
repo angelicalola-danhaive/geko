@@ -285,6 +285,7 @@ def make_mask(image, n = 1, threshold_sigma = 3):
     plt.scatter(cat.xcentroid, cat.ycentroid, color='red')
     plt.title('Flux Mask')
     plt.show()
+    plt.close()
     # plt.imshow(image*segment_map.data, origin='lower')
     # plt.title('Mask of the central source')
     # plt.show()
@@ -295,6 +296,7 @@ def make_mask(image, n = 1, threshold_sigma = 3):
         plt.imshow(segm_deblend.data, origin='lower')
         plt.title('Make mask - segm debelnd')
         plt.show()
+        plt.close()
 
         #if more than 2 labels, keep the central one and merge the others
         if segm_deblend.nlabels > 2:
@@ -312,6 +314,7 @@ def make_mask(image, n = 1, threshold_sigma = 3):
         plt.imshow(segm_deblend.data, origin='lower')
         plt.scatter(cat.xcentroid, cat.ycentroid, color='red')
         plt.show()
+        plt.close()
     else: 
         segm_deblend = None
         mask_2comp = None

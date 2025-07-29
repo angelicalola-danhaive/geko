@@ -47,7 +47,7 @@ from scipy.constants import c
 import math
 import xarray as xr
 jax.config.update('jax_enable_x64', True)
-numpyro.enable_validation()
+# numpyro.enable_validation()  # Disabled for performance - only enable for debugging
 
 # ============================================================================
 # STANDALONE JIT-COMPILED FUNCTIONS (extracted from class methods)
@@ -270,7 +270,7 @@ class Disk():
 		# inclination_err = (((jnp.arccos(1-py_table['ellip_q84'][0]) - jnp.arccos(1-py_table['ellip_q50'][0])) + (jnp.arccos(1-py_table['ellip_q50'][0]) - jnp.arccos(1-py_table['ellip_q16'][0])))/2)*180/jnp.pi
 		inclination_err = ( (utils.compute_inclination(ellip = py_table['ellip_q84'][0], q0 = 0.2) - inclination) + (inclination - utils.compute_inclination(ellip = py_table['ellip_q16'][0], q0 = 0.2)) )/2
 
-		inclination_std = inclination_err*2 #no x2 bc this is an accurate measurement!
+		inclination_std = inclination_err #*2 #no x2 bc this is an accurate measurement!
 		# ellip_std =   ellip_err/2.36
 
 		#because the F115W is fit with the 0.03 resolution, r_eff is twice too big
@@ -625,6 +625,7 @@ class Disk():
 		plt.colorbar()
 		plt.title('Fluxes mean')
 		plt.show()
+		plt.close()
 		print(fluxes_mean.max())
 		threshold = 0.4*fluxes_mean.max()
 		mask = jnp.zeros_like(fluxes_mean)
@@ -634,6 +635,7 @@ class Disk():
 		plt.imshow(jnp.where(mask ==1, fluxes_mean, np.nan), origin = 'lower')
 		plt.title('Mask for v_rot comp')
 		plt.show()
+		plt.close()
 		return model_v_rot
 
 	def plot(self):
@@ -651,6 +653,7 @@ class Disk():
 		plt.scatter(self.x0_vel, self.mu_y0_vel, color='red')
 		plt.title('Disk')
 		plt.show()
+		plt.close()
 
 
 

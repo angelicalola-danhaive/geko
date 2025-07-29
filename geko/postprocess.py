@@ -156,6 +156,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 						color='dodgerblue', **CORNER_KWARGS)
 	plt.tight_layout()
 	plt.savefig(save_runs_path + str(ID)+'_v_sigma_corner.png', dpi=300)
+	plt.close()
 
 
 def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None):

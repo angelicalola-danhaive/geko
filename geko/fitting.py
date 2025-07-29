@@ -43,17 +43,6 @@ from astropy.convolution import convolve as convolve_astropy
 from astropy.cosmology import Planck18 as cosmo
 
 
-jax.config.update('jax_enable_x64', True)
-numpyro.set_host_device_count(2)
-numpyro.enable_validation()
-if jax.devices('gpu'):
-    numpyro.set_platform('gpu')
-
-# np.set_printoptions(precision=15, floatmode='maxprec')
-# jnp.set_printoptions(precision=15, floatmode='maxprec')
-# import figure_setup as setup
-
-XLA_FLAGS = "--xla_gpu_force_compilation_parallelism=1"
 
 # plotting settings
 
@@ -107,8 +96,7 @@ class Fit_Numpyro():
 
 		new_mask = self.create_mask()
 
-		with numpyro.validation_enabled():
-			self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =new_mask) #, extra_fields=("potential_energy", "accept_prob"))
+		self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =new_mask) #, extra_fields=("potential_energy", "accept_prob"))
 
 		print('done')
 
