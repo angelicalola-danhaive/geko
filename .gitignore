@@ -57,7 +57,6 @@ cover/
 *.png
 
 # Data files and configuration
-nircam_grism/
 
 # Claude Code configuration
 CLAUDE.md
