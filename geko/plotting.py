@@ -315,23 +315,23 @@ def make_mask(im, sigma_rms, save_to_folder):
 	y_extent = np.max(np.abs(yy - yc_obj))
 
 	#plot the image and the segmentation map
-	fig, ax = plt.subplots(1, 2, figsize=(10, 5))
-	ax[0].imshow(im_conv, origin='lower', cmap='Greys_r', interpolation='nearest')
-	ax[0].set_title('Data')
-	#plot the r_max
-	ax[0].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
-	#plot a line of length y_extent along the y axis starting from the center
-	ax[0].plot([xc_obj, xc_obj], [yc_obj - y_extent, yc_obj + y_extent], color='red', lw=2, label='y_extent')
+	# fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+	# ax[0].imshow(im_conv, origin='lower', cmap='Greys_r', interpolation='nearest')
+	# ax[0].set_title('Data')
+	# #plot the r_max
+	# ax[0].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
+	# #plot a line of length y_extent along the y axis starting from the center
+	# ax[0].plot([xc_obj, xc_obj], [yc_obj - y_extent, yc_obj + y_extent], color='red', lw=2, label='y_extent')
 
-	ax[1].imshow(closest_segm, origin='lower', cmap='tab20', interpolation='nearest')
-	ax[1].set_title('Segmentation map')
+	# ax[1].imshow(closest_segm, origin='lower', cmap='tab20', interpolation='nearest')
+	# ax[1].set_title('Segmentation map')
 
-	#plot the r_max
-	ax[1].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
-	plt.tight_layout()
-	plt.savefig('bboxes/' + str(save_to_folder) + '_bbox.png', dpi=300)
-	# plt.show()
-	plt.close()
+	# #plot the r_max
+	# ax[1].add_patch(plt.Circle((xc_obj, yc_obj), r_max, color='red', fill=False, lw=2, label='r_max'))
+	# plt.tight_layout()
+	# plt.savefig('bboxes/' + str(save_to_folder) + '_bbox.png', dpi=300)
+	# # plt.show()
+	# plt.close()
 	return im_conv, segment_map, r_max, y_extent
 
 
@@ -351,7 +351,7 @@ def compute_r90(n, r_eff):
 	return result.root if result.converged else None
 
 
-def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
+def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None):
 	# plt.show()
 
 	fig = plt.figure(constrained_layout=True)
@@ -399,7 +399,23 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	#fit the observed data with photutils to get its radius
 	# make segmentation map and identify sources
-	im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 5, save_to_folder)
+	try:
+		im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 5, save_to_folder)
+	except Exception as e:
+		try:
+			print("Error in make_mask, trying with lower sigma_rms")
+			im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 3, save_to_folder)
+		except Exception as e:
+			try:
+				print("Trying with lowest sigma_rms")
+				im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 1, save_to_folder)
+			except Exception as e:
+				print("Error in make_mask with all sigma_rms values, setting rmax = 0")
+				rmax = 0.0
+				rmax_proj = 0.0
+	
+
+
 
 	# get the source properties
 	obs_radius = rmax #already computed in the make_mask function 
@@ -488,29 +504,16 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# X *= 0.0629/factor#put it in arcseconds
 	# Y *= 0.0629/factor
 
-	#compute the maximum velocity within the main label
-	#find y-pixel extend of the main label
-	ymin = np.min(np.where(segm_deblend.data == main_label)[0])
-	ymax = np.max(np.where(segm_deblend.data == main_label)[0])
-	#find the max velocity in the direct image within the main label
-	v_max = np.nanmax(np.abs(model_velocities)[ymin:ymax+1, :])
-	# print('v_max', v_max)
-	# #plot the velocity map with the upper and lower limits
-	# plt.imshow(model_velocities, origin = 'lower', cmap = 'RdBu_r')
-	# #horizonal line
-	# plt.plot([0, direct_image_size], [ymin, ymin], 'k-', lw=2)
-	# plt.plot([0, direct_image_size], [ymax, ymax], 'k-', lw=2)
-	# plt.show()
 
-
-	#find the coordinates of the velocity centroid from model_velocities
-	grad_x, grad_y = np.gradient(model_velocities)
-	center = np.nanargmax(np.sqrt(grad_y**2 + grad_x**2))
-	center = np.unravel_index(center, model_velocities.shape)
 	v0 = inf_data.posterior['v0'].quantile(0.5, dim=["chain", "draw"]).values
+	x0_morph = inf_data.posterior['xc_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	y0_morph = inf_data.posterior['yc_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	x0_vel = inf_data.posterior['x0_vel'].quantile(0.5, dim=["chain", "draw"]).values
+	y0_vel = inf_data.posterior['y0_vel'].quantile(0.5, dim=["chain", "draw"]).values
+
 	#the center is the pixel whose value is closest to v0
 	# center = [15,16] #np.unravel_index(np.nanargmin(np.abs(model_velocities - v0)), model_velocities.shape)
-	velocites_center = model_velocities[center[0], center[1]]
+	velocites_center = model_velocities[int(x0_vel), int(y0_vel)]
 	vel_map_ax = fig.add_subplot(gs0[1,0])
 	cp = vel_map_ax.pcolormesh(X, Y,(model_velocities - v0), shading='nearest', cmap = 'RdBu_r')
 	# plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
@@ -521,8 +524,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	from matplotlib.patches import Ellipse
 
 	# Define ellipse parameters
-	center_x = (center[1]-x0)  # Assuming the ellipse is centered at the median x position
-	center_y = (center[0]-y0) # If the galaxy is centered at y=0 in arcsec
+	center_x = (x0_morph-x0)  # Assuming the ellipse is centered at the median x position
+	center_y = (y0_morph-y0) # If the galaxy is centered at y=0 in arcsec
 	width = 2*obs_radius  # Major axis (r_obs is the semi-major axis)
 	height = 2 * (1 - ellip)*obs_radius  # Minor axis, where ellip is the ellipticity (ellip = 1 - b/a)
 	angle = -np.degrees(theta_Ha)  # Rotation angle in degrees
@@ -577,7 +580,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 
 
-	vel_map_ax.plot((center[1]-x0), (center[0]-y0), '+', markersize=10, label = 'velocity centroid', color = 'black') #*0.0629/factor
+	vel_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, label = 'velocity centroid', color = 'black') #*0.0629/factor
+	vel_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, color = 'crimson')
 	# vel_map_ax.legend(fontsize = 10, loc = 'lower right', borderaxespad = 2)
 
 	veldisp_map_ax = fig.add_subplot(gs0[1,1])
@@ -590,8 +594,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# cbar.ax.set_ylabel(r'$\sigma_v$ [km/s]', fontsize = 5)
 	veldisp_map_ax.axis('off')
 	veldisp_map_ax.set_title(r'$\sigma_0$ map', fontsize=10)
-	veldisp_map_ax.plot((center[1]-x0), (center[0]-y0), '+', markersize=10, label = 'velocity centroid', color = 'black')
-	veldisp_map_ax.legend(fontsize = 10, loc = 'lower right',borderaxespad = 2)
+	veldisp_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, label = 'velocity centroid', color = 'black')
+	veldisp_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, color = 'crimson')
+	veldisp_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
 
 	veldisp_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=veldisp_map_ax.transAxes)
 	veldisp_map_ax.text(0.2, 0.5, '0.5"', color = 'black', fontsize = 10, ha='center', va='center', rotation = 90, transform=veldisp_map_ax.transAxes)
@@ -613,7 +618,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# cbar.ax.set_ylabel('flux [Mjy?]', fontsize = 5)
 	# cbar.ax.tick_params(labelsize = 5)
 	flux_map_ax.set_title(r'H$\alpha$ map', fontsize=10)
-	flux_map_ax.plot((center[1]-x0), (center[0]-y0), '+', markersize=10, label = 'velocity centroid', color = 'black')
+	flux_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, color = 'black')
+	flux_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, label = 'flux centroid', color = 'crimson')
+	flux_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
 	# flux_map_ax.legend(fontsize = 10, loc = 'lower right',borderaxespad = 2)
 
 	flux_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=flux_map_ax.transAxes)
@@ -625,12 +632,13 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	# fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=15, fontweight='bold')
 	# fig.savefig('FrescoHa/GoldSummaries/' + str(save_to_folder) + '.png', dpi=500)
-
+	# plt.tight_layout()
 	if save_to_folder != None:
 		if name == 'summary':
-			fig.savefig('fitting_results/' + save_to_folder + '/summary.png', dpi=300)
+			fig.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_summary.png', dpi=300, bbox_inches="tight")
 		else:
 			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
+	plt.close()
 
 
 	# gs1 = gs0[2,:]
@@ -646,6 +654,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	sigma0_16 = float(inf_data.posterior['sigma0'].quantile(0.16, dim=["chain", "draw"]).values)
 	sigma0_84 = float(inf_data.posterior['sigma0'].quantile(0.84, dim=["chain", "draw"]).values)
+	
 	sigma0_50 = float(inf_data.posterior['sigma0'].quantile(0.5, dim=["chain", "draw"]).values)
 
 	v_re_50 = float(inf_data.posterior['v_re'].quantile(0.5, dim=["chain", "draw"]).values)
@@ -686,7 +695,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		plot_datapoints=False,
 		fill_contours=True,
 		plot_contours=True,
-		show_titles=False,
+		show_titles=True,
 		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]', r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]'],
 		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$', r'$x_{0, v}$', r'$y_{0,v}$'],
 		max_n_ticks=3,
@@ -706,15 +715,17 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# plt.gca().set(box_aspect=1)
 	if save_to_folder != None:
 		if name == 'summary':
-			plt.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png', dpi=300)
-			figure_image = plt.imread('fitting_results/' + str(save_to_folder) + '/cornerplot' + '.png')
+			plt.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png', dpi=300)
+			plt.close()
+			figure_image = plt.imread(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png')
 		elif name == 'pretty':
 			plt.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
+			plt.close()
 			figure_image = plt.imread('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png')
 		else:
 			plt.savefig('testing/' + save_to_folder + '/' + name + '_corner.png', dpi=500)
+			plt.close()
 			figure_image = plt.imread('testing/' + save_to_folder + '/' + name + '_corner.png')
-
 	corner_ax.imshow(figure_image, origin = 'upper')
 	corner_ax.axis('off')
 	corner_ax.text(0.6,0.8, r'$\sigma_0 = $' + str(round(sigma0_50,1)) + r'$^{+' + str(round(sigma0_84- sigma0_50, 1)) + r'}' +  r'_{-' + str(round(sigma0_50- sigma0_16, 1)) + r'}$' + r' km/s', transform=corner_ax.transAxes, fontsize=10, va='top', color='black')
@@ -728,7 +739,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	if save_to_folder != None:
 		if name == 'summary':
-				fig.savefig('fitting_results/' + str(save_to_folder) + '/summary_corner' + '.png', dpi=300)
+				fig.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_summary_corner' + '.png', dpi=300)
 		elif name == 'pretty':
 			fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
 		else:
@@ -740,7 +751,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# fig.savefig('fitting_results/' + str(save_to_folder) + '/cornerplot_text' + '.png', dpi=300)
 	plt.close()
 
-	return ymin,ymax
+	return None,None
 
 
 def plot_merger_summary(obs_map, model_map, obs_error, model_velocities, v_rot, fluxes_mean, inf_data, wave_space, mask, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None):

@@ -38,7 +38,7 @@ import corner
 
 # import smplotlib
 
-def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84):
+def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84, save_runs_path):
 	''' 
 		Save all of the best-fit parameters in a table
 	'''
@@ -69,7 +69,10 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	v_circ_84 = jnp.array(inf_data.posterior['v_circ'].quantile(0.84, dim=["chain", "draw"]))
 
 	#save results to a file
-	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', 'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', 'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84', 'x0_vel_16', 'x0_vel_50', 'x0_vel_84', 'y0_vel_16', 'y0_vel_50', 'y0_vel_84']
+	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', \
+	  'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', \
+		'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84', 'x0_vel_16', 'x0_vel_50', 'x0_vel_84', 'y0_vel_16', 'y0_vel_50', 'y0_vel_84', \
+			'amplitude_16', 'amplitude_84', 'n_16', 'n_84']
 	t_empty = np.zeros((len(params), 1))
 	res = Table(t_empty.T, names=params)
 	res['ID'] = ID
@@ -124,7 +127,13 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	res['y0_vel_50'] = kin_model.y0_vel_mean
 	res['y0_vel_84'] = kin_model.y0_vel_84
 
-	res.write('fitting_results/' + output + 'results', format='ascii', overwrite=True)
+	res['amplitude_16'] = kin_model.amplitude_16
+	res['amplitude_84'] = kin_model.amplitude_84
+
+	res['n_16'] = kin_model.n_16
+	res['n_84'] = kin_model.n_84
+
+	res.write(save_runs_path + str(ID) + '_results', format='ascii', overwrite=True)
 	
 	#save a cornerplot of the v_sigma and sigma posteriors
 	fig = plt.figure(figsize=(10, 10))
@@ -146,10 +155,11 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
 						color='dodgerblue', **CORNER_KWARGS)
 	plt.tight_layout()
-	plt.savefig('fitting_results/' + output + 'v_sigma_corner.png', dpi=300)
+	plt.savefig(save_runs_path + str(ID)+'_v_sigma_corner.png', dpi=300)
+	plt.close()
 
 
-def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None):
+def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None):
 	"""
 		Main function that automatically post-processes the inference data and saves all of the relevant plots
 		Returns the main data products so that data can be analyzed separately
@@ -161,7 +171,7 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	#load inference data
 	if mock_params is None:
 		# inf_data = az.InferenceData.from_netcdf('FrescoHa/Runs-Final/' + output + '/'+ 'output')
-		inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
+		inf_data = az.InferenceData.from_netcdf(save_runs_path + str(ID) + '_output')
 		j=0
 	else:
 		inf_data = az.InferenceData.from_netcdf('testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_'+ 'output')
@@ -204,9 +214,9 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	
 	#save the best fit parameters in a table
 
-	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84)
+	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84, save_runs_path = save_runs_path)
 	
-	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med)
+	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med, save_runs_path = save_runs_path)
 
 	return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
 

@@ -56,6 +56,12 @@ cover/
 #Images (generated during tests)
 *.png
 
+# Data files and configuration
+nircam_grism/
+
+# Claude Code configuration
+CLAUDE.md
+
 # Translations
 *.mo
 *.pot

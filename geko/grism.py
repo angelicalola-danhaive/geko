@@ -41,7 +41,32 @@ from jax.scipy.signal import fftconvolve
 #import time
 import time 
 import jax
-jax.config.update('jax_enable_x64', True)
+# jax.config.update('jax_enable_x64', True)  # Already set in fitting.py
+
+# ============================================================================
+# STANDALONE JIT-COMPILED FUNCTIONS (extracted from Grism class methods)
+# ============================================================================
+
+@jax.jit
+def _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges):
+	"""Core Gaussian computation for dispersion (extracted from Grism.disperse)"""
+	from jax.scipy import special
+	import math
+	
+	# Make 3D cube (spatial, spectral, wavelengths)
+	mu = wave_centers[:,:,jnp.newaxis]
+	sigma = wave_sigmas_eff[:,:,jnp.newaxis]
+	
+	# Compute CDF for Gaussian integration
+	cdf = 0.5 * (1 + special.erf((wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu) / (sigma * math.sqrt(2.0))))
+	gaussian_matrix = cdf[:,:,1:] - cdf[:,:,:-1]
+	
+	# Create spectral cube
+	cube = F[:,:,jnp.newaxis] * gaussian_matrix
+	
+	return cube
+
+# ============================================================================
 
 
 
@@ -99,7 +124,7 @@ class Grism:
 
 		self.get_trace()
 
-		self.compute_lsf_new()
+		self.compute_lsf() #_new()
 
 		self.compute_PSF(PSF)
 
@@ -386,7 +411,7 @@ class Grism:
 		# plt.show()
 		self.PSF =  self.oversampled_PSF[:,:, jnp.newaxis]
 
-		self.full_kernel = jnp.array(self.PSF) * self.lsf_kernel
+		# self.full_kernel = jnp.array(self.PSF) * self.lsf_kernel
 
 	
 	def disperse(self, F, V, D):
@@ -401,11 +426,11 @@ class Grism:
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
 		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
 
-		# sigma_LSF = self.sigma_lsf
+		sigma_LSF = self.sigma_lsf
 
 		#set the effective dispersion which also accounts for the LSF
-		# wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
-		wave_sigmas_eff = wave_sigmas
+		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
+		# wave_sigmas_eff = wave_sigmas
 
 		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
@@ -418,12 +443,12 @@ class Grism:
 		wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
 
 
-		cdf = 0.5* (1 + special.erf( (wave_space_edges[jnp.newaxis,jnp.newaxis,:] - mu)/ (sigma*math.sqrt(2.)) ))
-		gaussian_matrix = cdf[:,:,1:]-cdf[:,:,:-1]
+		# Use JIT-compiled core for Gaussian computation
+		cube = _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges)
 
-		cube = F[:,:,jnp.newaxis]*gaussian_matrix
+		# psf_cube = fftconvolve(cube, self.full_kernel, mode='same') 
+		psf_cube = fftconvolve(cube, self.PSF, mode='same') 
 
-		psf_cube = fftconvolve(cube, self.full_kernel, mode='same') 
 		#collapse across the x axis
 		grism_full = jnp.sum(psf_cube, axis = 1) 
 		return grism_full
@@ -624,24 +649,24 @@ class Grism:
 
 	# def set_wave_scale(self, scale):
 
-		'''
-			Sets the scale of the grism image to 'scale'. Modifies all relevant parameters in the class so that when the disperse function is called, 
-			the grism wavelength space has the appropriate scale
+		# '''
+		# 	Sets the scale of the grism image to 'scale'. Modifies all relevant parameters in the class so that when the disperse function is called, 
+		# 	the grism wavelength space has the appropriate scale
 
-			Parameters
-			----------
+		# 	Parameters
+		# 	----------
 
-			Returns
-			----------
-		'''
+		# 	Returns
+		# 	----------
+		# '''
 
-		self.wave_scale = scale
-		self.sh_beam = (self.sh[0],((self.WRANGE[1]-self.WRANGE[0])/self.wave_scale).astype(int))
-		#full grism array
-		self.grism_full = jnp.zeros(self.sh_beam)
+		# self.wave_scale = scale
+		# self.sh_beam = (self.sh[0],((self.WRANGE[1]-self.WRANGE[0])/self.wave_scale).astype(int))
+		# #full grism array
+		# self.grism_full = jnp.zeros(self.sh_beam)
 
-		self.get_trace()
+		# self.get_trace()
 
-		self.compute_lsf()
+		# self.compute_lsf()
 
-		self.set_sensitivity()
+		# self.set_sensitivity()

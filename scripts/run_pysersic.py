@@ -77,7 +77,7 @@ def prepare_data(im, sig,psf, fit_multi=False, perform_masking=False, plot=False
 
     # make segmentation map and identify sources
     im_conv, segment_map = make_mask(im, sigma_rms)
-    segm_deblend = deblend_sources(im_conv, segment_map, npixels=5, nlevels = 50,  contrast=1, progress_bar=False) #contrast=0.001nlevels=50,
+    segm_deblend = deblend_sources(im_conv, segment_map, npixels=10, nlevels = 64,  contrast=0.1, progress_bar=False) #contrast=0.001nlevels=50,
     source_cat = SourceCatalog(im, segm_deblend, convolved_data=im_conv, error=sig)
     source_tbl = source_cat.to_table()
 
@@ -211,22 +211,48 @@ def fit_data(filter, id, path_output=None, im = None, sig = None, psf = None,
             axs[i].set_xticks([])
             axs[i].set_yticks([])
             axs[i].contour(mask, levels=[0.5], colors='crimson', linewidths=1.5)
-        plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_paperplot' + post_name + '.png'), bbox_inches='tight', dpi=1000)
-        plt.show()
-
+        # plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_paperplot' + post_name + '.png'), bbox_inches='tight', dpi=1000)
+        # plt.show()
         # # save figures
-        fig, ax = plot_residual(im, bf_model, mask=None, vmin=-0.45, vmax=0.45)
+        pixel_scale = 0.031  # arcsec/pixel
+
+        ny, nx = im.shape
+        x_center = nx // 2
+        y_center = ny // 2
+
+
+        fig, ax = plot_residual(im, bf_model, mask=None, vmin=-0.45, vmax=0.45, )
+        #make all of the subplots share the y axis
+        fig.subplots_adjust(hspace=0, wspace=0)
+
         for i in range(3):
-            ax[i].set_xticks([])
-            ax[i].set_yticks([])
+            # Get current tick positions (in pixels)
+            xticks = [10,25,40]
+            yticks = [10,25,40]
+
+            # Convert pixel positions to arcsecond offsets from center
+            xtick_labels = np.round([(x - x_center) * pixel_scale for x in xticks],2)
+            ytick_labels = np.round([(y - y_center) * pixel_scale for y in yticks],2)
+            ax[i].set_xticks(xticks)
+            ax[i].set_yticks(yticks)
+            ax[i].set_xticklabels(xtick_labels)
+            ax[i].set_yticklabels(ytick_labels)
+            ax[i].set_xlabel('[arcsec]')
+            ax[i].set_ylabel('[arcsec]')
             ax[i].contour(mask, levels=[0.5], colors='cornflowerblue', linewidths=1.5)
+            #plot a circle with a hatched pattern in the bottom left corner with a diamter of the PSF FWHM
+            ax[i].add_patch(plt.Circle((10, 10), 5.2/2, color='magenta', fill=False, hatch='///', linewidth=1.5))
         
+        ax[1].set_yticklabels([])
+        ax[2].set_yticklabels([])
+        ax[1].set_ylabel('')
+        ax[2].set_ylabel('')
         #reduce the separation between the subplots
         fig.tight_layout()
 
         plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_residual_svi' + post_name + '.png'), bbox_inches='tight', dpi=1000)
-        plt.show()
-        fig = fitter.svi_results.corner(color='C0') 
+        # plt.show()
+        fig = fitter.svi_results.corner(color='blue', smooth = 1) 
         plt.savefig(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_corner_svi' + post_name + '.png'), bbox_inches='tight',  dpi = 1000)        # save results
         plt.show()
         fitter.svi_results.save_result(os.path.join(path_output, str(id) + '_' + str(type) + '_' + filter.upper() + '_svi' + post_name + '.asdf'))
@@ -239,7 +265,7 @@ def fit_data(filter, id, path_output=None, im = None, sig = None, psf = None,
         else:
             fitter = FitSingle(data=im, rms=sig ,mask=mask,psf=psf, prior=prior, loss_func=student_t_loss)
         # sampling
-        fitter.sample(rkey = random.PRNGKey(0))
+        fitter.sample(rkey = random.PRNGKey(0), num_chains = 2, num_samples = 1000, num_warmup = 250)
         sampling_res = fitter.sampling_results
         print("sampling results:", sampling_res)
         summary =  sampling_res.summary()
@@ -442,52 +468,55 @@ def main_lola_images():
     #load my catalog
     cat = Table.read('/Users/lola/ASTRO/JWST/grism_project/catalogs/Gold_Silver_Unres_FRESCO_CONGRESS.txt', format = 'ascii')
 
-
     IDs_run = cat['ID']
     RA = cat['RA']
     DEC = cat['DEC']
     field = cat['field']
+    z = cat['z_spec']
 
-    path_output = '/Users/lola/ASTRO/JWST/grism_project/PysersicFits_v1/'
+    start = 0
+
+    path_output = '/Users/lola/ASTRO/JWST/grism_project/PysersicFits_v1d/'
     path_cutouts = '/Users/lola/ASTRO/JWST/grism_project/cutouts_v1/'
 
-    filter_list = ['F150W']
-    alternate_filter_list = ['F182M']
-    sigma_rms = 2
+    filter_list =  [ 'F090W', 'F150W','F200W', 'F356W'] #
+    alternate_filter_list = ['F090W','F150W', 'F277W' ] #bc F150W is already done  
+    sigma_rms = 1
 
     psf = None
 
-    bad_150w = ['1089292', '1089274', '1094903', '1098616', '1022983']
+    bad_150w = ['1089292', '1089274', '1094903', '1098616', '1022983', '1088590']
 
-    for count,id in enumerate(IDs_run):
+    for count,id in enumerate(['1092984']):
 
         id_mask = (IDs_run == int(id))
         #check if the file doesn't already exist
-        file_name = os.path.join(path_output, str(id) + '_image_F150W_corner_svi.png')
-        other_file_name = os.path.join(path_output, str(id) + '_image_F182M_corner_svi.png')
+        file_name = os.path.join(path_output, str(id) + '_image_F090W_corner_svi.png')
+        # other_file_name = os.path.join(path_output, str(id) + '_image_F182M_corner_svi.png')
     # --------------------------- check if the file already exists and if the PA uncertainty is small enough---------------------------
-        try:
-            file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F150W_svi.cat'), format='ascii')
-            if file['theta_q84']-file['theta_q16']>0.5:
-                print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
-            else:
-                print('File ' + file_name + ' already exists, skipping this iteration.')
-                continue    
-        except Exception as e:
-            try:
-                file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F182M_svi.cat'), format='ascii')
-                if file['theta_q84']-file['theta_q16']>0.5:
-                    print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
-                else:
-                    print('File ' + file_name + ' already exists, skipping this iteration.')
-                    continue
-            except Exception as e:
-                print('No file found for ID ' + str(id))
-                # continue
+        # try:
+        #     file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F150W_svi.cat'), format='ascii')
+        #     if file['theta_q84']-file['theta_q16']>0.5:
+        #         print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+        #     else:
+        #         print('File ' + file_name + ' already exists, skipping this iteration.')
+        #         continue    
+        # except Exception as e:
+        #     try:
+        #         file = Table.read(os.path.join(path_output, 'summary_' + str(id) + '_image_F182M_svi.cat'), format='ascii')
+        #         if file['theta_q84']-file['theta_q16']>0.5:
+        #             print('Re-running ID ' + str(id) + ' with filter F150W due to large PA uncertainty.')
+        #         else:
+        #             print('File ' + file_name + ' already exists, skipping this iteration.')
+        #             continue
+        #     except Exception as e:
+        #         print('No file found for ID ' + str(id))
+        #         # continue
 
-        # if os.path.exists(file_name) or os.path.exists(other_file_name):
-        #     print('File ' + file_name + ' already exists, skipping this iteration.')
-        #     continue
+        if os.path.exists(file_name): #or os.path.exists(other_file_name):
+            print('File ' + file_name + ' already exists, skipping this iteration.')
+            # continue
+
     # ---------------------------------------------------------------------------------------------------------------------------------
             
         try:
@@ -495,15 +524,19 @@ def main_lola_images():
             #print the number of iterations we are at out of the total ones to run
             print('Running iteration ' + str(count) + ' out of ' + str(len(IDs_run)) + ' with ID ' + str(id))
 
-                
-            for i,filter in enumerate(filter_list): 
-            
+            if z[id_mask]< 5:
+                filters = alternate_filter_list
+            else:
+                filters = filter_list
+                            
+            for i,filter in enumerate(filters): 
+    
                 im_path = path_cutouts + str(id) + '_' + filter + '.fits'
                 file = fits.open(im_path)
                 im = jnp.array(file['SCI'].data)
-                #check if the image file is all zero
+                # #check if the image file is all zero
                 if np.all(im == 0) or str(id) in bad_150w:
-                    filter = alternate_filter_list[i]
+                    filter = 'F182M'
                     im_path = path_cutouts + str(id) + '_' + filter + '.fits'
                     file = fits.open(im_path)
                     im = jnp.array(file['SCI'].data)
@@ -522,15 +555,19 @@ def main_lola_images():
                 #load the psf
                 if field[id_mask] == 'GOODS-S-FRESCO':
                     bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/program_bithash.goodss.v1.0.0.fits'
-                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gs/'
+                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1d/gs/'
                 else:
                     bithash_file = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/program_bithash.goodsn.v1.0.0.fits'
-                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1/gn/'
+                    psf_dir = '/Users/lola/ASTRO/JWST/grism_project/mpsf_v1d/gn/'
                 psf_path = utils.choose_mspf(bithash_file, psf_dir, RA[id_mask], DEC[id_mask], [im_path])[0]
                 psf = fits.getdata(psf_path)
 
                 #downsample it down to the grism resolution
-                psf = utils.downsample_psf_centered(psf, size = 15)
+                # psf = utils.downsample_psf_centered(psf, size = 15)
+                #crop the psf so it is 15x15
+                psf = psf[psf.shape[0]//2-7:psf.shape[0]//2+8, psf.shape[1]//2-7:psf.shape[1]//2+8]
+
+                # psf = utils.load_psf(filter, y_factor=)
 
                 fit_data(filter, id, path_output=path_output,  im = im_crop , sig =sig, psf = psf,
                         fit_multi=False, posterior_estimation=True, do_sampling=False, perform_masking=True, plot=True, sigma_rms = sigma_rms)
@@ -545,6 +582,41 @@ def main_lola_images():
             # sys.exit()
             continue
 
+def main_lucy():
+
+
+    IDs_run = ['6355', '10612']
+
+    path_output = '/Users/lola/Desktop/lucy_pysersic_fits/'
+    path_cutouts = '/Users/lola/Desktop/lucy_pysersic_fits/'
+
+    filter_list =  ['F444W'] #
+    sigma_rms = 5
+
+    for count,id in enumerate(IDs_run):
+
+                            
+        for i,filter in enumerate(filter_list): 
+        
+            im_path =  path_cutouts + str(id) + '_NIRCam_' + filter + '_crop.fits'
+            im = jnp.array(fits.getdata(im_path))
+            err_path =  path_cutouts + str(id) + '_NIRCam_' + filter + '_error_crop.fits'
+            err = jnp.array(fits.getdata(err_path))
+            psf= utils.load_psf(filter=filter, y_factor=2)
+
+            #downsample it down to the grism resolution
+            # psf = utils.downsample_psf_centered(psf, size = 15)
+            #crop the psf so it is 15x15
+            # psf = psf[psf.shape[0]//2-7:psf.shape[0]//2+8, psf.shape[1]//2-7:psf.shape[1]//2+8]
+
+            # psf = utils.load_psf(filter, y_factor=)
+
+            fit_data(filter, id, path_output=path_output,  im = im , sig =err, psf = psf,
+                    fit_multi=False, posterior_estimation=True, do_sampling=True, perform_masking=True, plot=True, sigma_rms = sigma_rms)
+            
+            inc, PA, r_eff, x_c, y_c = get_params(path_output, id, filter, type = 'image')
+            # print(inc, PA, r_eff, x_c, y_c)
+            write_catalog(path_output, id, filter, type = 'image')
 
 
 def main_lola_grism():

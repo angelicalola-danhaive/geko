@@ -10,7 +10,7 @@ __all__ = ['run_full_preprocessing', 'prep_grism']
 
 #imports
 from . import  utils
-from . import  grism#just for now since in active dev
+from . import  grism #just for now since in active dev
 from . import  models
 # import run_pysersic as py
 
@@ -117,7 +117,7 @@ def read_config_file(input, output, master_cat_path, line):
 	target_accept_prob = inference['Inference']['target_accept_prob']
 	
 	#return all of the parameters
-	return ID, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,  flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
+	return ID, field, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,  flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
 def renormalize_image(direct,direct_error, obs_map):
@@ -150,15 +150,15 @@ def renormalize_image(direct,direct_error, obs_map):
 	mask_grism = mask_grism_seg.data
 
 	# plot the direct image found within the mask, the rest set to 0
-	plt.imshow(direct*mask_image, cmap='viridis', origin='lower')
-	plt.title('Direct image within the mask')
-	plt.show()
+	# plt.imshow(direct*mask_image, cmap='viridis', origin='lower')
+	# plt.title('Direct image within the mask')
+	# plt.show()
 
 
 	# plot the grism image found within the mask, the rest set to 0
-	plt.imshow(obs_map*mask_grism, cmap='viridis', origin='lower')
-	plt.title('Grism data within the mask')
-	plt.show()
+	# plt.imshow(obs_map*mask_grism, cmap='viridis', origin='lower')
+	# plt.title('Grism data within the mask')
+	# plt.show()
 
 	#compute the normalization factor
 	normalization_factor = obs_map[jnp.where(mask_grism == 1)].sum()/direct[jnp.where(mask_image == 1)].sum()
@@ -166,9 +166,9 @@ def renormalize_image(direct,direct_error, obs_map):
 	direct = direct*normalization_factor
 	direct_error = direct_error*normalization_factor
 	
-	plt.imshow(direct, cmap='viridis', origin='lower')
-	plt.title('Normalized direct image')
-	plt.show()
+	# plt.imshow(direct, cmap='viridis', origin='lower')
+	# plt.title('Normalized direct image')
+	# plt.show()
 
 
 	return direct, direct_error, normalization_factor, mask_grism
@@ -186,20 +186,20 @@ def mask_bad_pixels(image,errors,tolerance=3.5):
 	hot_pixels = jnp.where(sobel_image > tolerance)
 
 	#show sobel image
-	plt.imshow(sobel_image, cmap='viridis', origin='lower')
-	plt.colorbar()
-	plt.title('Sobel filter image')
-	plt.show()
+	# plt.imshow(sobel_image, cmap='viridis', origin='lower')
+	# plt.colorbar()
+	# plt.title('Sobel filter image')
+	# plt.show()
 
 	if len(hot_pixels[0]) == 0:
 		print('No hot pixels found')
 		return image, errors
 	
 	#plot the hot pixels
-	plt.imshow(image, cmap='viridis', origin='lower')
-	plt.scatter(hot_pixels[1],hot_pixels[0],c='r',s=1)
-	plt.title('Selected hot/dead pixels')
-	plt.show()
+	# plt.imshow(image, cmap='viridis', origin='lower')
+	# plt.scatter(hot_pixels[1],hot_pixels[0],c='r',s=1)
+	# plt.title('Selected hot/dead pixels')
+	# plt.show()
 
 	for pixels in [hot_pixels]:
 		image = image.at[pixels[0],pixels[1]].set(0)
@@ -396,27 +396,27 @@ def preprocess_mock_data(mock_params):
 	theta = 0
 	grism_object = mock_params['grism_object']
 
-	plt.imshow(obs_map, origin='lower')
-	plt.title('obs_map')
-	plt.colorbar()
-	plt.show()
+	# plt.imshow(obs_map, origin='lower')
+	# plt.title('obs_map')
+	# plt.colorbar()
+	# plt.show()
 
-	plt.imshow(obs_map/obs_error, origin='lower')
-	plt.title('obs map S/N')
-	plt.colorbar()
-	plt.show()
+	# plt.imshow(obs_map/obs_error, origin='lower')
+	# plt.title('obs map S/N')
+	# plt.colorbar()
+	# plt.show()
 
-	plt.imshow(direct, origin='lower')
-	plt.title('Direct')
-	plt.colorbar()
-	plt.show()
+	# plt.imshow(direct, origin='lower')
+	# plt.title('Direct')
+	# plt.colorbar()
+	# plt.show()
 
-	plt.imshow(direct/direct_error, origin='lower')
-	plt.title('Direct S/N')
-	plt.colorbar()
-	plt.show()
+	# plt.imshow(direct/direct_error, origin='lower')
+	# plt.title('Direct S/N')
+	# plt.colorbar()
+	# plt.show()
 
-	plt.close()
+	# plt.close()
 
 	
 	return  obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
@@ -432,7 +432,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 			input = yaml.load(file, Loader=yaml.FullLoader)
 		print('Read inputs successfully')
 		#load of all the parameters from the configuration file
-		ID, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds,\
+		ID, field, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds,\
 		sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
 		#preprocess the images and the grism spectrum
 		if field == 'ALT':
@@ -448,9 +448,24 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 		obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
 				wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object = preprocess_mock_data(mock_params)
 
+	#load the PSF that corresponds to the grism program 
+	if field == 'GOODS-N':
+		psf_path = 'mpsf_v1d/mpsf_jw018950.gn.f444w.fits' 
+	elif field == 'GOODS-N-CONGRESS':
+		psf_path = 'mpsf_v1d/mpsf_jw035770.f356w.fits' 
+	elif field == 'GOODS-S-FRESCO':
+		psf_path = 'mpsf_v1d/mpsf_jw018950.gs.f444w.fits' 
+	
+	#manually set the psf path to what it was in the previous version 
+	#THIS IS FOR TESTING PURPOSES, REMOVE AFTER!
+	# psf_path = 'mpsf_gds/mpsf_' + str(grism_filter).lower() + '.fits'
 
-	PSF = utils.load_psf(filter = grism_filter, y_factor = 1) #y_factor = 1 because putting it at grism resolution and then will be oversampled accordingly in the grism module
+	PSF = fits.getdata(psf_path)
 
+	# PSF = utils.load_psf(grism_filter, 1, 9)
+
+	#downsample it down to the grism resolution
+	PSF = utils.downsample_psf_centered(PSF, size = 15)
 	#run pysersic fit to get morphological parameters
 	if mock_params == None:
 		path_output = 'fitting_results/' + output
@@ -472,7 +487,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 		#the input index_max should be the index of the last element of the array +1 (since that is how array cropping works)
 		#setting by default the dispersion center at the center of the image in its original resolution 
 		icenter = jcenter = obs_map.shape[0]//2
-		grism_object = grism_dev.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
+		grism_object = grism.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
 					   grism_filter = grism_filter, grism_module = module, grism_pupil = 'R', PSF = PSF)
 
 

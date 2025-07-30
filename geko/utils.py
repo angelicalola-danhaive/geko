@@ -7,13 +7,14 @@
 
 __all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', 'compute_gal_props',
            'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile', 
-           'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux']
+           'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux', 'rotate_coords']
            
 # geko imports
 
 # import run_pysersic as py
 
 #other imports
+import jax
 from jax import image
 import jax.numpy as jnp
 from jax.scipy.stats import norm
@@ -284,6 +285,7 @@ def make_mask(image, n = 1, threshold_sigma = 3):
     plt.scatter(cat.xcentroid, cat.ycentroid, color='red')
     plt.title('Flux Mask')
     plt.show()
+    plt.close()
     # plt.imshow(image*segment_map.data, origin='lower')
     # plt.title('Mask of the central source')
     # plt.show()
@@ -294,6 +296,7 @@ def make_mask(image, n = 1, threshold_sigma = 3):
         plt.imshow(segm_deblend.data, origin='lower')
         plt.title('Make mask - segm debelnd')
         plt.show()
+        plt.close()
 
         #if more than 2 labels, keep the central one and merge the others
         if segm_deblend.nlabels > 2:
@@ -311,6 +314,7 @@ def make_mask(image, n = 1, threshold_sigma = 3):
         plt.imshow(segm_deblend.data, origin='lower')
         plt.scatter(cat.xcentroid, cat.ycentroid, color='red')
         plt.show()
+        plt.close()
     else: 
         segm_deblend = None
         mask_2comp = None
@@ -697,6 +701,7 @@ def resample_errors(error_map, factor, wave_factor):
     return resampled_errors
 
 
+@jax.jit
 def bn_approx(n):
     n_safe = jnp.where(n!=0, n, 0.00001)
     bn_value = 2 * n_safe - 1 / 3 + 4 / (405 * n_safe) + 46 / (25515 * n_safe**2) + 131 / (1148175 * n_safe**3) - 2194697 / (30690717750 * n_safe**4)
@@ -704,6 +709,7 @@ def bn_approx(n):
     return jnp.where(n != 0, bn_value, 0.0)  # Still use jnp.where to return 0 for n=0
 
 
+@jax.jit
 def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
         
     # import tensorflow_probability as tfp
@@ -729,6 +735,7 @@ def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
         
     return jnp.where((n_safe>0) & ((x_maj>0) | (x_min>0)) & (b_safe!=0) & (r_eff>0), amplitude * jnp.exp(-bn * (z ** (1 / n_safe) - 1.0)), amplitude * jnp.exp(bn))
 
+@jax.jit
 def compute_adaptive_sersic_profile(x, y,intensity , r_eff, n, x0, y0, ellip, PA_sersic):
     '''
         Notes about inputs:
@@ -885,6 +892,7 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
         filter_lower = basename.split('_')[1].lower()
         #re-order the obs_dict so the keys are from smallest to largest
         obs_dict_copy = dict(sorted(obs_dict.items()))
+        print(obs_dict_copy)
 
         if 8 in obs_dict_copy.keys():
             #if we have a 3215 psf, use it
@@ -962,14 +970,67 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
 
     return psf_list
 
-def rotate_coords(x,y,xc,yc,theta):
+@jax.jit
+def rotate_coords(x, y, xc, yc, theta):
     '''
-    Xc,Yc is the center of the image
-    Angle is in RADIANS, and the rotation is counter-clockwise
+    Rotate (x, y) around (xc, yc) by angle theta (in radians).
+    Rotation is CLOCKWISE.
     '''
-    # Rotate (x0, y0) around (xc, yc)
     dx, dy = x - xc, y - yc
-    x_rot = xc + jnp.cos(theta) * dx - jnp.sin(theta) * dy
-    y_rot = yc + jnp.sin(theta) * dx + jnp.cos(theta) * dy
+    x_rot = xc + jnp.cos(theta) * dx + jnp.sin(theta) * dy
+    y_rot = yc - jnp.sin(theta) * dx + jnp.cos(theta) * dy
 
     return x_rot, y_rot
+
+
+def flux_lambda_to_nu(F_lambda, lambda_microm):
+    """
+    Convert flux density from erg/s/cm²/microm to erg/s/cm²/Hz.
+
+    Parameters:
+    -----------
+    F_lambda : float or array-like
+        Spectral flux density in erg/s/cm²/nm.
+    lambda_nm : float or array-like
+        Wavelength in nanometers (nm) corresponding to F_lambda.
+
+    Returns:
+    --------
+    F_nu : float or array-like
+        Spectral flux density in erg/s/cm²/Hz.
+    """
+    c = 2.99792458e10  # speed of light in cm/s
+    lambda_cm = lambda_microm * 1e-4  # convert microm to cm
+    F_nu = F_lambda * (lambda_cm**2) / c
+    return F_nu
+
+def fnu_to_mjy(f_nu):
+    """
+    Convert flux density from erg/s/cm²/Hz to mJy.
+
+    Parameters:
+    -----------
+    f_nu : float or array-like
+        Spectral flux density in erg/s/cm²/Hz.
+
+    Returns:
+    --------
+    f_mjy : float or array-like
+        Spectral flux density in mJy.
+    """
+    return f_nu * 1e26  # Convert from erg/s/cm²/Hz to mJy
+
+
+def int_flux_to_flux_density(int_flux, lambda_micron, delta_lambda_microm):
+    """
+    Convert integrated flux to flux density.
+
+    int_flux = total EL flux in erg/s/cm2
+    """
+    delta_lambda_cm = delta_lambda_microm * 1e-4  # convert microm to cm
+    int_flux_per_micron = int_flux / delta_lambda_cm  # in erg/s/cm²/cm
+    total_disp_flux = flux_lambda_to_nu(int_flux_per_micron, lambda_micron)  #in erg/s/cm²/Hz
+
+    flux_density = fnu_to_mjy(total_disp_flux)  # Convert to mJy
+
+    return flux_density

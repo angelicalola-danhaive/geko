@@ -43,16 +43,6 @@ from astropy.convolution import convolve as convolve_astropy
 from astropy.cosmology import Planck18 as cosmo
 
 
-jax.config.update('jax_enable_x64', True)
-numpyro.set_host_device_count(2)
-numpyro.enable_validation()
-# numpyro.set_platform('gpu')
-
-# np.set_printoptions(precision=15, floatmode='maxprec')
-# jnp.set_printoptions(precision=15, floatmode='maxprec')
-# import figure_setup as setup
-
-XLA_FLAGS = "--xla_gpu_force_compilation_parallelism=1"
 
 # plotting settings
 
@@ -84,9 +74,6 @@ class Fit_Numpyro():
 
 		self.parametric = parametric
 
-	def __str__(self):
-		# print all of the attributes of the class
-		return 'Fit_Numpyro Class: \n' + ' - factor = ' + str(self.factor) + '\n - wave_factor = ' + str(self.wave_factor) + '\n grism object = ' + str(grism_object)
 
 	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
 
@@ -109,8 +96,7 @@ class Fit_Numpyro():
 
 		new_mask = self.create_mask()
 
-		with numpyro.validation_enabled():
-			self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =new_mask) #, extra_fields=("potential_energy", "accept_prob"))
+		self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =new_mask) #, extra_fields=("potential_energy", "accept_prob"))
 
 		print('done')
 
@@ -169,11 +155,11 @@ class Fit_Numpyro():
 		return new_mask
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
-def run_geko_fit(output, master_cat, line, parametric=False):
+def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples):
 
 	# ----------------------------------------------------------preprocessing the data------------------------------------------------------------------------
 	z_spec, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,\
-	num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor = pre.run_full_preprocessing(output, master_cat, line)
+	_, _, step_size, target_accept_prob, delta_wave, factor = pre.run_full_preprocessing(output, master_cat, line)
 	
 	if parametric:
 		with open('fitting_results/' + output + 'config_real.yaml', 'r') as file:
@@ -183,13 +169,17 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 		field = input[0]['Data']['field']
 
 		try:
-			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
+			pysersic_summary = Table.read('PysersicFits_v1d/summary_' + str(ID) + '_image_F150W_svi.cat', format='ascii')
 		except:
-			pysersic_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_image_F150W_svi.cat', format='ascii')
-		try:	
-			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F356W_svi.cat', format='ascii')
-		except:
-			pysersic_grism_summary = Table.read('fitting_results/' + output + 'summary_' + str(ID) + '_grism_F444W_svi.cat', format='ascii')
+			pysersic_summary = Table.read('PysersicFits_v1d/summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
+		master_cat_table =Table.read(master_cat, format="ascii")
+		#load the prior for the total emission line flux 
+		log_int_flux = master_cat_table['fit_flux_cgs'][master_cat_table['ID'] == ID][0] #in log(ergs/s/cm2)
+		int_flux = 10**log_int_flux #in ergs/s/cm2
+		log_int_flux_err = master_cat_table['fit_flux_cgs_e'][master_cat_table['ID'] == ID][0] #in log(ergs/s/cm2)
+		int_flux_err_high = 10**(log_int_flux + log_int_flux_err) - 10**log_int_flux #in ergs/s/cm2
+		int_flux_err_low = 10**log_int_flux - 10**(log_int_flux - log_int_flux_err) #in ergs/s/cm2
+		int_flux_err = np.mean([int_flux_err_high, int_flux_err_low]) #in ergs/s/cm2
 		
 		#based on the field, set the correction rotation to match JADES to the grism survey
 		if field == 'GOODS-S-FRESCO':
@@ -201,7 +191,7 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 		else:
 			raise ValueError("Field not recognized. Please check the field name in the config file.")
  
-		kin_model.disk.set_parametric_priors(pysersic_summary, pysersic_grism_summary, z_spec, wavelength, delta_wave, theta_rot, shape = obs_map.shape[0])
+		kin_model.disk.set_parametric_priors(pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength, delta_wave, theta_rot = theta_rot, shape = obs_map.shape[0])
 	else:
 		#raise non-parametric fitting not implemented error
 		raise ValueError("Non-parametric fitting is not implemented yet. Please set --parametric to True to use the parametric fitting.")
@@ -220,15 +210,16 @@ def run_geko_fit(output, master_cat, line, parametric=False):
 	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error)
 
 	run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
-		                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2)
+		                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=num_chains)
 
 	inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
 
 	# no ../ because the open() function reads from terminal directory (not module directory)
-	inf_data.to_netcdf('fitting_results/' + output + 'output')
+	inf_data.to_netcdf(save_runs_path + str(ID) + '_output')
+	# inf_data.to_netcdf('fitting_results/' + output + 'output')
 
 	#figure out how to make this work well
-	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric, ID = ID)
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric, ID = ID, save_runs_path = save_runs_path)
 
 
 

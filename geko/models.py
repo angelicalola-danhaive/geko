@@ -47,7 +47,97 @@ from scipy.constants import c
 import math
 import xarray as xr
 jax.config.update('jax_enable_x64', True)
-numpyro.enable_validation()
+# numpyro.enable_validation()  # Disabled for performance - only enable for debugging
+
+# ============================================================================
+# STANDALONE JIT-COMPILED FUNCTIONS (extracted from class methods)
+# ============================================================================
+
+@jax.jit
+def _v_rad_core(x, y, PA, i, Va, r_t, r):
+	"""Core computation for radial velocity (extracted from KinModels.v_rad)"""
+	return (2/pi)*Va*jnp.arctan(r/r_t)*jnp.sin(i)
+
+
+@jax.jit  
+def _vel1d_core(r, Va, r_t):
+	"""Core computation for 1D velocity profile (extracted from KinModels.vel1d)"""
+	r_t_safe = jnp.where(r_t != 0.0, r_t, 1.0)
+	r_safe = jnp.where(r != 0.0, r, 1.0)
+	v_out = jnp.where((r_t!=0.0) & (r!=0.0), (2.0/jnp.pi)*Va*jnp.arctan2(r_safe,r_t_safe), 0.0)
+	return jnp.array(v_out)
+
+
+@jax.jit
+def _v_core(x, y, PA, i, Va, r_t):
+	"""Core computation for velocity field (extracted from KinModels.v)"""
+	i_rad = i / 180 * jnp.pi
+	PA_rad = PA / 180 * jnp.pi
+	
+	# Precompute trigonometric values
+	sini = jnp.sin(i_rad)
+	cosi = jnp.cos(i_rad)
+	
+	# Rotate coordinates
+	x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
+	y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
+	
+	# Safeguard for cases where cosi is zero
+	i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
+	cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
+	
+	# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
+	r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
+	r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
+	r = jnp.sqrt(r_safe_squared)
+	
+	# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
+	r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
+	
+	# Calculate observed velocity using the standalone vel1d function
+	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(x_rot, Va, r_t))
+	
+	# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
+	vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
+	
+	return vel_obs_final
+
+
+@jax.jit
+def _v_int_core(x, y, PA, i, Va, r_t):
+	"""Core computation for integrated velocity field (extracted from KinModels.v_int)"""
+	i_rad = i / 180 * jnp.pi
+	PA_rad = PA / 180 * jnp.pi
+	
+	# Precompute trigonometric values
+	sini = jnp.sin(i_rad)
+	cosi = jnp.cos(i_rad)
+	
+	# Rotate coordinates
+	x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
+	y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
+	
+	# Safeguard for cases where cosi is zero
+	i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
+	cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
+	
+	# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
+	r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
+	r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
+	r = jnp.sqrt(r_safe_squared)
+	
+	# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
+	r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
+	
+	# Calculate observed velocity using the standalone vel1d function
+	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(x_rot, Va, r_t))
+	
+	# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
+	vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
+	
+	return vel_obs_final
+
+# ============================================================================
 
 class KinModels:
 	'''
@@ -59,83 +149,23 @@ class KinModels:
 		print('New kinematic model created')
 	
 	def v_rad(self, x, y, PA, i, Va, r_t, r):
-		return (2/pi)*Va*jnp.arctan(r/r_t)*jnp.sin(i)
+		"""Radial velocity component"""
+		return _v_rad_core(x, y, PA, i, Va, r_t, r)
 
 
 	def v(self, x, y, PA, i, Va, r_t):
-		i_rad = i / 180 * jnp.pi
-		PA_rad = PA / 180 * jnp.pi
-		
-		# Precompute trigonometric values
-		sini = jnp.sin(i_rad)
-		cosi = jnp.cos(i_rad)
-		
-		# Rotate coordinates
-		x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
-		y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
-		
-		# Safeguard for cases where cosi is zero
-		i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
-		cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
-		
-		# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
-		r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
-		r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
-		r = jnp.sqrt(r_safe_squared)
-		
-		# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
-		r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
-		
-		# Calculate observed velocity
-		vel_obs = jnp.where(cosi != 0, self.vel1d(r_safe, Va, r_t) * sini, self.vel1d(x_rot, Va, r_t))
-		
-		# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
-		vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
-		
-		return vel_obs_final
+		"""2D velocity field calculation"""
+		return _v_core(x, y, PA, i, Va, r_t)
 	
 	def v_int(self, x, y, PA, i, Va, r_t):
-		i_rad = i / 180 * jnp.pi
-		PA_rad = PA / 180 * jnp.pi
-		
-		# Precompute trigonometric values
-		sini = jnp.sin(i_rad)
-		cosi = jnp.cos(i_rad)
-		
-		# Rotate coordinates
-		x_rot = x * jnp.cos(PA_rad) - y * jnp.sin(PA_rad)
-		y_rot = x * jnp.sin(PA_rad) + y * jnp.cos(PA_rad)
-		
-		# Safeguard for cases where cosi is zero
-		i_rad_safe = jnp.where(cosi != 0, i_rad, 0)
-		cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)  # Use a small epsilon to avoid division by zero
-		
-		# Calculate r, handling x_rot = 0 and y_rot = 0 cases separately
-		r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
-		r_safe_squared = jnp.where(r_squared != 0.0, r_squared, 1e-12)  # Small epsilon to avoid sqrt(0)
-		r = jnp.sqrt(r_safe_squared)
-		
-		# Handle the special case where r = 0 or where both x_rot and y_rot are 0 explicitly
-		r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
-		
-		# Calculate observed velocity
-		vel_obs = jnp.where(cosi != 0, self.vel1d(r_safe, Va, r_t), self.vel1d(x_rot, Va, r_t))
-		
-		# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
-		vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
-		
-		return vel_obs_final
+		"""Integrated velocity field calculation"""
+		return _v_int_core(x, y, PA, i, Va, r_t)
 	
 
 
 	def vel1d(self, r, Va, r_t):
-		r_t_safe = jnp.where(r_t != 0.0, r_t, 1.0)
-		r_safe = jnp.where(r != 0.0, r, 1.0)
-		v_out = jnp.where((r_t!=0.0) & (r!=0.0), (2.0/jnp.pi)*Va*jnp.arctan2(r_safe,r_t_safe), 0.0)
-		# v_out = 40
-		# v_out = jnp.where(jnp.cos(r/r_t), (2.0/jnp.pi)*Va*jnp.arctan2(r,jnp.where(jnp.abs(r_t)>0, r_t, 1.0)), 0.0)
-
-		return jnp.array(v_out)
+		"""1D velocity profile"""
+		return _vel1d_core(r, Va, r_t)
 
 
 		# return dispersions
@@ -223,15 +253,15 @@ class Disk():
 		print('y0_vel --- Truncated Normal w/ mu: ' + str(self.mu_y0_vel) + ' and sigma: ' + str(self.y0_std) + ' and bounds: ' + str(self.y_low) + ' ' + str(self.y_high))
 		print('v0 --- Normal w/ mu: 0 and sigma: 100')
 
-	def set_parametric_priors(self,py_table, py_grism_table, redshift, wavelength, delta_wave, theta_rot = 0.0, shape = 31):
+	def set_parametric_priors(self,py_table, flux_measurements, redshift, wavelength, delta_wave, theta_rot = 0.0, shape = 31):
 		"""
 		Set the priors for the parametric model
-
+		delta_wave = the pixel scale along the wavelength axis, in the native instrument resolution 
 		theta_rot = the angle (in RADIANS) by which the rotate the image COUNTERCLOCKWISE in order to match the grism observations
 		"""
 		#need to set sizes in kpc before converting to arcsecs then pxs
 		arcsec_per_kpc = cosmo.arcsec_per_kpc_proper(z=redshift).value
-		kpc_per_pixel = 0.06/arcsec_per_kpc
+		kpc_per_pixel = 0.063/arcsec_per_kpc
 
 		ellip = py_table['ellip_q50'][0] 
 		# inclination = jnp.arccos(1-ellip)*180/jnp.pi
@@ -240,22 +270,16 @@ class Disk():
 		# inclination_err = (((jnp.arccos(1-py_table['ellip_q84'][0]) - jnp.arccos(1-py_table['ellip_q50'][0])) + (jnp.arccos(1-py_table['ellip_q50'][0]) - jnp.arccos(1-py_table['ellip_q16'][0])))/2)*180/jnp.pi
 		inclination_err = ( (utils.compute_inclination(ellip = py_table['ellip_q84'][0], q0 = 0.2) - inclination) + (inclination - utils.compute_inclination(ellip = py_table['ellip_q16'][0], q0 = 0.2)) )/2
 
-		inclination_std = inclination_err #no x2 bc this is an accurate measurement!
+		inclination_std = inclination_err #*2 #no x2 bc this is an accurate measurement!
 		# ellip_std =   ellip_err/2.36
 
 		#because the F115W is fit with the 0.03 resolution, r_eff is twice too big
-		#also using Natalia's fit to convert from near-UV to Ha sizes and for the scatter/uncertainty
-		nUV_to_Ha = 1 #10**0.2
-		nUV_to_Ha_std = 0 #10**0.171
-		#put the r_eff in kpc
-		r_eff_kpc = py_table['r_eff_q50'][0]*kpc_per_pixel
-		r_eff_kpc_err = (((py_table['r_eff_q84'][0] - py_table['r_eff_q50'][0]) + (py_table['r_eff_q50'][0] - py_table['r_eff_q16'][0]))/2)*kpc_per_pixel
 
 		r_eff_UV = py_table['r_eff_q50'][0]/2
-		r_eff_Ha = r_eff_UV*nUV_to_Ha
+		r_eff_Ha = r_eff_UV
 		r_eff_UV_err = ((py_table['r_eff_q84'][0] - py_table['r_eff_q50'][0]) + (py_table['r_eff_q50'][0] - py_table['r_eff_q16'][0]))/4
 		#combine the uncertainties from measurements and scaling relation
-		r_eff_std = r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)*2 #adding uncertainity of 2 to broaden prior
+		r_eff_std = np.maximum(3,r_eff_Ha) #r_eff_Ha*np.sqrt((r_eff_UV_err/r_eff_UV)**2 + (nUV_to_Ha_std/nUV_to_Ha)**2)*2 #adding uncertainity of 2 to broaden prior
 
 		#compute hard bounds for r_eff in kpc to not be too small or too big
 		r_eff_min_kpc = 0.1 
@@ -266,38 +290,40 @@ class Disk():
 
 		n = py_table['n_q50'][0]
 		n_err = ((py_table['n_q84'][0] - py_table['n_q50'][0]) + (py_table['n_q50'][0] - py_table['n_q16'][0]))/2
-		n_std = n_err*2
+		n_std = 1
 
 		#try taking n from grism too
 		# n = py_grism_table['n_q50'][0]
 		# n_err = ((py_grism_table['n_q84'][0] - py_grism_table['n_q50'][0]) + (py_grism_table['n_q50'][0] - py_grism_table['n_q16'][0]))/2
 		# n_std = n_err/2.36
 
-		#take the flux from the grism
-		flux = py_grism_table['flux_q50'][0]
-		amplitude = flux #utils.flux_to_Ie(flux,n, r_eff, ellip)
-		amplitude_high = py_grism_table['flux_q84'][0] #utils.flux_to_Ie(py_grism_table['flux_q84'][0],n, r_eff, ellip)
-		amplitude_low = py_grism_table['flux_q16'][0] #utils.flux_to_Ie(py_grism_table['flux_q16'][0],n, r_eff, ellip)
-		amplitude_err = ((amplitude_high - amplitude) + (amplitude - amplitude_low))/2
-		amplitude_std = amplitude_err #no x2 because this is an accurate measurement of the flux in the grism data!
+		#get the flux prior from the integrated line measurements
+		int_flux, int_flux_err = flux_measurements
+		amplitude =  utils.int_flux_to_flux_density(int_flux,wavelength, delta_wave) #convert the integrated flux to a flux density
+		amplitude_std = utils.int_flux_to_flux_density(int_flux,wavelength, delta_wave) #convert the integrated flux to a flux density uncertainty
 
 		#central pixel from image
 		 #because the F115W is fit with the 0.03 resolution, the centroids are twice too big
-		xc_morph = py_table['xc_q50'][0]/2
+		 #but also, the fit is done on a 40x40 image and we want the center on a 31x31 image 
+		xc_morph_py = py_table['xc_q50'][0]/2
+		xc_morph = xc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		xc_err = ((py_table['xc_q84'][0] - py_table['xc_q50'][0]) + (py_table['xc_q50'][0] - py_table['xc_q16'][0]))/4
-		xc_std = xc_err*4 #boosting the uncertainties on the centroids to have a looser prior
+		#set the uncertainties in the scale of the effective radius
+		xc_std = 0.25*r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
 
-		yc_morph = py_table['yc_q50'][0]/2
+		yc_morph_py = py_table['yc_q50'][0]/2
+		yc_morph = yc_morph_py + (shape-20)/2  #convert to the center of the 31x31 image
 		yc_err = ((py_table['yc_q84'][0] - py_table['yc_q50'][0]) + (py_table['yc_q50'][0] - py_table['yc_q16'][0]))/4
-		yc_std = yc_err*4 #boosting the uncertainties on the centroids to have a looser prior
+		yc_std = 0.25*r_eff_Ha #boosting the uncertainties on the centroids to have a looser prior
 
 		#rotate the prior according to theta rot
 		xc,yc = (shape-1)/2, (shape-1)/2
 		xc_morph_rot, yc_morph_rot = utils.rotate_coords(xc_morph, yc_morph, xc, yc, theta_rot)
 
 		theta = py_table['theta_q50'][0]
-		#rotate the prior according to theta rot 
-		theta_rot = (theta + theta_rot) % 360 #it's a + because the rotation is counter-clockwise and the PA is also defined in a CCW way in Pysersic
+		#rotate the prior according to theta rot (still in radians)
+		print('Rotating the prior by ', theta_rot, ' radians, from ', theta, ' radians to ', theta - theta_rot, ' radians')
+		theta_rot = (theta - theta_rot) % (2*jnp.pi) #it's a - because the rotation is CLOCKWISE and the PA is also defined in a CCW way in Pysersic
 
 		PA = (theta_rot-jnp.pi/2) * (180/jnp.pi) #convert to degrees
 		if PA < 0:
@@ -310,19 +336,10 @@ class Disk():
 		if PA < 0:
 			PA += 180
 		PA_mean_err = ((py_table['theta_q84'][0] - py_table['theta_q50'][0]) + (py_table['theta_q50'][0] - py_table['theta_q16'][0]))/2
-		PA_std = (PA_mean_err*2)*(180/jnp.pi) #convert to degrees
+		PA_std = (PA_mean_err)*(180/jnp.pi) #convert to degrees
 		print('Setting parametric priors: ', PA, inclination, r_eff_Ha, n, amplitude, xc_morph, yc_morph)
 
-		#compute velocity bounds using the grism size
-		r_eff_grism = py_grism_table['r_eff_q50'][0]
-		r_s_grism = r_eff_grism/1.676
-		r22_grism = 2.2*r_s_grism
-		PA_grism = py_grism_table['theta_q50'][0]
-		#project r22 on the x axis using the PA
-		r22_x = jnp.abs(r22_grism*jnp.cos(PA_grism))
-		#compute the velocity gradient
-		vel_pix_scale = (delta_wave/wavelength)*(c/1000) #put c in km/s
-		# self.V_max = r22_x*vel_pix_scale
+		#set velocity bounds
 		self.V_max = 800
 		self.D_max = 500
 
@@ -347,6 +364,9 @@ class Disk():
 		self.xc_std = xc_std
 		self.yc_morph = yc_morph_rot
 		self.yc_std = yc_std
+
+		self.xc_std_vel = 2*self.xc_std
+		self.yc_std_vel = 2*self.yc_std
 	
 
 	def set_parametric_priors_test(self,priors):
@@ -475,7 +495,7 @@ class Disk():
 		"""
 
 		unscaled_PA = numpyro.sample('unscaled_PA', dist.Normal())
-		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std*4 + self.PA_morph_mu) #giving more freedom to the kinematic PA! it's really the morph one that has to be well constrained
+		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std*2 + self.PA_morph_mu) #giving more freedom to the kinematic PA! it's really the morph one that has to be well constrained
 
 		unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())  #* (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
 		Va = numpyro.deterministic('Va', unscaled_Va*(2*self.V_max) - self.V_max)
@@ -489,11 +509,11 @@ class Disk():
 
 
 		unscaled_x0_vel = numpyro.sample('unscaled_x0_vel', dist.Normal())
-		x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.xc_std + self.xc_morph)
+		x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.xc_std_vel + self.xc_morph)
 
 
 		unscaled_y0_vel = numpyro.sample('unscaled_y0_vel', dist.Normal())
-		y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.yc_std + self.yc_morph)  
+		y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.yc_std_vel + self.yc_morph)  
 
 		unscaled_v0 = numpyro.sample('unscaled_v0', dist.Normal())
 		v0 = numpyro.deterministic('v0', unscaled_v0*50)
@@ -539,8 +559,12 @@ class Disk():
 	def compute_parametrix_flux_posterior(self, inference_data):
 		#compute means for parametric flux model
 		self.amplitude_mean = jnp.array(inference_data.posterior['amplitude'].median(dim=["chain", "draw"]))
+		self.amplitude_16 = jnp.array(inference_data.posterior['amplitude'].quantile(0.16, dim=["chain", "draw"]))
+		self.amplitude_84 = jnp.array(inference_data.posterior['amplitude'].quantile(0.84, dim=["chain", "draw"]))
 		self.r_eff_mean = jnp.array(inference_data.posterior['r_eff'].median(dim=["chain", "draw"]))
 		self.n_mean = jnp.array(inference_data.posterior['n'].median(dim=["chain", "draw"]))
+		self.n_16 = jnp.array(inference_data.posterior['n'].quantile(0.16, dim=["chain", "draw"]))
+		self.n_84 = jnp.array(inference_data.posterior['n'].quantile(0.84, dim=["chain", "draw"]))
 		# self.ellip_mean = jnp.array(inference_data.posterior['ellip'].median(dim=["chain", "draw"]))
 		self.PA_morph_mean = jnp.array(inference_data.posterior['PA_morph'].median(dim=["chain", "draw"])) #- 45
 		#compute the inclination prior posterior and median from the ellipticity
@@ -601,6 +625,7 @@ class Disk():
 		plt.colorbar()
 		plt.title('Fluxes mean')
 		plt.show()
+		plt.close()
 		print(fluxes_mean.max())
 		threshold = 0.4*fluxes_mean.max()
 		mask = jnp.zeros_like(fluxes_mean)
@@ -610,6 +635,7 @@ class Disk():
 		plt.imshow(jnp.where(mask ==1, fluxes_mean, np.nan), origin = 'lower')
 		plt.title('Mask for v_rot comp')
 		plt.show()
+		plt.close()
 		return model_v_rot
 
 	def plot(self):
@@ -627,6 +653,7 @@ class Disk():
 		plt.scatter(self.x0_vel, self.mu_y0_vel, color='red')
 		plt.title('Disk')
 		plt.show()
+		plt.close()
 
 
 
@@ -674,6 +701,10 @@ class DiskModel(KinModels):
 		fluxes,r_eff, i, xc_morph, yc_morph = self.disk.sample_fluxes_parametric() 
 		Pa, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params_parametric(r_eff=r_eff)      
 		# i = utils.compute_inclination(ellip = ellip) 
+
+		#set the velocity centroid to the morph one so that we don't have to fit for it!
+		x0_vel = xc_morph
+		y0_vel = yc_morph
 
 		fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
 
@@ -781,6 +812,13 @@ class DiskModel(KinModels):
 
 		# self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
 		inference_data,self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
+
+		self.amplitude_16 = self.disk.amplitude_16
+		self.amplitude_84 = self.disk.amplitude_84
+
+		self.n_16 = self.disk.n_16
+		self.n_84 = self.disk.n_84
+
 		self.r_eff_16 = self.disk.r_eff_16
 		self.r_eff_84 = self.disk.r_eff_84
 
@@ -925,13 +963,13 @@ class DiskModel(KinModels):
 	
 	def log_posterior(self, grism_object, obs_map, obs_error,values = {}):
 		return -(self.log_likelihood(grism_object, obs_map, obs_error,values) + self.log_prior(values))
-	def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None, v_re = None, PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None):
+	def plot_summary(self, obs_map, obs_error, inf_data, wave_space, save_to_folder = None, name = None, v_re = None, PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None):
 		obs_radius = self.r_eff_mean
 		ellip = self.ellip_mean
 		theta_Ha = self.PA_morph_mean/(180/jnp.pi) + jnp.pi/2 #need to convert to radians and match plotting ref frame
 		n = self.n_mean
 
-		ymin,ymax = plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, v_re, self.fluxes_mean, inf_data, wave_space, x0 = self.x0, y0 = self.y0, factor = 1, direct_image_size = self.im_shape[0], save_to_folder = save_to_folder, name = name, PA = PA, i = i, Va = Va, r_t = r_t, sigma0 = sigma0, obs_radius = obs_radius, ellip = ellip, theta_obs = theta_obs, theta_Ha =theta_Ha, n = n)
+		ymin,ymax = plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, v_re, self.fluxes_mean, inf_data, wave_space, x0 = self.x0, y0 = self.y0, factor = 1, direct_image_size = self.im_shape[0], save_to_folder = save_to_folder, name = name, PA = PA, i = i, Va = Va, r_t = r_t, sigma0 = sigma0, obs_radius = obs_radius, ellip = ellip, theta_obs = theta_obs, theta_Ha =theta_Ha, n = n, save_runs_path  = save_runs_path)
 		return ymin, ymax
 
 
