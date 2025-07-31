@@ -378,11 +378,11 @@ class Disk():
 		self.inc_mu = priors['i']
 		self.inc_std = 0.2*priors['i']
 		self.r_eff_mu = (1.676/0.4)*priors['r_t']
-		self.r_eff_std = 2 #0.5*self.r_eff_mu
+		self.r_eff_std = np.maximum(3, self.r_eff_mu)
 		self.r_eff_min = 0
 		self.r_eff_max = 15
 		self.n_mu = priors['n'] #1 #*2 #just testing for Erica's
-		self.n_std = 2
+		self.n_std = 1
 		self.xc_morph = 15
 		self.xc_std = 1
 		self.yc_morph = 15
