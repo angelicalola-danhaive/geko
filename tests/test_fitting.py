@@ -274,13 +274,15 @@ class TestKinModelsInitialization:
 def test_run_geko_fit_function():
     """Test that run_geko_fit function exists and has correct signature"""
     assert callable(run_geko_fit)
-    
+
     # Check function signature
     import inspect
     sig = inspect.signature(run_geko_fit)
-    expected_params = ['output', 'master_cat', 'line', 'parametric', 'save_runs_path', 
-                      'num_chains', 'num_warmup', 'num_samples']
-    
+    expected_params = ['output', 'master_cat', 'line', 'parametric', 'save_runs_path',
+                      'num_chains', 'num_warmup', 'num_samples', 'source_id', 'field',
+                      'grism_filter', 'delta_wave_cutoff', 'factor', 'wave_factor',
+                      'model_name', 'config']
+
     actual_params = list(sig.parameters.keys())
     assert actual_params == expected_params
 
