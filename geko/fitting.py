@@ -31,7 +31,6 @@ from jax import random
 import arviz as az
 
 import argparse
-import yaml
 import corner
 
 from astropy.table import Table
@@ -208,32 +207,74 @@ class Fit_Numpyro():
 		return new_mask
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
-def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples, config=None):
+def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples,
+                 source_id, field, grism_filter='F444W', delta_wave_cutoff=0.005, factor=5, wave_factor=10,
+                 model_name='Disk', config=None):
+	"""
+	Run geko fitting without requiring a YAML config file.
+
+	Parameters
+	----------
+	output : str
+		Name of output subfolder
+	master_cat : str
+		Path to master catalog file
+	line : int
+		Emission line wavelength in Angstroms (e.g., 6562 for H-alpha)
+	parametric : bool
+		Use parametric morphology fitting
+	save_runs_path : str
+		Base directory containing data files
+	num_chains : int
+		Number of MCMC chains
+	num_warmup : int
+		Number of warmup iterations
+	num_samples : int
+		Number of MCMC samples
+	source_id : int
+		Source ID number
+	field : str
+		Field name: 'GOODS-N', 'GOODS-N-CONGRESS', or 'GOODS-S-FRESCO'
+	grism_filter : str, optional
+		Grism filter name (default: 'F444W')
+	delta_wave_cutoff : float, optional
+		Wavelength bin size cutoff in microns (default: 0.005)
+	factor : int, optional
+		Spatial oversampling factor (default: 5)
+	wave_factor : int, optional
+		Wavelength oversampling factor (default: 10)
+	model_name : str, optional
+		Kinematic model type (default: 'Disk')
+	config : FitConfiguration, optional
+		Optional configuration object to override priors
+
+	Returns
+	-------
+	arviz.InferenceData
+		MCMC inference results
+	"""
 
 	# ----------------------------------------------------------preprocessing the data------------------------------------------------------------------------
-	z_spec, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,\
-	_, _, step_size, target_accept_prob, delta_wave, factor = pre.run_full_preprocessing(output, master_cat, line)
-	
-	if parametric:
-		with open('fitting_results/' + output + 'config_real.yaml', 'r') as file:
-			input = yaml.load(file, Loader=yaml.FullLoader)
-		ID = input[0]['Data']['ID']
-		#get the field 
-		field = input[0]['Data']['field']
+	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object,\
+	delta_wave = pre.run_full_preprocessing(output, master_cat, line, save_runs_path=save_runs_path,
+	                                        source_id=source_id, field=field, grism_filter=grism_filter,
+	                                        delta_wave_cutoff=delta_wave_cutoff, factor=factor,
+	                                        wave_factor=wave_factor, model_name=model_name)
 
+	if parametric:
 		try:
-			pysersic_summary = Table.read('PysersicFits_v1d/summary_' + str(ID) + '_image_F150W_svi.cat', format='ascii')
+			pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F150W_svi.cat', format='ascii')
 		except:
-			pysersic_summary = Table.read('PysersicFits_v1d/summary_' + str(ID) + '_image_F182M_svi.cat', format='ascii')
+			pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F182M_svi.cat', format='ascii')
 		master_cat_table =Table.read(master_cat, format="ascii")
-		#load the prior for the total emission line flux 
-		log_int_flux = master_cat_table['fit_flux_cgs'][master_cat_table['ID'] == ID][0] #in log(ergs/s/cm2)
+		#load the prior for the total emission line flux
+		log_int_flux = master_cat_table['fit_flux_cgs'][master_cat_table['ID'] == source_id][0] #in log(ergs/s/cm2)
 		int_flux = 10**log_int_flux #in ergs/s/cm2
-		log_int_flux_err = master_cat_table['fit_flux_cgs_e'][master_cat_table['ID'] == ID][0] #in log(ergs/s/cm2)
+		log_int_flux_err = master_cat_table['fit_flux_cgs_e'][master_cat_table['ID'] == source_id][0] #in log(ergs/s/cm2)
 		int_flux_err_high = 10**(log_int_flux + log_int_flux_err) - 10**log_int_flux #in ergs/s/cm2
 		int_flux_err_low = 10**log_int_flux - 10**(log_int_flux - log_int_flux_err) #in ergs/s/cm2
 		int_flux_err = np.mean([int_flux_err_high, int_flux_err_low]) #in ergs/s/cm2
-		
+
 		#based on the field, set the correction rotation to match JADES to the grism survey
 		if field == 'GOODS-S-FRESCO':
 			theta_rot = jnp.radians(0)
@@ -242,8 +283,8 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 		elif field == 'GOODS-N-CONGRESS':
 			theta_rot = jnp.radians(228.22379)
 		else:
-			raise ValueError("Field not recognized. Please check the field name in the config file.")
- 
+			raise ValueError("Field not recognized. Please check the field name.")
+
 		kin_model.disk.set_parametric_priors(pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength, delta_wave, theta_rot = theta_rot, shape = obs_map.shape[0])
 	else:
 		#raise non-parametric fitting not implemented error
@@ -269,21 +310,17 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
 	# Run inference - config parameters will be used automatically if provided
 	run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
-		                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=num_chains)
+		                      median=True, step_size=0.001, adapt_step_size=True, target_accept_prob=0.8,  num_chains=num_chains)
 
 	inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
 
-	# Get ID for output filename
-	if parametric:
-		output_id = ID  # ID defined in parametric section above
-	else:
-		output_id = output.rstrip('/')  # Use output directory name
-	
 	# Save results
-	inf_data.to_netcdf(save_runs_path + str(output_id) + '_output')
+	inf_data.to_netcdf(save_runs_path + str(source_id) + '_output')
 
 	# Process results
-	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line, parametric=parametric, ID=output_id, save_runs_path=save_runs_path)
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line, parametric=parametric, ID=source_id, save_runs_path=save_runs_path)
+
+	return inf_data
 
 
 
