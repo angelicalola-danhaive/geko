@@ -131,8 +131,8 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	res['n_16'] = kin_model.n_16
 	res['n_84'] = kin_model.n_84
 
-	res.write(save_runs_path + str(ID) + '_results', format='ascii', overwrite=True)
-	
+	res.write(save_runs_path + output + '/' + str(ID) + '_results', format='ascii', overwrite=True)
+
 	#save a cornerplot of the v_sigma and sigma posteriors
 	fig = plt.figure(figsize=(10, 10))
 	CORNER_KWARGS = dict(
@@ -153,7 +153,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
 						color='dodgerblue', **CORNER_KWARGS)
 	plt.tight_layout()
-	plt.savefig(save_runs_path + str(ID)+'_v_sigma_corner.png', dpi=300)
+	plt.savefig(save_runs_path + output + '/' + str(ID)+'_v_sigma_corner.png', dpi=300)
 	plt.close()
 
 

@@ -715,9 +715,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# plt.gca().set(box_aspect=1)
 	if save_to_folder != None:
 		if name == 'summary':
-			plt.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png', dpi=300)
+			plt.savefig(save_runs_path + save_to_folder + '/' + save_to_folder + '_cornerplot' + '.png', dpi=300)
 			plt.close()
-			figure_image = plt.imread(save_runs_path + str(save_to_folder).split('/')[0] + '_cornerplot' + '.png')
+			figure_image = plt.imread(save_runs_path + save_to_folder + '/' + save_to_folder + '_cornerplot' + '.png')
 		elif name == 'pretty':
 			plt.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
 			plt.close()
@@ -739,7 +739,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	if save_to_folder != None:
 		if name == 'summary':
-				fig.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_summary_corner' + '.png', dpi=300)
+				fig.savefig(save_runs_path + save_to_folder + '/' + save_to_folder + '_summary_corner' + '.png', dpi=300)
 		elif name == 'pretty':
 			fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
 		else:
