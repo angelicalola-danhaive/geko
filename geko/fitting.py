@@ -89,34 +89,28 @@ class Fit_Numpyro():
 
 
 	def run_inference(self, num_samples=None, num_warmup=None, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=None, max_tree_depth=None, num_chains=None, init_vals = None):
-		
-		# Use config values if available and parameters not explicitly provided
+
+		# Always use config for defaults - create default config if none provided
+		from .config import MCMCSettings
 		if self.config is not None:
 			mcmc_config = self.config.mcmc
-			if num_samples is None:
-				num_samples = mcmc_config.num_samples
-			if num_warmup is None:
-				num_warmup = mcmc_config.num_warmup
-			if target_accept_prob is None:
-				target_accept_prob = mcmc_config.target_accept_prob
-			if max_tree_depth is None:
-				max_tree_depth = mcmc_config.max_tree_depth
-			if num_chains is None:
-				num_chains = mcmc_config.num_chains
-			if mcmc_config.step_size is not None:
-				step_size = mcmc_config.step_size
-		
-		# Set defaults if still None
-		# if num_samples is None:
-		# 	num_samples = 2000
-		# if num_warmup is None:
-		# 	num_warmup = 2000
-		# if target_accept_prob is None:
-		# 	target_accept_prob = 0.8
-		# if max_tree_depth is None:
-		# 	max_tree_depth = 10
-		# if num_chains is None:
-		# 	num_chains = 5
+		else:
+			# Use default MCMCSettings if no config provided
+			mcmc_config = MCMCSettings()
+
+		# Use config values if parameters not explicitly provided
+		if num_samples is None:
+			num_samples = mcmc_config.num_samples
+		if num_warmup is None:
+			num_warmup = mcmc_config.num_warmup
+		if target_accept_prob is None:
+			target_accept_prob = mcmc_config.target_accept_prob
+		if max_tree_depth is None:
+			max_tree_depth = mcmc_config.max_tree_depth
+		if num_chains is None:
+			num_chains = mcmc_config.num_chains
+		if mcmc_config.step_size is not None:
+			step_size = mcmc_config.step_size
 
 		if self.parametric:
 			inference_model = self.kin_model.inference_model_parametric
