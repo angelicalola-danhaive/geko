@@ -1,24 +1,11 @@
-<<<<<<< HEAD
-<div>
-  <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200" align="left" style="margin-right: 20px;"/>
+<img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200" align="left" style="margin-right: 20px;"/>
 
-=======
-<table>
-<tr>
-<td width="200">
-  <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200"/>
-</td>
-<td>
->>>>>>> origin/main
-  <h2>the <strong>G</strong>rism <strong>E</strong>mission-line <strong>K</strong>inematics t<strong>O</strong>ol</h2>
+## the **G**rism **E**mission-line **K**inematics t**O**ol
 
-  <p>
-    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"/></a>
-    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"/></a>
-  </p>
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-  <br clear="left"/>
-</div>
+<br clear="left"/>
 
 ## Description
 
