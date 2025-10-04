@@ -1,6 +1,8 @@
 <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200" align="left"/>
 
-# the **G**rism **E**mission-line **K**inematics t**O**ol
+<div style="overflow: auto;">
+  <h1>the <strong>G</strong>rism <strong>E</strong>mission-line <strong>K</strong>inematics t<strong>O</strong>ol</h1>
+</div>
 
 <p>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"/></a>
