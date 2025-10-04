@@ -20,8 +20,6 @@ import matplotlib.pyplot as plt
 
 import jax.numpy as jnp
 
-import yaml
-
 from scipy.ndimage import median_filter, sobel, center_of_mass
 from scipy import ndimage
 
@@ -56,68 +54,6 @@ from skimage import color, data, restoration
 c_m = c*1e-9
 
 
-
-
-def read_config_file(input, output, master_cat_path, line):
-	"""
-
-		Read the config file for the galaxy and returns all of the relevant parameters
-
-	"""
-	data = input[0]
-	params = input[1]
-	inference = input[2]
-
-	ID = data['Data']['ID']
-
-	master_cat =Table.read(master_cat_path, format="ascii")
-	
-	field = data['Data']['field']
-
-
-	if field == 'GOODS-N':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + 'F444W' + '_ID' + str(ID) + '_comb.fits'
-		grism_filter = 'F444W'
-	elif field == 'GOODS-N-CONGRESS':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_GDN_' + 'F356W' + '_ID' + str(ID) + '_comb.fits'
-		grism_filter = 'F356W'
-	elif field == 'GOODS-S-FRESCO':
-		grism_spectrum_path = 'fitting_results/' + output+ 'spec_2d_FRESCO_' + 'F444W' + '_ID' + str(ID) + '_comb.fits'
-		grism_filter = 'F444W'
-	else:
-		#generate error that the input field is not supported
-		raise ValueError(f"Field {field} is not supported. Supported fields are: GOODS-N, GOODS-N-CONGRESS, GOODS-S-FRESCO.")
-		
-
-	wavelength = master_cat[master_cat['ID'] == ID][str(line) + '_lambda'][0]
-
-	redshift = master_cat[master_cat['ID'] == ID]['zspec'][0]
-
-	flux_threshold = inference['Inference']['flux_threshold']
-	
-	delta_wave_cutoff = params['Params']['delta_wave_cutoff']
-	
-	factor = params['Params']['factor']
-	wave_factor = params['Params']['wave_factor']
- 
-
-	model_name = inference['Inference']['model']
-	
-	#import all of the bounds needed for the priors
-
-	PA_sigma = inference['Inference']['PA_bounds']
-	i_bounds = inference['Inference']['i_bounds']
-	Va_bounds = inference['Inference']['Va_bounds']
-	r_t_bounds = inference['Inference']['r_t_bounds']
-	sigma0_bounds = inference['Inference']['sigma0_bounds']
-
-	num_samples = inference['Inference']['num_samples'] 
-	num_warmup = inference['Inference']['num_warmup']
-	step_size = inference['Inference']['step_size']
-	target_accept_prob = inference['Inference']['target_accept_prob']
-	
-	#return all of the parameters
-	return ID, field, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,  flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff
 
 
 def renormalize_image(direct,direct_error, obs_map):
@@ -422,18 +358,59 @@ def preprocess_mock_data(mock_params):
 	return  obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
 				wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object
 
-def run_full_preprocessing(output,master_cat, line, mock_params = None, priors = None):
+def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=None, save_runs_path='fitting_results/',
+                            source_id=None, field=None, grism_filter='F444W', delta_wave_cutoff=0.005,
+                            factor=5, wave_factor=10, model_name='Disk'):
 	"""
-		Main function that automatically post-processes the inference data and saves all of the relevant plots
+		Main function that automatically preprocesses data for geko fitting.
+
+		Parameters
+		----------
+		output : str
+			Name of output subfolder
+		master_cat : str
+			Path to master catalog file
+		line : int
+			Emission line wavelength in Angstroms
+		mock_params : dict, optional
+			Parameters for mock data (for testing)
+		priors : dict, optional
+			Custom priors (not used in current implementation)
+		save_runs_path : str
+			Base directory containing data files
+		source_id : int
+			Source ID number
+		field : str
+			Field name: 'GOODS-N', 'GOODS-N-CONGRESS', or 'GOODS-S-FRESCO'
+		grism_filter : str
+			Grism filter name (default: 'F444W')
+		delta_wave_cutoff : float
+			Wavelength bin size cutoff in microns
+		factor : int
+			Spatial oversampling factor
+		wave_factor : int
+			Wavelength oversampling factor
+		model_name : str
+			Kinematic model type (default: 'Disk')
 	"""
-	
+
 	if mock_params == None:
-		with open('fitting_results/' + output + '/' + 'config_real.yaml', 'r') as file:
-			input = yaml.load(file, Loader=yaml.FullLoader)
-		print('Read inputs successfully')
-		#load of all the parameters from the configuration file
-		ID, field, redshift, grism_filter, grism_spectrum_path, field, wavelength, redshift, line,flux_threshold, factor, wave_factor, model_name, PA_sigma, i_bounds, Va_bounds, r_t_bounds,\
-		sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob, delta_wave_cutoff = read_config_file(input, output + '/', master_cat,line)
+		ID = source_id
+
+		# Construct grism spectrum path based on field
+		if field == 'GOODS-N':
+			grism_spectrum_path = save_runs_path + output + '/spec_2d_GDN_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
+		elif field == 'GOODS-N-CONGRESS':
+			grism_spectrum_path = save_runs_path + output + '/spec_2d_GDN_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
+		elif field == 'GOODS-S-FRESCO':
+			grism_spectrum_path = save_runs_path + output + '/spec_2d_FRESCO_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
+		else:
+			raise ValueError(f"Field {field} is not supported. Supported fields are: GOODS-N, GOODS-N-CONGRESS, GOODS-S-FRESCO.")
+
+		# Get wavelength and redshift from master catalog
+		master_cat_table = Table.read(master_cat, format="ascii")
+		wavelength = master_cat_table[master_cat_table['ID'] == ID][str(line) + '_lambda'][0]
+		redshift = master_cat_table[master_cat_table['ID'] == ID]['zspec'][0]
 		#preprocess the images and the grism spectrum
 		if field == 'ALT':
 			#generate an error that says not updated
@@ -449,15 +426,15 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 				wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object = preprocess_mock_data(mock_params)
 		field = 'GOODS-S-FRESCO'
 
-	#load the PSF that corresponds to the grism program 
+	#load the PSF that corresponds to the grism program
 	if field == 'GOODS-N':
-		psf_path = 'mpsf_v1d/mpsf_jw018950.gn.f444w.fits' 
+		psf_path = save_runs_path + 'psfs/mpsf_jw018950.gn.f444w.fits'
 	elif field == 'GOODS-N-CONGRESS':
-		psf_path = 'mpsf_v1d/mpsf_jw035770.f356w.fits' 
+		psf_path = save_runs_path + 'psfs/mpsf_jw035770.f356w.fits'
 	elif field == 'GOODS-S-FRESCO':
-		psf_path = 'mpsf_v1d/mpsf_jw018950.gs.f444w.fits' 
-	
-	#manually set the psf path to what it was in the previous version 
+		psf_path = save_runs_path + 'psfs/mpsf_jw018950.gs.f444w.fits'
+
+	#manually set the psf path to what it was in the previous version
 	#THIS IS FOR TESTING PURPOSES, REMOVE AFTER!
 	# psf_path = 'mpsf_gds/mpsf_' + str(grism_filter).lower() + '.fits'
 
@@ -469,8 +446,8 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	PSF = utils.downsample_psf_centered(PSF, size = 15)
 	#run pysersic fit to get morphological parameters
 	if mock_params == None:
-		path_output = 'fitting_results/' + output
-	else: 
+		path_output = save_runs_path + output
+	else:
 		test = mock_params['test']
 		j = mock_params['j']
 		path_output = 'testing/' + str(test) + '/'
@@ -524,9 +501,19 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 	r_full_grism = None
 	PA_grism = None
 	PA_morph = None
+
+	# In direct parameter mode, these bounds are not used (set to None)
+	# They're only used in legacy config file mode
+	if source_id is not None and field is not None:
+		# Direct mode: use None for unused legacy parameters
+		PA_sigma = None
+		Va_bounds = [0, 500]  # Default bounds
+		r_t_bounds = [0.1, 5.0, 10.0]  # Default bounds
+		sigma0_bounds = [0, 200]  # Default bounds
+
 	kin_model.set_bounds((obs_map.shape[0], obs_map.shape[0]), factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_full_grism)
 
-	return redshift, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor
+	return redshift, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave
 
 
 ########## unused functions bins below - typically relevant for the non-parametric fitting but useless in the parametric!! ###########
