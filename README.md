@@ -1,8 +1,7 @@
 <div align="center">
   <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="300"/>
-
-  # Geko
-  ### **G**rism **E**mission-line **K**inematics t**O**ol
+  
+  ### the **G**rism **E**mission-line **K**inematics t**O**ol
 
   [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
   [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
