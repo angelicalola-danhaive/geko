@@ -429,15 +429,11 @@ class Disk():
 
 		# Set morphological priors
 		morph = config.morphology
-		self.PA_morph_mu = (morph.PA_min + morph.PA_max) / 2  # Use center of range
-		self.PA_morph_std = (morph.PA_max - morph.PA_min) / 4   # ~95% coverage
-		self.PA_morph_min = morph.PA_min
-		self.PA_morph_max = morph.PA_max
+		self.PA_morph_mu = morph.PA_mean
+		self.PA_morph_std = morph.PA_std
 
-		self.inc_mu = (morph.inc_min + morph.inc_max) / 2
-		self.inc_std = (morph.inc_max - morph.inc_min) / 4
-		self.inc_min = morph.inc_min
-		self.inc_max = morph.inc_max
+		self.inc_mu = morph.inc_mean
+		self.inc_std = morph.inc_std
 
 		self.r_eff_mu = morph.r_eff_mean
 		self.r_eff_std = morph.r_eff_std
@@ -504,10 +500,10 @@ class Disk():
 
 		# Apply morphology overrides
 		morph_map = {
-			'PA_min': ('PA_morph_min', lambda v: v),
-			'PA_max': ('PA_morph_max', lambda v: v),
-			'inc_min': ('inc_min', lambda v: v),
-			'inc_max': ('inc_max', lambda v: v),
+			'PA_mean': ('PA_morph_mu', lambda v: v),
+			'PA_std': ('PA_morph_std', lambda v: v),
+			'inc_mean': ('inc_mu', lambda v: v),
+			'inc_std': ('inc_std', lambda v: v),
 			'r_eff_mean': ('r_eff_mu', lambda v: v),
 			'r_eff_std': ('r_eff_std', lambda v: v),
 			'r_eff_min': ('r_eff_min', lambda v: v),
@@ -531,14 +527,6 @@ class Disk():
 				attr_name, transform = morph_map[config_param]
 				setattr(self, attr_name, transform(value))
 				overridden_params.append(f"{config_param}→{attr_name}")
-
-				# Also update derived parameters
-				if config_param in ['PA_min', 'PA_max']:
-					self.PA_morph_mu = (self.PA_morph_min + self.PA_morph_max) / 2
-					self.PA_morph_std = (self.PA_morph_max - self.PA_morph_min) / 4
-				elif config_param in ['inc_min', 'inc_max']:
-					self.inc_mu = (self.inc_min + self.inc_max) / 2
-					self.inc_std = (self.inc_max - self.inc_min) / 4
 
 		# Apply kinematic overrides
 		kin_map = {

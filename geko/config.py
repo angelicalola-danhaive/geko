@@ -21,13 +21,13 @@ class MorphologyPriors:
     No defaults are provided - all parameters must be specified.
     """
 
-    # Position angle (degrees) - uniform prior
-    PA_min: float
-    PA_max: float
+    # Position angle (degrees) - normal prior
+    PA_mean: float
+    PA_std: float
 
-    # Inclination (degrees) - uniform prior
-    inc_min: float
-    inc_max: float
+    # Inclination (degrees) - truncated normal prior
+    inc_mean: float
+    inc_std: float
 
     # Effective radius (pixels) - truncated normal
     r_eff_mean: float
@@ -111,17 +111,20 @@ class FitConfiguration:
 
         # Validate morphology priors (if provided)
         if self.morphology is not None:
-            if self.morphology.PA_min >= self.morphology.PA_max:
-                issues.append("ERROR: PA_min must be less than PA_max")
+            if self.morphology.PA_std <= 0:
+                issues.append("ERROR: PA_std must be positive")
 
-            if self.morphology.inc_min >= self.morphology.inc_max:
-                issues.append("ERROR: inc_min must be less than inc_max")
+            if self.morphology.inc_std <= 0:
+                issues.append("ERROR: inc_std must be positive")
 
-            if self.morphology.inc_min < 20:
+            if self.morphology.inc_mean < 20:
                 issues.append("WARNING: Very low inclinations (<20°) may be difficult to fit")
 
             if self.morphology.r_eff_min >= self.morphology.r_eff_max:
                 issues.append("ERROR: r_eff_min must be less than r_eff_max")
+
+            if self.morphology.r_eff_std <= 0:
+                issues.append("ERROR: r_eff_std must be positive")
 
         # Validate kinematic priors
         if self.kinematics.Va_min >= self.kinematics.Va_max:
@@ -323,8 +326,8 @@ if __name__ == "__main__":
     # Create config with custom morphology and kinematic priors
     config = FitConfiguration(
         morphology=MorphologyPriors(
-            PA_min=10, PA_max=170,
-            inc_min=40, inc_max=70,
+            PA_mean=90.0, PA_std=30.0,
+            inc_mean=55.0, inc_std=15.0,
             r_eff_mean=3.0, r_eff_std=1.0, r_eff_min=0.5, r_eff_max=10.0,
             n_mean=1.0, n_std=0.5, n_min=0.5, n_max=4.0,
             xc_mean=0.0, xc_std=2.0,
