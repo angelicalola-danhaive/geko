@@ -103,6 +103,27 @@ def resample(image_high_res, factor_y, factor_x):
     return image_low_res
 
 def downsample_error(error_array):
+    """
+    Downsample a 2D error array by a factor of 2 with proper error propagation.
+
+    Uses RMS (root-mean-square) averaging of 2x2 blocks to properly propagate
+    uncertainties when downsampling error maps.
+
+    Parameters
+    ----------
+    error_array : numpy.ndarray
+        2D array of error/uncertainty values to downsample
+
+    Returns
+    -------
+    numpy.ndarray
+        Downsampled error array with shape (h//2, w//2)
+
+    Notes
+    -----
+    If dimensions are odd, the array is cropped to even dimensions before downsampling.
+    Error propagation: sigma_downsampled = sqrt(mean(sigma_i^2)) for 2x2 blocks.
+    """
     # Ensure dimensions are even
     h, w = error_array.shape
     h2, w2 = h // 2 * 2, w // 2 * 2
@@ -379,6 +400,27 @@ def save_fits_image(image, masked_indices, inference_data, filename):
     hdul.writeto(filename, overwrite=True)
     
 def downsample_psf_centered(psf_full, size):
+    """
+    Crop and downsample a PSF around its center.
+
+    Extracts a centered region from the full PSF and downsamples it by a factor of 2.
+
+    Parameters
+    ----------
+    psf_full : numpy.ndarray
+        Full PSF array (typically high-resolution)
+    size : int
+        Half-width of the region to extract (output will be (2*size+1, 2*size+1) before downsampling)
+
+    Returns
+    -------
+    numpy.ndarray
+        Downsampled PSF with shape approximately (size, size)
+
+    Notes
+    -----
+    The PSF is cropped symmetrically around its center before downsampling.
+    """
     psf_crop = np.array(psf_full[psf_full.shape[0]//2 - size:psf_full.shape[0]//2 + size + 1, \
                                             psf_full.shape[1]//2 - size:psf_full.shape[1]//2 + size + 1])
 
@@ -398,7 +440,34 @@ def downsample_psf_centered(psf_full, size):
     return psf_downsampled
 
 def load_psf( filter, y_factor, size = 9, psf_folder = 'mpsf_gds/'):
-    psf_fits = fits.open(psf_folder + 'mpsf_' + str(filter).lower() + '.fits') 
+    """
+    Load and process a PSF file for a given filter.
+
+    Loads a PSF FITS file, crops it to the desired size, and optionally downsamples
+    it based on the pixel scale factor.
+
+    Parameters
+    ----------
+    filter : str
+        Filter name (e.g., 'F444W')
+    y_factor : int
+        Spatial oversampling factor. If 1, PSF is downsampled to 0.063" resolution
+    size : int, optional
+        Size of output PSF array (default: 9)
+    psf_folder : str, optional
+        Path to folder containing PSF files (default: 'mpsf_gds/')
+
+    Returns
+    -------
+    numpy.ndarray
+        Normalized PSF array of shape (size, size)
+
+    Notes
+    -----
+    The PSF is always renormalized to sum to 1 after processing.
+    Filename format expected: 'mpsf_{filter}.fits' in psf_folder.
+    """
+    psf_fits = fits.open(psf_folder + 'mpsf_' + str(filter).lower() + '.fits')
     psf_full = np.array(psf_fits[0].data)
 
     print(psf_full.shape)

@@ -88,6 +88,19 @@ class FitConfiguration:
     mcmc: MCMCSettings = None
     
     def __post_init__(self):
+        """
+        Initialize default values for kinematics and MCMC settings after dataclass creation.
+
+        This method is automatically called after __init__. It ensures that kinematics
+        and MCMC settings are never None by providing default instances if not specified.
+        Morphology priors intentionally have no defaults and must be explicitly provided.
+
+        Notes
+        -----
+        - Stores default kinematics for later comparison to track user modifications
+        - Morphology priors remain None unless explicitly set by user
+        - Kinematics and MCMC get default instances if not provided
+        """
         # Store defaults for comparison (to track which params were explicitly modified)
         # Note: morphology has no defaults - must be explicitly provided
         self._default_kinematics = KinematicPriors()
