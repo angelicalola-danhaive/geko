@@ -1,0 +1,75 @@
+# ----------------------------------------------------------------------
+#       JWST/NIRCam WFSS Sensitivity Curve (Cycle-1) 
+# 
+#       /filter: F250M    /module: B   /pupil: C
+# 
+# Generated using data from PID 1536, 1538 (PI: Gordon; 4 observations)
+# ObsID: jw01536083001_0210n_00001
+#        jw01536083001_0210n_00002
+#        jw01538059001_0210n_00001
+#        jw01538059001_0210n_00002
+# Flux Calibration Uncertainty (16-50-84th percentile in FWHM) = 0.58-1.13-1.82%
+# Please note that the wavelength space might not be uniform.
+# ----------------------------------------------------------------------
+# How to use this file? When you have a spectrum extracted as:
+#       wavelength sequence [in unit of micron]:   arr_wave
+#       spectral sequence   [in unit of DN/S]:     arr_spec
+# If the spectrum has to be resampled, do not sum the DN/s along the dispersion direction.
+# Simply interpolate the `wavelength` and `DN/s/Jy` column of this table, like:
+# >> from scipy import interpolate
+# >> ## interpolate the sensitivity curve:
+# >> func_sens = interpolate.UnivariateSpline(tb_sens['wavelength'], tb_sens['DN/s/Jy'], ext = 'zeros', k = 1)
+# >> ## apply the sensitivity curve: 
+# >> arr_spec_mJy = arr_spec / func_sens(arr_wave) * 1e3 # unit: mJy
+# ----------------------------------------------------------------------
+# Produced by Mr. Fengwu Sun (Steward Observatory, UofArizona), 2022/09/20
+# Contact:        fengwusun[AT]arizona.edu 
+# ----------------------------------------------------------------------
+wavelength DN/s/Jy DN/s/Jy_err
+2.3970 304.8 10.8
+2.4020 410.0 29.9
+2.4065 1257.1 110.9
+2.4115 3532.3 110.8
+2.4165 5426.0 101.6
+2.4215 6413.5 47.0
+2.4265 6367.5 164.5
+2.4315 6399.4 101.1
+2.4365 6609.1 37.6
+2.4415 6575.2 35.6
+2.4465 6779.6 66.7
+2.4515 6960.4 99.2
+2.4565 6994.5 34.9
+2.4615 6992.9 189.9
+2.4665 7041.3 99.3
+2.4715 7182.8 109.3
+2.4765 7248.8 77.9
+2.4815 7646.4 91.0
+2.4865 7801.5 175.3
+2.4915 7920.5 113.2
+2.4965 8004.5 81.9
+2.5015 7997.1 94.1
+2.5065 8153.5 98.0
+2.5115 8080.4 43.6
+2.5165 8092.7 183.2
+2.5215 8133.5 122.1
+2.5265 8199.3 48.7
+2.5315 8437.3 150.0
+2.5365 8354.6 42.2
+2.5415 8594.5 80.8
+2.5465 8642.5 84.1
+2.5515 8548.0 102.7
+2.5565 8742.7 50.7
+2.5615 8737.3 51.2
+2.5665 8676.8 138.5
+2.5715 8452.1 86.1
+2.5765 8637.5 50.9
+2.5815 9000.7 46.2
+2.5865 8039.4 76.1
+2.5915 4649.8 275.9
+2.5965 1620.7 34.9
+2.6015 756.4 19.8
+2.6065 305.0 25.1
+2.6115 223.5 1.7
+2.6165 121.5 59.6
+2.6215 89.9 68.8
+2.6265 -37.3 61.6

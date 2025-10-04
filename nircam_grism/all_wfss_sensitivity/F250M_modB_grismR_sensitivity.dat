@@ -1,0 +1,79 @@
+# ----------------------------------------------------------------------
+#       JWST/NIRCam WFSS Sensitivity Curve (Cycle-1) 
+# 
+#       /filter: F250M    /module: B   /pupil: R
+# 
+# Generated using data from PID 1536, 1537, 1538 (PI: Gordon; 6 observations)
+# ObsID: jw01536083001_02109_00001
+#        jw01536083001_02109_00002
+#        jw01537031001_02109_00001
+#        jw01537031001_02109_00002
+#        jw01538059001_02109_00001
+#        jw01538059001_02109_00002
+# Flux Calibration Uncertainty (16-50-84th percentile in FWHM) = 1.27-1.63-2.06%
+# Please note that the wavelength space might not be uniform.
+# ----------------------------------------------------------------------
+# How to use this file? When you have a spectrum extracted as:
+#       wavelength sequence [in unit of micron]:   arr_wave
+#       spectral sequence   [in unit of DN/S]:     arr_spec
+# If the spectrum has to be resampled, do not sum the DN/s along the dispersion direction.
+# Simply interpolate the `wavelength` and `DN/s/Jy` column of this table, like:
+# >> from scipy import interpolate
+# >> ## interpolate the sensitivity curve:
+# >> func_sens = interpolate.UnivariateSpline(tb_sens['wavelength'], tb_sens['DN/s/Jy'], ext = 'zeros', k = 1)
+# >> ## apply the sensitivity curve: 
+# >> arr_spec_mJy = arr_spec / func_sens(arr_wave) * 1e3 # unit: mJy
+# ----------------------------------------------------------------------
+# Produced by Mr. Fengwu Sun (Steward Observatory, UofArizona), 2022/09/20
+# Contact:        fengwusun[AT]arizona.edu 
+# ----------------------------------------------------------------------
+wavelength DN/s/Jy DN/s/Jy_err
+2.3950 142.3 33.6
+2.4000 353.7 94.9
+2.4050 967.6 205.0
+2.4100 2605.0 98.0
+2.4150 4695.1 113.4
+2.4200 5772.9 71.6
+2.4250 6100.9 123.0
+2.4300 6287.3 99.2
+2.4350 6295.4 92.0
+2.4400 6482.5 112.1
+2.4450 6609.7 103.6
+2.4500 6649.0 111.7
+2.4550 6653.6 155.9
+2.4600 6732.9 90.5
+2.4650 6769.1 133.9
+2.4700 7002.6 135.3
+2.4750 7208.1 117.4
+2.4800 7292.8 168.8
+2.4850 7524.3 97.1
+2.4900 7735.9 126.6
+2.4950 7861.5 112.2
+2.5000 7957.5 132.1
+2.5050 7953.9 124.7
+2.5100 7984.7 152.4
+2.5150 7960.6 127.1
+2.5200 8027.0 98.1
+2.5250 8167.8 167.3
+2.5300 8235.1 143.4
+2.5350 8413.2 129.8
+2.5400 8326.5 101.9
+2.5450 8366.0 116.3
+2.5500 8425.1 174.8
+2.5550 8578.5 105.1
+2.5600 8545.3 104.6
+2.5650 8437.4 103.1
+2.5700 8420.9 144.2
+2.5750 8422.9 113.4
+2.5800 8769.1 162.8
+2.5850 8517.3 226.4
+2.5900 5954.8 264.8
+2.5950 2411.2 97.3
+2.6000 973.9 89.2
+2.6050 368.4 135.9
+2.6100 59.5 43.3
+2.6150 55.3 2492.6
+2.6200 -97.4 81.0
+2.6250 -163.1 119.6
+2.6300 -89.4 134.6
+2.6347 -203.0 49.0
