@@ -89,6 +89,40 @@ class Fit_Numpyro():
 
 
 	def run_inference(self, num_samples=None, num_warmup=None, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=None, max_tree_depth=None, num_chains=None, init_vals = None):
+		"""
+		Run MCMC inference using the NUTS sampler.
+
+		Performs Bayesian parameter estimation using Numpyro's No-U-Turn Sampler (NUTS).
+		MCMC settings are taken from the config object if provided, otherwise defaults are used.
+
+		Parameters
+		----------
+		num_samples : int, optional
+			Number of MCMC samples to draw (default: from config or 1000)
+		num_warmup : int, optional
+			Number of warmup/burn-in samples (default: from config or 500)
+		high_res : bool, optional
+			Use high resolution model (default: False)
+		median : bool, optional
+			Initialize from median values (default: True)
+		step_size : float, optional
+			NUTS step size (default: 1 or from config)
+		adapt_step_size : bool, optional
+			Adapt step size during warmup (default: True)
+		target_accept_prob : float, optional
+			Target acceptance probability (default: from config or 0.8)
+		max_tree_depth : int, optional
+			Maximum NUTS tree depth (default: from config or 10)
+		num_chains : int, optional
+			Number of MCMC chains (default: from config or 4)
+		init_vals : dict, optional
+			Initial parameter values (default: None)
+
+		Notes
+		-----
+		Results are stored in self.mcmc and printed to console.
+		Creates a source mask automatically using photutils segmentation.
+		"""
 
 		# Always use config for defaults - create default config if none provided
 		from .config import MCMCSettings
