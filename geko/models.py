@@ -339,9 +339,17 @@ class Disk():
 		PA_std = (PA_mean_err)*(180/jnp.pi) #convert to degrees
 		print('Setting parametric priors: ', PA, inclination, r_eff_Ha, n, amplitude, xc_morph, yc_morph)
 
-		#set velocity bounds
-		self.V_max = 800
-		self.D_max = 500
+		# Set kinematic prior bounds (use config defaults)
+		from .config import KinematicPriors
+		kin_defaults = KinematicPriors()
+		self.Va_min = kin_defaults.Va_min
+		self.Va_max = kin_defaults.Va_max
+		self.sigma0_min = kin_defaults.sigma0_min
+		self.sigma0_max = kin_defaults.sigma0_max
+
+		# Set backward compatibility attributes
+		self.V_max = self.Va_max
+		self.D_max = self.sigma0_max
 
 		#set class attributes for all of these values
 		self.PA_morph_mu = PA
@@ -450,14 +458,11 @@ class Disk():
 		self.Va_max = kin.Va_max
 		self.V_max = kin.Va_max  # For backward compatibility
 
-		self.r_t_mu = kin.r_t_mean
-		self.r_t_std = kin.r_t_std
-		self.r_t_min = kin.r_t_min
-		self.r_t_max = kin.r_t_max
-
 		self.sigma0_min = kin.sigma0_min
 		self.sigma0_max = kin.sigma0_max
 		self.D_max = kin.sigma0_max  # For backward compatibility
+
+		# Note: r_t is not set from config - it uses r_eff as max bound
 
 		# Set velocity coordinate uncertainties
 		self.xc_std_vel = 2 * self.xc_std
@@ -532,10 +537,6 @@ class Disk():
 		kin_map = {
 			'Va_min': ('Va_min', lambda v: v),
 			'Va_max': ('Va_max', lambda v: v),
-			'r_t_mean': ('r_t_mu', lambda v: v),
-			'r_t_std': ('r_t_std', lambda v: v),
-			'r_t_min': ('r_t_min', lambda v: v),
-			'r_t_max': ('r_t_max', lambda v: v),
 			'sigma0_min': ('sigma0_min', lambda v: v),
 			'sigma0_max': ('sigma0_max', lambda v: v),
 		}
@@ -664,15 +665,15 @@ class Disk():
 		unscaled_PA = numpyro.sample('unscaled_PA', dist.Normal())
 		Pa = numpyro.deterministic('PA', unscaled_PA*self.PA_morph_std*2 + self.PA_morph_mu) #giving more freedom to the kinematic PA! it's really the morph one that has to be well constrained
 
-		unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())  #* (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
-		Va = numpyro.deterministic('Va', unscaled_Va*(2*self.V_max) - self.V_max)
+		unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())
+		Va = numpyro.deterministic('Va', unscaled_Va*(self.Va_max - self.Va_min) + self.Va_min)
 
 		unscaled_r_t = numpyro.sample('unscaled_r_t', dist.Uniform())
 		r_t = numpyro.deterministic('r_t', unscaled_r_t*r_eff)
-	
+
 
 		unscaled_sigma0 = numpyro.sample('unscaled_sigma0', dist.Uniform())
-		sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*self.D_max)
+		sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*(self.sigma0_max - self.sigma0_min) + self.sigma0_min)
 
 
 		unscaled_x0_vel = numpyro.sample('unscaled_x0_vel', dist.Normal())

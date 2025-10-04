@@ -62,7 +62,7 @@ def fit_galaxy(data_path, config, **kwargs):
 
 __all__ = ["Fit_Numpyro", "Grism", "KinModels", 'plot_disk_summary', 'plot_pp_cornerplot', 'process_results', 'run_full_preprocessing',
            'oversample', 'resample', 'scale_distribution', 'find_best_sample', 'compute_gal_props',
-           'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile', 
+           'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile',
            'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux', 'fit_galaxy',
-           'FitConfiguration', 'MorphologyPriors', 'KinematicPriors', 'MCMCSettings', 'ComputationSettings',
-           'create_high_redshift_config', 'create_quick_test_config', 'create_conservative_config']
+           'FitConfiguration', 'MorphologyPriors', 'KinematicPriors', 'MCMCSettings',
+           'get_default_config', 'load_config']
