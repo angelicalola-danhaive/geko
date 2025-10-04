@@ -100,13 +100,13 @@ If you use Geko in your research, please cite the following paper:
 
 ## Acknowledgements
 
+We thank Amanda Stoffers for creating our beautiful logo. 
 We acknowledge support from the Royal Society Research Grants.
 
 This package makes use of:
 - [JAX](https://github.com/google/jax) for accelerated numerical computing
 - [Numpyro](https://github.com/pyro-ppl/numpyro) for probabilistic programming
 - [Astropy](https://www.astropy.org/) for astronomical data handling
-- [PySersic](https://github.com/AstroORyan/pysersic) for Sérsic profile fitting
 
 ## License
 
