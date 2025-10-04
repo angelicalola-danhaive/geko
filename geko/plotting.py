@@ -352,6 +352,63 @@ def compute_r90(n, r_eff):
 
 
 def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None):
+	"""
+	Create comprehensive summary plot for disk model fitting results.
+
+	Generates a multi-panel figure showing observed and model grism spectra,
+	residuals, velocity/dispersion fields, rotation curve, and fit parameters.
+
+	Parameters
+	----------
+	obs_map : numpy.ndarray
+		Observed 2D grism spectrum
+	model_map : numpy.ndarray
+		Best-fit model grism spectrum
+	obs_error : numpy.ndarray
+		Observation error map
+	model_velocities : numpy.ndarray
+		Model velocity field
+	model_dispersions : numpy.ndarray
+		Model velocity dispersion field
+	v_rot : float
+		Rotation velocity at effective radius
+	fluxes_mean : numpy.ndarray
+		Mean flux values from MCMC
+	inf_data : arviz.InferenceData
+		MCMC inference results
+	wave_space : numpy.ndarray
+		Wavelength array
+	x0, y0 : int, optional
+		Center coordinates (default: 31)
+	factor : int, optional
+		Oversampling factor (default: 2)
+	direct_image_size : int, optional
+		Direct image size (default: 62)
+	save_to_folder : str, optional
+		Output folder path for saving figure
+	name : str, optional
+		Base filename for saving
+	PA, i, Va, r_t, sigma0 : float, optional
+		Best-fit kinematic parameters
+	obs_radius, ellip : float, optional
+		Morphological parameters
+	theta_obs, theta_Ha : float, optional
+		Position angles
+	n : float, optional
+		Sersic index
+	save_runs_path : str, optional
+		Base directory for saving
+
+	Returns
+	-------
+	ymin, ymax : float
+		Y-axis limits for velocity plot
+
+	Notes
+	-----
+	Saves figure as '{save_to_folder}_summary.png' if save_to_folder is provided.
+	Creates 6-panel plot with grism spectra, residuals, kinematics, and parameters.
+	"""
 	# plt.show()
 
 	fig = plt.figure(constrained_layout=True)

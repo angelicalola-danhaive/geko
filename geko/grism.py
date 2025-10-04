@@ -78,6 +78,50 @@ def _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges):
 
 
 class Grism:
+	"""
+	JWST NIRCam grism spectroscopy forward modeling class.
+
+	Models the dispersion and convolution of 3D data cubes through a grism,
+	including wavelength-dependent trace, LSF, and PSF effects.
+
+	Parameters
+	----------
+	im_shape : int
+		Size of the image (assumes square)
+	im_scale : float, optional
+		Pixel scale of the model image in arcsec (default: 0.031)
+	icenter : int, optional
+		i-coordinate of galaxy center in pixels (default: 5)
+	jcenter : int, optional
+		j-coordinate of galaxy center in pixels (default: 5)
+	wavelength : float, optional
+		Central wavelength in microns (default: 4.2)
+	wave_space : numpy.ndarray, optional
+		Wavelength array in microns
+	index_min : int, optional
+		Minimum wavelength index
+	index_max : int, optional
+		Maximum wavelength index
+	grism_filter : str, optional
+		Grism filter name (default: 'F444W')
+	grism_module : str, optional
+		JWST module 'A' or 'B' (default: 'A')
+	grism_pupil : str, optional
+		Grism pupil 'R' or 'C' (default: 'R')
+	PSF : numpy.ndarray, optional
+		Point spread function array
+
+	Attributes
+	----------
+	im_shape : int
+		Image size
+	im_scale : float
+		Model pixel scale
+	detector_scale : float
+		Detector pixel scale (0.0629" for JWST)
+	factor : int
+		Oversampling factor between model and detector
+	"""
 	def __init__(self, im_shape, im_scale = 0.031, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
 
 
@@ -422,9 +466,35 @@ class Grism:
 
 	
 	def disperse(self, F, V, D):
-		'''
-			Dispersion function going from flux space F to grism space G
-		'''
+		"""
+		Disperse a 3D data cube (flux, velocity, dispersion) through the grism.
+
+		Forward models the grism spectroscopy by:
+		1. Shifting wavelengths based on velocity field
+		2. Broadening by velocity dispersion and LSF
+		3. Convolving with spatial PSF
+		4. Collapsing to 2D grism spectrum
+
+		Parameters
+		----------
+		F : jax.numpy.ndarray
+			2D flux map (spatial y, spatial x)
+		V : jax.numpy.ndarray
+			2D velocity field in km/s (spatial y, spatial x)
+		D : jax.numpy.ndarray
+			2D velocity dispersion field in km/s (spatial y, spatial x)
+
+		Returns
+		-------
+		jax.numpy.ndarray
+			2D dispersed grism spectrum (spatial y, wavelength)
+
+		Notes
+		-----
+		Uses Gaussian profile convolution for spectral dispersion and
+		FFT convolution for spatial PSF. Velocity is converted to wavelength
+		shift via Doppler formula.
+		"""
 
 		J_min = self.index_min
 		J_max = self.index_max

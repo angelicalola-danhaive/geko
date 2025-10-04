@@ -146,6 +146,12 @@ class KinModels:
 
 
 	def __init__(self):
+		"""
+		Initialize a new kinematic model.
+
+		Creates a base kinematic model object with velocity field calculations
+		using arctangent rotation curve parameterization.
+		"""
 		print('New kinematic model created')
 	
 	def v_rad(self, x, y, PA, i, Va, r_t, r):
@@ -221,8 +227,35 @@ class KinModels:
 
 class Disk():
 	"""
-		Class for 1 disk object. Combinations of this will be used for the single disk model, 
-		then 2 disks for the 2 component ones etc
+	Disk kinematic and morphological model for parametric fitting.
+
+	Represents a single galactic disk with Sersic morphology and arctangent
+	rotation curve. Handles prior setting, parameter sampling, and model
+	evaluation for MCMC fitting.
+
+	Parameters
+	----------
+	direct_shape : tuple or int
+		Shape of the direct image
+	factor : int
+		Spatial oversampling factor
+	x0_vel : float
+		Initial guess for x-velocity center
+	mu_y0_vel : float
+		Initial guess for y-velocity center
+	r_eff : float
+		Effective radius in pixels
+
+	Attributes
+	----------
+	im_shape : tuple
+		Image dimensions
+	factor : int
+		Oversampling factor
+	x0 : float
+		Morphological x-center
+	y0 : float
+		Morphological y-center
 	"""
 	def __init__(self, direct_shape, factor,  x0_vel, mu_y0_vel, r_eff):
 		print('Disk object created')
@@ -255,9 +288,38 @@ class Disk():
 
 	def set_parametric_priors(self,py_table, flux_measurements, redshift, wavelength, delta_wave, theta_rot = 0.0, shape = 31):
 		"""
-		Set the priors for the parametric model
-		delta_wave = the pixel scale along the wavelength axis, in the native instrument resolution 
-		theta_rot = the angle (in RADIANS) by which the rotate the image COUNTERCLOCKWISE in order to match the grism observations
+		Set morphological and kinematic priors from PySersic fitting results.
+
+		Extracts morphological parameters from PySersic Sersic profile fits and
+		sets priors for both morphology (PA, inclination, r_eff, n, etc.) and
+		kinematics (Va, sigma0 bounds). Handles coordinate rotation to align
+		imaging and grism reference frames.
+
+		Parameters
+		----------
+		py_table : astropy.table.Table
+			PySersic fit results table with columns like 'r_eff_q50', 'ellip_q50', etc.
+		flux_measurements : list of float
+			[integrated_flux, flux_error] in erg/s/cm2
+		redshift : float
+			Spectroscopic redshift
+		wavelength : float
+			Observed emission line wavelength in microns
+		delta_wave : float
+			Wavelength pixel scale in microns at native resolution
+		theta_rot : float, optional
+			Rotation angle in radians to align image with grism (default: 0.0)
+		shape : int, optional
+			Size of model image (default: 31)
+
+		Notes
+		-----
+		This method:
+		- Converts PySersic results to geko parameter space
+		- Rotates coordinates by theta_rot to match grism orientation
+		- Sets Gaussian priors for morphology (PA, inc, r_eff, n, amplitude, xc, yc)
+		- Sets uniform prior bounds for kinematics from config defaults
+		- Stores all prior parameters as class attributes (e.g., self.PA_morph_mu)
 		"""
 		#need to set sizes in kpc before converting to arcsecs then pxs
 		arcsec_per_kpc = cosmo.arcsec_per_kpc_proper(z=redshift).value

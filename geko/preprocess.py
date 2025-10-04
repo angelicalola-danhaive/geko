@@ -365,6 +365,9 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
 	"""
 		Main function that automatically preprocesses data for geko fitting.
 
+		Loads grism spectroscopy data, performs background subtraction and cropping,
+		loads PSF, initializes the Grism dispersion object and kinematic model.
+
 		Parameters
 		----------
 		output : str
@@ -397,6 +400,25 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
 			PSF filename in save_runs_path/psfs/ (required if field='manual')
 		manual_grism_file : str, optional
 			Grism spectrum filename in save_runs_path/output/ (required if field='manual')
+
+		Returns
+		-------
+		z_spec : float
+			Spectroscopic redshift
+		wavelength : float
+			Observed wavelength in microns
+		wave_space : numpy.ndarray
+			Wavelength array for the cropped spectrum
+		obs_map : numpy.ndarray
+			Observed 2D grism spectrum (spatial x wavelength)
+		obs_error : numpy.ndarray
+			Error map for observations
+		kin_model : KinModels
+			Initialized kinematic model object
+		grism_object : Grism
+			Initialized grism dispersion object
+		delta_wave : float
+			Wavelength bin size in microns
 	"""
 
 	if mock_params == None:
