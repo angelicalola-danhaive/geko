@@ -640,13 +640,15 @@ class Disk():
 		self.PA_morph_mean = jnp.array(inference_data.posterior['PA_morph'].median(dim=["chain", "draw"])) #- 45
 		#compute the inclination prior posterior and median from the ellipticity
 		num_samples = inference_data.posterior['i'].shape[1]
+		num_chains = inference_data.posterior['i'].shape[0]
 
-		inference_data.posterior['ellip'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
+		inference_data.posterior['ellip'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims = ('chain', 'draw'))
 		inference_data.prior['ellip'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
-		for i in [0,1]:
+		for i in range(num_chains):
 			for sample in range(num_samples-1):
 				inference_data.posterior['ellip'][i,int(sample)] = 1 - utils.compute_axis_ratio(inc = float(inference_data.posterior['i'][i,int(sample)].values), q0 = 0.2)
-				inference_data.prior['ellip'][0,int(sample)] = 1 - utils.compute_axis_ratio(inc = float(inference_data.prior['i'][0,int(sample)].values), q0 = 0.2)
+				if i == 0:
+					inference_data.prior['ellip'][0,int(sample)] = 1 - utils.compute_axis_ratio(inc = float(inference_data.prior['i'][0,int(sample)].values), q0 = 0.2)
 		
 		self.i_mean = jnp.array(inference_data.posterior['i'].median(dim=["chain", "draw"]))
 		self.i_16 = jnp.array(inference_data.posterior['i'].quantile(0.16, dim=["chain", "draw"]))

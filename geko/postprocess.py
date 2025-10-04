@@ -195,9 +195,12 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 
 	# compute v/sigma posterior and quantiles
 
-	inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
+	# Get number of chains from the inference data
+	num_chains = inf_data.posterior['sigma0'].shape[0]
+
+	inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims = ('chain', 'draw'))
 	inf_data.prior['sigma0_trunc'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
-	for i in [0,1]:
+	for i in range(num_chains):
 		for sample in range(num_samples):
 			if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
 				inf_data.posterior['sigma0_trunc'][i,sample] = np.random.uniform(inf_data.posterior['sigma0'].quantile(0.84), 0.5*inf_data.posterior['sigma0'].quantile(0.16))

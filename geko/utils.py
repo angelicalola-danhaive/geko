@@ -573,10 +573,13 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
 
 
 def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual = None):
-    inf_data.posterior['v_re'] = xr.DataArray(np.zeros((2,num_samples)), dims = ('chain', 'draw'))
+    # Get number of chains from the inference data
+    num_chains = inf_data.posterior['PA'].shape[0]
+
+    inf_data.posterior['v_re'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims = ('chain', 'draw'))
     inf_data.prior['v_re'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
     #make the prior array based on the shape of another prior from inf_data
-    for i in [0,1]:
+    for i in range(num_chains):
         for sample in range(num_samples):
             x = np.linspace(0 - kin_model.x0_vel_mean, kin_model.im_shape[1]-1 - kin_model.x0_vel_mean, kin_model.im_shape[1]*kin_model.factor)
             y = np.linspace(0 - kin_model.y0_vel_mean, kin_model.im_shape[0]-1 - kin_model.y0_vel_mean, kin_model.im_shape[0]*kin_model.factor)
