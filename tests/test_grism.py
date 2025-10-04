@@ -2,6 +2,7 @@ from geko.grism import *
 import pytest
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 @pytest.fixture
 def grism_instance():
@@ -50,10 +51,14 @@ def test_disperse(grism_instance):
     mock_grism = grism_instance.disperse(mock_flux, mock_vel, mock_disp)
 
     #plot and save the mock_grism
+    # Use Path to get the directory where this test file is located
+    test_dir = Path(__file__).parent
+    output_path = test_dir / 'mock_grism.png'
+
     plt.imshow(mock_grism, origin='lower', cmap='viridis')
     plt.colorbar(label='Flux')
     plt.title('Mock Grism Image')
-    plt.savefig('tests/mock_grism.png')
+    plt.savefig(str(output_path))
 
 
     # Check that the total flux is preserved (with a tolerance)
