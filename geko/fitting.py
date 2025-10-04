@@ -107,16 +107,16 @@ class Fit_Numpyro():
 				step_size = mcmc_config.step_size
 		
 		# Set defaults if still None
-		if num_samples is None:
-			num_samples = 2000
-		if num_warmup is None:
-			num_warmup = 2000
-		if target_accept_prob is None:
-			target_accept_prob = 0.8
-		if max_tree_depth is None:
-			max_tree_depth = 10
-		if num_chains is None:
-			num_chains = 5
+		# if num_samples is None:
+		# 	num_samples = 2000
+		# if num_warmup is None:
+		# 	num_warmup = 2000
+		# if target_accept_prob is None:
+		# 	target_accept_prob = 0.8
+		# if max_tree_depth is None:
+		# 	max_tree_depth = 10
+		# if num_chains is None:
+		# 	num_chains = 5
 
 		if self.parametric:
 			inference_model = self.kin_model.inference_model_parametric
@@ -198,7 +198,9 @@ class Fit_Numpyro():
 
 def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples,
                  source_id, field, grism_filter='F444W', delta_wave_cutoff=0.005, factor=5, wave_factor=10,
-                 model_name='Disk', config=None):
+                 model_name='Disk', config=None,
+                 manual_psf_name=None, manual_theta_rot=None, manual_pysersic_file=None,
+                 manual_grism_file=None):
 	"""
 	Run geko fitting without requiring a YAML config file.
 
@@ -223,7 +225,7 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 	source_id : int
 		Source ID number
 	field : str
-		Field name: 'GOODS-N', 'GOODS-N-CONGRESS', or 'GOODS-S-FRESCO'
+		Field name: 'GOODS-N', 'GOODS-N-CONGRESS', 'GOODS-S-FRESCO', or 'manual'
 	grism_filter : str, optional
 		Grism filter name (default: 'F444W')
 	delta_wave_cutoff : float, optional
@@ -236,6 +238,18 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 		Kinematic model type (default: 'Disk')
 	config : FitConfiguration, optional
 		Optional configuration object to override priors
+	manual_psf_name : str, optional
+		PSF filename (required if field='manual').
+		Should be in save_runs_path/psfs/ directory
+	manual_theta_rot : float, optional
+		Rotation angle in degrees (required if field='manual')
+		Angle to rotate morphology to match grism orientation
+	manual_pysersic_file : str, optional
+		PySersic results filename (required if field='manual' and parametric=True)
+		Should be in save_runs_path/morph_fits/ directory
+	manual_grism_file : str, optional
+		Grism spectrum filename (required if field='manual')
+		Should be in save_runs_path/output/ directory
 
 	Returns
 	-------
@@ -248,29 +262,54 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 	delta_wave = pre.run_full_preprocessing(output, master_cat, line, save_runs_path=save_runs_path,
 	                                        source_id=source_id, field=field, grism_filter=grism_filter,
 	                                        delta_wave_cutoff=delta_wave_cutoff, factor=factor,
-	                                        wave_factor=wave_factor, model_name=model_name)
+	                                        wave_factor=wave_factor, model_name=model_name,
+	                                        manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file)
 
 	if parametric:
 		# Try to load PySersic morphology file
 		pysersic_available = False
-		try:
-			pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F150W_svi.cat', format='ascii')
-			pysersic_available = True
-		except:
+
+		# Handle manual field option
+		if field == 'manual':
+			if manual_pysersic_file is None:
+				if config is None:
+					raise ValueError(
+						"When field='manual', you must provide either:\n"
+						"  1. manual_pysersic_file parameter, or\n"
+						"  2. Complete morphological priors via the config parameter"
+					)
+				print(f"WARNING: No manual_pysersic_file provided for field='manual'. Will use config priors.")
+			else:
+				try:
+					pysersic_summary = Table.read(save_runs_path + 'morph_fits/' + manual_pysersic_file, format='ascii')
+					pysersic_available = True
+				except:
+					if config is None:
+						raise FileNotFoundError(
+							f"PySersic file not found at {save_runs_path}morph_fits/{manual_pysersic_file}\n"
+							f"To run without PySersic, you must provide morphological priors via the config parameter."
+						)
+					print(f"WARNING: PySersic file not found at {save_runs_path}morph_fits/{manual_pysersic_file}. Will use config priors.")
+		else:
+			# Standard field-based loading
 			try:
-				pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F182M_svi.cat', format='ascii')
+				pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F150W_svi.cat', format='ascii')
 				pysersic_available = True
 			except:
-				# No PySersic file found
-				if config is None:
-					raise FileNotFoundError(
-						f"No PySersic morphology file found for source {source_id} at:\n"
-						f"  {save_runs_path}morph_fits/summary_{source_id}_image_F150W_svi.cat\n"
-						f"  {save_runs_path}morph_fits/summary_{source_id}_image_F182M_svi.cat\n\n"
-						f"To run without PySersic, you must provide morphological priors via the config parameter.\n"
-						f"See the demo notebook for examples of setting custom priors."
-					)
-				print(f"WARNING: No PySersic file found for source {source_id}. Will use config priors.")
+				try:
+					pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F182M_svi.cat', format='ascii')
+					pysersic_available = True
+				except:
+					# No PySersic file found
+					if config is None:
+						raise FileNotFoundError(
+							f"No PySersic morphology file found for source {source_id} at:\n"
+							f"  {save_runs_path}morph_fits/summary_{source_id}_image_F150W_svi.cat\n"
+							f"  {save_runs_path}morph_fits/summary_{source_id}_image_F182M_svi.cat\n\n"
+							f"To run without PySersic, you must provide morphological priors via the config parameter.\n"
+							f"See the demo notebook for examples of setting custom priors."
+						)
+					print(f"WARNING: No PySersic file found for source {source_id}. Will use config priors.")
 
 		# Load emission line flux from master catalog
 		master_cat_table = Table.read(master_cat, format="ascii")
@@ -282,7 +321,11 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 		int_flux_err = np.mean([int_flux_err_high, int_flux_err_low]) #in ergs/s/cm2
 
 		# Set field-specific rotation to match JADES to grism survey
-		if field == 'GOODS-S-FRESCO':
+		if field == 'manual':
+			if manual_theta_rot is None:
+				raise ValueError("manual_theta_rot must be provided when field='manual'")
+			theta_rot = jnp.radians(manual_theta_rot)
+		elif field == 'GOODS-S-FRESCO':
 			theta_rot = jnp.radians(0)
 		elif field == 'GOODS-N': #fresco
 			theta_rot = jnp.radians(230.5098)

@@ -237,7 +237,7 @@ def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, fi
 
 
 	#load number of module A and module B frames from the header
-	if field == 'GOODS-S-FRESCO' or field == 'GOODS-N' or field == 'GOODS-N-CONGRESS':
+	if field == 'GOODS-S-FRESCO' or field == 'GOODS-N' or field == 'GOODS-N-CONGRESS' or field == 'manual':
 		# print('Manually setting the module because the N_A and N_B params are not in the header')
 		# module_A = 0
 		# module_B = 1
@@ -360,7 +360,8 @@ def preprocess_mock_data(mock_params):
 
 def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=None, save_runs_path='fitting_results/',
                             source_id=None, field=None, grism_filter='F444W', delta_wave_cutoff=0.005,
-                            factor=5, wave_factor=10, model_name='Disk'):
+                            factor=5, wave_factor=10, model_name='Disk',
+                            manual_psf_name=None, manual_grism_file=None):
 	"""
 		Main function that automatically preprocesses data for geko fitting.
 
@@ -381,7 +382,7 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
 		source_id : int
 			Source ID number
 		field : str
-			Field name: 'GOODS-N', 'GOODS-N-CONGRESS', or 'GOODS-S-FRESCO'
+			Field name: 'GOODS-N', 'GOODS-N-CONGRESS', 'GOODS-S-FRESCO', or 'manual'
 		grism_filter : str
 			Grism filter name (default: 'F444W')
 		delta_wave_cutoff : float
@@ -392,20 +393,28 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
 			Wavelength oversampling factor
 		model_name : str
 			Kinematic model type (default: 'Disk')
+		manual_psf_name : str, optional
+			PSF filename in save_runs_path/psfs/ (required if field='manual')
+		manual_grism_file : str, optional
+			Grism spectrum filename in save_runs_path/output/ (required if field='manual')
 	"""
 
 	if mock_params == None:
 		ID = source_id
 
 		# Construct grism spectrum path based on field
-		if field == 'GOODS-N':
+		if field == 'manual':
+			if manual_grism_file is None:
+				raise ValueError("manual_grism_file must be provided when field='manual'")
+			grism_spectrum_path = save_runs_path + output + '/' + manual_grism_file
+		elif field == 'GOODS-N':
 			grism_spectrum_path = save_runs_path + output + '/spec_2d_GDN_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
 		elif field == 'GOODS-N-CONGRESS':
 			grism_spectrum_path = save_runs_path + output + '/spec_2d_GDN_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
 		elif field == 'GOODS-S-FRESCO':
 			grism_spectrum_path = save_runs_path + output + '/spec_2d_FRESCO_' + grism_filter + '_ID' + str(ID) + '_comb.fits'
 		else:
-			raise ValueError(f"Field {field} is not supported. Supported fields are: GOODS-N, GOODS-N-CONGRESS, GOODS-S-FRESCO.")
+			raise ValueError(f"Field {field} is not supported. Supported fields are: GOODS-N, GOODS-N-CONGRESS, GOODS-S-FRESCO, manual.")
 
 		# Get wavelength and redshift from master catalog
 		master_cat_table = Table.read(master_cat, format="ascii")
@@ -427,7 +436,11 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
 		field = 'GOODS-S-FRESCO'
 
 	#load the PSF that corresponds to the grism program
-	if field == 'GOODS-N':
+	if field == 'manual':
+		if manual_psf_name is None:
+			raise ValueError("manual_psf_name must be provided when field='manual'")
+		psf_path = save_runs_path + 'psfs/' + manual_psf_name
+	elif field == 'GOODS-N':
 		psf_path = save_runs_path + 'psfs/mpsf_jw018950.gn.f444w.fits'
 	elif field == 'GOODS-N-CONGRESS':
 		psf_path = save_runs_path + 'psfs/mpsf_jw035770.f356w.fits'
