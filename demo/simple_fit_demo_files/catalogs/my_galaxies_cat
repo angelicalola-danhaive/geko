@@ -1,0 +1,2 @@
+index	field	ID	CAT	RunStat	RA	DEC	zspec	z_conf	zphot	z_a_v075	N_band	F444W_mag	name	close_comp	SNR_line	fit_flux_cgs	fit_flux_cgs_e	H_alpha	H_alpha_lambda	FWHM_um	FWHM_um_e	img_yc	img_FWHM	lin_yc	lin_FWHM	fop_to_fap	ID_v082	correction	CLUMPY
+246	GOODS-S-FRESCO	191250		highest v/sig	53.101707	-27.836173	5.3861	1	5.57	5.54	10	22.95	Ha	FALSE	41.033	-16.49	0.011	TRUE	4.19223	0.0087	0.00025	14.503	5.786	16.084	9.594	2.205	191250	0.94	1

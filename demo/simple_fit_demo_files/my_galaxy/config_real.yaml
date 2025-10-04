@@ -1,0 +1,36 @@
+- Data:
+    ID: 191250
+    field: GOODS-S-FRESCO
+- Params:
+    delta_wave_cutoff: 0.02
+    factor: 5
+    wave_factor: 9
+    y_factor: 1
+    x0: null
+    y0: null
+    x0_vel: null
+    y0_vel: null
+- Inference:
+    flux_bounds:
+    - 0.5
+    - 1
+    flux_type: auto
+    PA_bounds: 0.1
+    i_bounds:
+    - 0
+    - 90
+    Va_bounds:
+    - 0
+    - 1000
+    r_t_bounds:
+    - 0
+    - 10
+    sigma0_bounds:
+    - 0
+    - 300
+    flux_threshold: 3
+    model: Disk
+    num_samples: 500
+    num_warmup: 500
+    step_size: 0.001
+    target_accept_prob: 0.8

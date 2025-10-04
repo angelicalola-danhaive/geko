@@ -1,0 +1,2 @@
+ID ellip_q16 ellip_q50 ellip_q84 flux_q16 flux_q50 flux_q84 n_q16 n_q50 n_q84 r_eff_q16 r_eff_q50 r_eff_q84 sky_back_q16 sky_back_q50 sky_back_q84 theta_q16 theta_q50 theta_q84 xc_q16 xc_q50 xc_q84 yc_q16 yc_q50 yc_q84
+0.0 0.450 0.460 0.468 22.069 22.405 22.768 1.262 1.297 1.328 6.564 6.684 6.796 0.002 0.003 0.004 2.950 2.964 2.977 19.296 19.330 19.362 19.017 19.085 19.139
