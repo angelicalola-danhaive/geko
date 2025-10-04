@@ -315,7 +315,7 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 	inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
 
 	# Save results
-	inf_data.to_netcdf(save_runs_path + str(source_id) + '_output')
+	inf_data.to_netcdf(save_runs_path + output + '/' + str(source_id) + '_output')
 
 	# Process results
 	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(

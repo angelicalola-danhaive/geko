@@ -173,7 +173,7 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	#load inference data
 	if mock_params is None:
 		# inf_data = az.InferenceData.from_netcdf('FrescoHa/Runs-Final/' + output + '/'+ 'output')
-		inf_data = az.InferenceData.from_netcdf(save_runs_path + str(ID) + '_output')
+		inf_data = az.InferenceData.from_netcdf(save_runs_path + output + '/' + str(ID) + '_output')
 		j=0
 	else:
 		inf_data = az.InferenceData.from_netcdf('testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_'+ 'output')
