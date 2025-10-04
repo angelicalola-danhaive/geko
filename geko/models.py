@@ -414,6 +414,13 @@ class Disk():
 		if not isinstance(config, FitConfiguration):
 			raise TypeError("config must be a FitConfiguration object")
 
+		# Check that morphology priors are provided
+		if config.morphology is None:
+			raise ValueError(
+				"Morphology priors must be provided in config when using set_priors_from_config(). "
+				"Morphology priors should come from PySersic fitting or manual specification."
+			)
+
 		# Validate configuration
 		issues = config.validate()
 		errors = [issue for issue in issues if issue.startswith("ERROR")]

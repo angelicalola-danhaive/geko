@@ -11,39 +11,47 @@ from pathlib import Path
 
 @dataclass
 class MorphologyPriors:
-    """Morphological parameter priors (fixed shapes: uniform/truncated normal)"""
-    
+    """
+    Morphological parameter priors (fixed shapes: uniform/truncated normal)
+
+    Note: These priors must be explicitly set. They should come from either:
+    1. PySersic morphological fitting results, or
+    2. Manual user input based on expectations
+
+    No defaults are provided - all parameters must be specified.
+    """
+
     # Position angle (degrees) - uniform prior
-    PA_min: float = 0.0
-    PA_max: float = 180.0
-    
+    PA_min: float
+    PA_max: float
+
     # Inclination (degrees) - uniform prior
-    inc_min: float = 30.0
-    inc_max: float = 80.0
-    
+    inc_min: float
+    inc_max: float
+
     # Effective radius (pixels) - truncated normal
-    r_eff_mean: float = 3.0
-    r_eff_std: float = 1.0
-    r_eff_min: float = 0.5
-    r_eff_max: float = 10.0
-    
+    r_eff_mean: float
+    r_eff_std: float
+    r_eff_min: float
+    r_eff_max: float
+
     # Sersic index - truncated normal
-    n_mean: float = 1.0
-    n_std: float = 0.5
-    n_min: float = 0.5
-    n_max: float = 4.0
-    
+    n_mean: float
+    n_std: float
+    n_min: float
+    n_max: float
+
     # Central coordinates (pixels from center) - normal
-    xc_mean: float = 0.0
-    xc_std: float = 2.0
-    yc_mean: float = 0.0
-    yc_std: float = 2.0
-    
+    xc_mean: float
+    xc_std: float
+    yc_mean: float
+    yc_std: float
+
     # Amplitude - log-normal
-    amplitude_mean: float = 100.0
-    amplitude_std: float = 50.0
-    amplitude_min: float = 1.0
-    amplitude_max: float = 1000.0
+    amplitude_mean: float
+    amplitude_std: float
+    amplitude_min: float
+    amplitude_max: float
 
 @dataclass
 class KinematicPriors:
@@ -81,11 +89,10 @@ class FitConfiguration:
     
     def __post_init__(self):
         # Store defaults for comparison (to track which params were explicitly modified)
-        self._default_morphology = MorphologyPriors()
+        # Note: morphology has no defaults - must be explicitly provided
         self._default_kinematics = KinematicPriors()
 
-        if self.morphology is None:
-            self.morphology = MorphologyPriors()
+        # Kinematics and MCMC have defaults, morphology does not
         if self.kinematics is None:
             self.kinematics = KinematicPriors()
         if self.mcmc is None:
@@ -102,18 +109,19 @@ class FitConfiguration:
         """
         issues = []
 
-        # Validate morphology priors
-        if self.morphology.PA_min >= self.morphology.PA_max:
-            issues.append("ERROR: PA_min must be less than PA_max")
+        # Validate morphology priors (if provided)
+        if self.morphology is not None:
+            if self.morphology.PA_min >= self.morphology.PA_max:
+                issues.append("ERROR: PA_min must be less than PA_max")
 
-        if self.morphology.inc_min >= self.morphology.inc_max:
-            issues.append("ERROR: inc_min must be less than inc_max")
+            if self.morphology.inc_min >= self.morphology.inc_max:
+                issues.append("ERROR: inc_min must be less than inc_max")
 
-        if self.morphology.inc_min < 20:
-            issues.append("WARNING: Very low inclinations (<20°) may be difficult to fit")
+            if self.morphology.inc_min < 20:
+                issues.append("WARNING: Very low inclinations (<20°) may be difficult to fit")
 
-        if self.morphology.r_eff_min >= self.morphology.r_eff_max:
-            issues.append("ERROR: r_eff_min must be less than r_eff_max")
+            if self.morphology.r_eff_min >= self.morphology.r_eff_max:
+                issues.append("ERROR: r_eff_min must be less than r_eff_max")
 
         # Validate kinematic priors
         if self.kinematics.Va_min >= self.kinematics.Va_max:
@@ -143,17 +151,19 @@ class FitConfiguration:
         dict
             Dictionary with 'morphology' and 'kinematics' keys, each containing
             only the parameters that were explicitly modified from defaults.
+
+        Notes
+        -----
+        Morphology has no defaults - if morphology is provided, all params are returned.
+        Kinematics are compared against defaults.
         """
         modified = {'morphology': {}, 'kinematics': {}}
 
-        # Check morphology parameters
-        morph_dict = asdict(self.morphology)
-        default_morph_dict = asdict(self._default_morphology)
-        for key, value in morph_dict.items():
-            if value != default_morph_dict[key]:
-                modified['morphology'][key] = value
+        # Morphology has no defaults - if provided, return all parameters
+        if self.morphology is not None:
+            modified['morphology'] = asdict(self.morphology)
 
-        # Check kinematic parameters
+        # Check kinematic parameters against defaults
         kin_dict = asdict(self.kinematics)
         default_kin_dict = asdict(self._default_kinematics)
         for key, value in kin_dict.items():
@@ -173,11 +183,14 @@ class FitConfiguration:
             print(f"\nValidation Issues ({len(issues)}):")
             for issue in issues:
                 print(f"  {issue}")
-        
+
         # Morphology priors
         print(f"\nMorphology Priors:")
-        self._print_section_summary(self.morphology, MorphologyPriors())
-        
+        if self.morphology is not None:
+            self._print_section_summary(self.morphology, None)
+        else:
+            print("  Not set (will use PySersic priors)")
+
         # Kinematic priors
         print(f"\nKinematic Priors:")
         self._print_section_summary(self.kinematics, KinematicPriors())
@@ -190,14 +203,20 @@ class FitConfiguration:
     def _print_section_summary(self, current_obj, default_obj):
         """Print summary of a configuration section, highlighting changes"""
         current_dict = asdict(current_obj)
-        default_dict = asdict(default_obj)
-        
-        for key, current_value in current_dict.items():
-            default_value = default_dict[key]
-            if current_value != default_value:
-                print(f"  {key}: {current_value} (default: {default_value})")
-            else:
+
+        if default_obj is None:
+            # No defaults - just print all values
+            for key, current_value in current_dict.items():
                 print(f"  {key}: {current_value}")
+        else:
+            # Compare against defaults
+            default_dict = asdict(default_obj)
+            for key, current_value in current_dict.items():
+                default_value = default_dict[key]
+                if current_value != default_value:
+                    print(f"  {key}: {current_value} (default: {default_value})")
+                else:
+                    print(f"  {key}: {current_value}")
     
     def save(self, filename: str, output_dir: str = None):
         """
@@ -301,13 +320,16 @@ if __name__ == "__main__":
     # Demo usage
     print("Demo: Creating a configuration")
 
-    # Create config with some custom settings
+    # Create config with custom morphology and kinematic priors
     config = FitConfiguration(
         morphology=MorphologyPriors(
-            PA_min=10,
-            PA_max=170,
-            inc_min=40,
-            inc_max=70
+            PA_min=10, PA_max=170,
+            inc_min=40, inc_max=70,
+            r_eff_mean=3.0, r_eff_std=1.0, r_eff_min=0.5, r_eff_max=10.0,
+            n_mean=1.0, n_std=0.5, n_min=0.5, n_max=4.0,
+            xc_mean=0.0, xc_std=2.0,
+            yc_mean=0.0, yc_std=2.0,
+            amplitude_mean=100.0, amplitude_std=50.0, amplitude_min=1.0, amplitude_max=1000.0
         ),
         kinematics=KinematicPriors(
             Va_max=400
