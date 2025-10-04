@@ -378,11 +378,11 @@ class Disk():
 		self.inc_mu = priors['i']
 		self.inc_std = 0.2*priors['i']
 		self.r_eff_mu = (1.676/0.4)*priors['r_t']
-		self.r_eff_std = 2 #0.5*self.r_eff_mu
+		self.r_eff_std = np.maximum(3, self.r_eff_mu)
 		self.r_eff_min = 0
 		self.r_eff_max = 15
 		self.n_mu = priors['n'] #1 #*2 #just testing for Erica's
-		self.n_std = 2
+		self.n_std = 1
 		self.xc_morph = 15
 		self.xc_std = 1
 		self.yc_morph = 15
@@ -391,10 +391,81 @@ class Disk():
 		self.amplitude_mu = 200 #utils.Ie_to_flux(1, self.n_mu, self.r_eff_mu, ellip)
 		self.amplitude_std = 40 #0.1*self.amplitude_mu
 
-		self.V_max = 800
+		self.V_max = 1000
 		self.D_max = 600
 
+		self.xc_std_vel = 2*self.xc_std
+		self.yc_std_vel = 2*self.yc_std
+
 		print('Set mock kinematic priors: ', self.PA_morph_mu, self.inc_mu, self.r_eff_mu, self.amplitude_mu, self.n_mu, self.xc_morph, self.yc_morph)
+
+	def set_priors_from_config(self, config):
+		"""Set priors from FitConfiguration object"""
+		from .config import FitConfiguration
+		
+		if not isinstance(config, FitConfiguration):
+			raise TypeError("config must be a FitConfiguration object")
+		
+		# Validate configuration
+		issues = config.validate()
+		errors = [issue for issue in issues if issue.startswith("ERROR")]
+		if errors:
+			raise ValueError(f"Configuration validation failed: {errors}")
+		
+		# Set morphological priors
+		morph = config.morphology
+		self.PA_morph_mu = (morph.PA_min + morph.PA_max) / 2  # Use center of range
+		self.PA_morph_std = (morph.PA_max - morph.PA_min) / 4   # ~95% coverage
+		self.PA_morph_min = morph.PA_min
+		self.PA_morph_max = morph.PA_max
+		
+		self.inc_mu = (morph.inc_min + morph.inc_max) / 2
+		self.inc_std = (morph.inc_max - morph.inc_min) / 4
+		self.inc_min = morph.inc_min
+		self.inc_max = morph.inc_max
+		
+		self.r_eff_mu = morph.r_eff_mean
+		self.r_eff_std = morph.r_eff_std
+		self.r_eff_min = morph.r_eff_min
+		self.r_eff_max = morph.r_eff_max
+		
+		self.n_mu = morph.n_mean
+		self.n_std = morph.n_std
+		self.n_min = morph.n_min
+		self.n_max = morph.n_max
+		
+		self.amplitude_mu = morph.amplitude_mean
+		self.amplitude_std = morph.amplitude_std
+		self.amplitude_min = morph.amplitude_min
+		self.amplitude_max = morph.amplitude_max
+		
+		self.xc_morph = morph.xc_mean
+		self.xc_std = morph.xc_std
+		self.yc_morph = morph.yc_mean
+		self.yc_std = morph.yc_std
+		
+		# Set kinematic priors  
+		kin = config.kinematics
+		self.Va_min = kin.Va_min
+		self.Va_max = kin.Va_max
+		self.V_max = kin.Va_max  # For backward compatibility
+		
+		self.r_t_mu = kin.r_t_mean
+		self.r_t_std = kin.r_t_std
+		self.r_t_min = kin.r_t_min
+		self.r_t_max = kin.r_t_max
+		
+		self.sigma0_min = kin.sigma0_min
+		self.sigma0_max = kin.sigma0_max
+		self.D_max = kin.sigma0_max  # For backward compatibility
+		
+		# Set velocity coordinate uncertainties
+		self.xc_std_vel = 2 * self.xc_std
+		self.yc_std_vel = 2 * self.yc_std
+		
+		print(f"Set priors from config: PA={self.PA_morph_min}-{self.PA_morph_max}°, "
+		      f"inc={self.inc_min}-{self.inc_max}°, Va={self.Va_min}-{self.Va_max} km/s, "
+		      f"sigma0={self.sigma0_min}-{self.sigma0_max} km/s")
 
 
 	def sample_fluxes_parametric(self):

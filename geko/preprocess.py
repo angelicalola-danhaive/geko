@@ -368,7 +368,7 @@ def define_mock_params():
 	num_samples = 500
 	num_warmup = 500
 	step_size = 0.001
-	target_accept_prob = 0.9
+	target_accept_prob = 0.8
 
 	
 	return broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
@@ -447,6 +447,7 @@ def run_full_preprocessing(output,master_cat, line, mock_params = None, priors =
 		r_t_bounds, sigma0_bounds,num_samples, num_warmup, step_size, target_accept_prob = define_mock_params()
 		obs_map, obs_error, direct, direct_error, broad_band, xcenter_detector, ycenter_detector, icenter, jcenter, icenter_low, jcenter_low, \
 				wave_space, delta_wave, index_min, index_max, wavelength, theta, grism_object = preprocess_mock_data(mock_params)
+		field = 'GOODS-S-FRESCO'
 
 	#load the PSF that corresponds to the grism program 
 	if field == 'GOODS-N':

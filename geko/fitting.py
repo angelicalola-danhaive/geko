@@ -50,11 +50,25 @@ from astropy.cosmology import Planck18 as cosmo
 
 
 class Fit_Numpyro():
-	def __init__(self, obs_map, obs_error, grism_object, kin_model, inference_data, parametric):
+	def __init__(self, obs_map, obs_error, grism_object, kin_model, inference_data, parametric, config=None):
 		""" Class to fit model to data
 
 						Parameters
 						----------
+						obs_map : array-like
+							Observed 2D grism spectrum
+						obs_error : array-like
+							Error map for observations
+						grism_object : Grism
+							Grism dispersion object
+						kin_model : KinModels
+							Kinematic model object
+						inference_data : arviz.InferenceData or None
+							Previous inference results
+						parametric : bool
+							Whether to use parametric morphology
+						config : FitConfiguration, optional
+							Configuration object with priors and settings
 
 						Attributes
 						----------
@@ -65,26 +79,65 @@ class Fit_Numpyro():
 
 		self.mask = (jnp.where(obs_map/obs_error < 5.0, 0, 1)).astype(bool)
 
-
 		self.grism_object = grism_object
-
 		self.kin_model = kin_model
-
 		self.inference_data = inference_data
-
 		self.parametric = parametric
+		
+		# Handle configuration if provided
+		if config is not None:
+			from .config import FitConfiguration
+			if not isinstance(config, FitConfiguration):
+				raise TypeError("config must be a FitConfiguration object")
+			
+			self.config = config
+			
+			# Apply configuration to kin_model
+			self.kin_model.disk.set_priors_from_config(config)
+			
+			print("Applied configuration to kinematic model priors")
+		else:
+			self.config = None
 
 
-	def run_inference(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
+	def run_inference(self, num_samples=None, num_warmup=None, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=None, max_tree_depth=None, num_chains=None, init_vals = None):
+		
+		# Use config values if available and parameters not explicitly provided
+		if self.config is not None:
+			mcmc_config = self.config.mcmc
+			if num_samples is None:
+				num_samples = mcmc_config.num_samples
+			if num_warmup is None:
+				num_warmup = mcmc_config.num_warmup
+			if target_accept_prob is None:
+				target_accept_prob = mcmc_config.target_accept_prob
+			if max_tree_depth is None:
+				max_tree_depth = mcmc_config.max_tree_depth
+			if num_chains is None:
+				num_chains = mcmc_config.num_chains
+			if mcmc_config.step_size is not None:
+				step_size = mcmc_config.step_size
+		
+		# Set defaults if still None
+		if num_samples is None:
+			num_samples = 2000
+		if num_warmup is None:
+			num_warmup = 2000
+		if target_accept_prob is None:
+			target_accept_prob = 0.8
+		if max_tree_depth is None:
+			max_tree_depth = 10
+		if num_chains is None:
+			num_chains = 5
 
 		if self.parametric:
 			inference_model = self.kin_model.inference_model_parametric
 		else:
 			inference_model = self.kin_model.inference_model
 		self.nuts_kernel = NUTS(inference_model,  step_size=step_size, adapt_step_size=adapt_step_size, init_strategy=init_to_median(num_samples=2000),
-								target_accept_prob=target_accept_prob, find_heuristic_step_size=True, max_tree_depth=10, dense_mass=False, adapt_mass_matrix=True) 
+								target_accept_prob=target_accept_prob, find_heuristic_step_size=True, max_tree_depth=max_tree_depth, dense_mass=False, adapt_mass_matrix=True) 
 		
-		print('max tree: ', max_tree_depth)
+		print(f'MCMC settings: {num_chains} chains, {num_samples} samples, {num_warmup} warmup, max_tree_depth={max_tree_depth}, target_accept={target_accept_prob}')
 		print('step size: ', step_size)
 		print('warmup: ', num_warmup)
 		print('samples: ', num_samples)
@@ -155,7 +208,7 @@ class Fit_Numpyro():
 		return new_mask
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
-def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples):
+def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples, config=None):
 
 	# ----------------------------------------------------------preprocessing the data------------------------------------------------------------------------
 	z_spec, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,\
@@ -197,8 +250,13 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 		raise ValueError("Non-parametric fitting is not implemented yet. Please set --parametric to True to use the parametric fitting.")
 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
+	
+	# Apply configuration if provided (this will override existing priors)
+	if config is not None:
+		print("Applying custom configuration priors...")
+		config.print_summary()
 
-	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric=parametric)
+	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric=parametric, config=config)
 
 	rng_key = random.PRNGKey(4)
 	if parametric:
@@ -209,17 +267,23 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
 	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error)
 
+	# Run inference - config parameters will be used automatically if provided
 	run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
 		                      median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=num_chains)
 
 	inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
 
-	# no ../ because the open() function reads from terminal directory (not module directory)
-	inf_data.to_netcdf(save_runs_path + str(ID) + '_output')
-	# inf_data.to_netcdf('fitting_results/' + output + 'output')
+	# Get ID for output filename
+	if parametric:
+		output_id = ID  # ID defined in parametric section above
+	else:
+		output_id = output.rstrip('/')  # Use output directory name
+	
+	# Save results
+	inf_data.to_netcdf(save_runs_path + str(output_id) + '_output')
 
-	#figure out how to make this work well
-	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line,parametric=parametric, ID = ID, save_runs_path = save_runs_path)
+	# Process results
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line, parametric=parametric, ID=output_id, save_runs_path=save_runs_path)
 
 
 
