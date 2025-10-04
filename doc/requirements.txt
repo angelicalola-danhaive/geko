@@ -1,0 +1,4 @@
+sphinx-book-theme
+myst-nb
+numpydoc
+sphinx>=4.0
