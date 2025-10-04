@@ -102,6 +102,10 @@ class FitConfiguration:
     computation: ComputationSettings = None
     
     def __post_init__(self):
+        # Store defaults for comparison (to track which params were explicitly modified)
+        self._default_morphology = MorphologyPriors()
+        self._default_kinematics = KinematicPriors()
+
         if self.morphology is None:
             self.morphology = MorphologyPriors()
         if self.kinematics is None:
@@ -150,9 +154,40 @@ class FitConfiguration:
         
         if self.mcmc.target_accept_prob <= 0 or self.mcmc.target_accept_prob >= 1:
             issues.append("ERROR: target_accept_prob must be between 0 and 1")
-        
+
         return issues
-    
+
+    def get_modified_params(self):
+        """
+        Return dictionaries of only the parameters that differ from defaults.
+
+        This allows selective override of priors - only explicitly modified
+        parameters will override PySersic priors or other defaults.
+
+        Returns
+        -------
+        dict
+            Dictionary with 'morphology' and 'kinematics' keys, each containing
+            only the parameters that were explicitly modified from defaults.
+        """
+        modified = {'morphology': {}, 'kinematics': {}}
+
+        # Check morphology parameters
+        morph_dict = asdict(self.morphology)
+        default_morph_dict = asdict(self._default_morphology)
+        for key, value in morph_dict.items():
+            if value != default_morph_dict[key]:
+                modified['morphology'][key] = value
+
+        # Check kinematic parameters
+        kin_dict = asdict(self.kinematics)
+        default_kin_dict = asdict(self._default_kinematics)
+        for key, value in kin_dict.items():
+            if value != default_kin_dict[key]:
+                modified['kinematics'][key] = value
+
+        return modified
+
     def print_summary(self):
         """Print a summary of the configuration, highlighting non-default values"""
         print("Geko Fit Configuration Summary")

@@ -400,72 +400,168 @@ class Disk():
 		print('Set mock kinematic priors: ', self.PA_morph_mu, self.inc_mu, self.r_eff_mu, self.amplitude_mu, self.n_mu, self.xc_morph, self.yc_morph)
 
 	def set_priors_from_config(self, config):
-		"""Set priors from FitConfiguration object"""
+		"""Set ALL priors from FitConfiguration object (complete override)"""
 		from .config import FitConfiguration
-		
+
 		if not isinstance(config, FitConfiguration):
 			raise TypeError("config must be a FitConfiguration object")
-		
+
 		# Validate configuration
 		issues = config.validate()
 		errors = [issue for issue in issues if issue.startswith("ERROR")]
 		if errors:
 			raise ValueError(f"Configuration validation failed: {errors}")
-		
+
 		# Set morphological priors
 		morph = config.morphology
 		self.PA_morph_mu = (morph.PA_min + morph.PA_max) / 2  # Use center of range
 		self.PA_morph_std = (morph.PA_max - morph.PA_min) / 4   # ~95% coverage
 		self.PA_morph_min = morph.PA_min
 		self.PA_morph_max = morph.PA_max
-		
+
 		self.inc_mu = (morph.inc_min + morph.inc_max) / 2
 		self.inc_std = (morph.inc_max - morph.inc_min) / 4
 		self.inc_min = morph.inc_min
 		self.inc_max = morph.inc_max
-		
+
 		self.r_eff_mu = morph.r_eff_mean
 		self.r_eff_std = morph.r_eff_std
 		self.r_eff_min = morph.r_eff_min
 		self.r_eff_max = morph.r_eff_max
-		
+
 		self.n_mu = morph.n_mean
 		self.n_std = morph.n_std
 		self.n_min = morph.n_min
 		self.n_max = morph.n_max
-		
+
 		self.amplitude_mu = morph.amplitude_mean
 		self.amplitude_std = morph.amplitude_std
 		self.amplitude_min = morph.amplitude_min
 		self.amplitude_max = morph.amplitude_max
-		
+
 		self.xc_morph = morph.xc_mean
 		self.xc_std = morph.xc_std
 		self.yc_morph = morph.yc_mean
 		self.yc_std = morph.yc_std
-		
-		# Set kinematic priors  
+
+		# Set kinematic priors
 		kin = config.kinematics
 		self.Va_min = kin.Va_min
 		self.Va_max = kin.Va_max
 		self.V_max = kin.Va_max  # For backward compatibility
-		
+
 		self.r_t_mu = kin.r_t_mean
 		self.r_t_std = kin.r_t_std
 		self.r_t_min = kin.r_t_min
 		self.r_t_max = kin.r_t_max
-		
+
 		self.sigma0_min = kin.sigma0_min
 		self.sigma0_max = kin.sigma0_max
 		self.D_max = kin.sigma0_max  # For backward compatibility
-		
+
 		# Set velocity coordinate uncertainties
 		self.xc_std_vel = 2 * self.xc_std
 		self.yc_std_vel = 2 * self.yc_std
-		
+
 		print(f"Set priors from config: PA={self.PA_morph_min}-{self.PA_morph_max}°, "
 		      f"inc={self.inc_min}-{self.inc_max}°, Va={self.Va_min}-{self.Va_max} km/s, "
 		      f"sigma0={self.sigma0_min}-{self.sigma0_max} km/s")
+
+	def apply_config_overrides(self, config):
+		"""
+		Apply only explicitly modified config parameters as selective overrides.
+
+		This method checks which parameters were changed from defaults and only
+		overrides those specific parameters, leaving PySersic or default priors
+		intact for all other parameters.
+
+		Parameters
+		----------
+		config : FitConfiguration
+			Configuration object with potentially modified parameters
+		"""
+		from .config import FitConfiguration
+
+		if not isinstance(config, FitConfiguration):
+			raise TypeError("config must be a FitConfiguration object")
+
+		# Get only the parameters that were explicitly modified
+		modified = config.get_modified_params()
+
+		overridden_params = []
+
+		# Apply morphology overrides
+		morph_map = {
+			'PA_min': ('PA_morph_min', lambda v: v),
+			'PA_max': ('PA_morph_max', lambda v: v),
+			'inc_min': ('inc_min', lambda v: v),
+			'inc_max': ('inc_max', lambda v: v),
+			'r_eff_mean': ('r_eff_mu', lambda v: v),
+			'r_eff_std': ('r_eff_std', lambda v: v),
+			'r_eff_min': ('r_eff_min', lambda v: v),
+			'r_eff_max': ('r_eff_max', lambda v: v),
+			'n_mean': ('n_mu', lambda v: v),
+			'n_std': ('n_std', lambda v: v),
+			'n_min': ('n_min', lambda v: v),
+			'n_max': ('n_max', lambda v: v),
+			'amplitude_mean': ('amplitude_mu', lambda v: v),
+			'amplitude_std': ('amplitude_std', lambda v: v),
+			'amplitude_min': ('amplitude_min', lambda v: v),
+			'amplitude_max': ('amplitude_max', lambda v: v),
+			'xc_mean': ('xc_morph', lambda v: v),
+			'xc_std': ('xc_std', lambda v: v),
+			'yc_mean': ('yc_morph', lambda v: v),
+			'yc_std': ('yc_std', lambda v: v),
+		}
+
+		for config_param, value in modified['morphology'].items():
+			if config_param in morph_map:
+				attr_name, transform = morph_map[config_param]
+				setattr(self, attr_name, transform(value))
+				overridden_params.append(f"{config_param}→{attr_name}")
+
+				# Also update derived parameters
+				if config_param in ['PA_min', 'PA_max']:
+					self.PA_morph_mu = (self.PA_morph_min + self.PA_morph_max) / 2
+					self.PA_morph_std = (self.PA_morph_max - self.PA_morph_min) / 4
+				elif config_param in ['inc_min', 'inc_max']:
+					self.inc_mu = (self.inc_min + self.inc_max) / 2
+					self.inc_std = (self.inc_max - self.inc_min) / 4
+
+		# Apply kinematic overrides
+		kin_map = {
+			'Va_min': ('Va_min', lambda v: v),
+			'Va_max': ('Va_max', lambda v: v),
+			'r_t_mean': ('r_t_mu', lambda v: v),
+			'r_t_std': ('r_t_std', lambda v: v),
+			'r_t_min': ('r_t_min', lambda v: v),
+			'r_t_max': ('r_t_max', lambda v: v),
+			'sigma0_min': ('sigma0_min', lambda v: v),
+			'sigma0_max': ('sigma0_max', lambda v: v),
+		}
+
+		for config_param, value in modified['kinematics'].items():
+			if config_param in kin_map:
+				attr_name, transform = kin_map[config_param]
+				setattr(self, attr_name, transform(value))
+				overridden_params.append(f"{config_param}→{attr_name}")
+
+				# Update backward compatibility attributes
+				if config_param == 'Va_max':
+					self.V_max = value
+				elif config_param == 'sigma0_max':
+					self.D_max = value
+
+		# Update velocity coordinate uncertainties if morphology xc/yc changed
+		if any('xc_std' in p or 'yc_std' in p for p in overridden_params):
+			self.xc_std_vel = 2 * self.xc_std
+			self.yc_std_vel = 2 * self.yc_std
+
+		if overridden_params:
+			print(f"Applied {len(overridden_params)} config overrides: {', '.join(overridden_params[:5])}" +
+			      (f" and {len(overridden_params)-5} more..." if len(overridden_params) > 5 else ""))
+		else:
+			print("No config overrides applied (all parameters at default values)")
 
 
 	def sample_fluxes_parametric(self):
