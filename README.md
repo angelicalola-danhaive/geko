@@ -1,4 +1,4 @@
-<table border="0">
+<table>
 <tr>
 <td width="200">
   <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200"/>
