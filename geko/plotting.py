@@ -635,7 +635,7 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# plt.tight_layout()
 	if save_to_folder != None:
 		if name == 'summary':
-			fig.savefig(save_runs_path + str(save_to_folder).split('/')[0] + '_summary.png', dpi=300, bbox_inches="tight")
+			fig.savefig(save_runs_path + save_to_folder + '/' + str(save_to_folder).split('/')[0] + '_summary.png', dpi=300, bbox_inches="tight")
 		else:
 			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
 	plt.close()
