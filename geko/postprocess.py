@@ -20,8 +20,6 @@ import numpyro
 
 import arviz as az
 
-import yaml
-
 import numpy as np
 
 from jax.scipy.signal import convolve
