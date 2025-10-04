@@ -157,14 +157,18 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	plt.close()
 
 
-def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None):
+def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None,
+                     field=None, grism_filter='F444W', delta_wave_cutoff=0.005, factor=5, wave_factor=10, model_name='Disk'):
 	"""
 		Main function that automatically post-processes the inference data and saves all of the relevant plots
 		Returns the main data products so that data can be analyzed separately
 	"""
 
 	#pre-process the galaxy data
-	z_spec, wavelength, wave_space, obs_map, obs_error, model_name, kin_model, grism_object,  num_samples, num_warmup, step_size, target_accept_prob, delta_wave, factor  = pre.run_full_preprocessing(output, master_cat, line, mock_params)
+	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = pre.run_full_preprocessing(
+		output, master_cat, line, mock_params=mock_params, save_runs_path=save_runs_path,
+		source_id=ID, field=field, grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
+		factor=factor, wave_factor=wave_factor, model_name=model_name)
 
 	#load inference data
 	if mock_params is None:

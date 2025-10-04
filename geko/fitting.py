@@ -318,7 +318,10 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 	inf_data.to_netcdf(save_runs_path + str(source_id) + '_output')
 
 	# Process results
-	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(output, master_cat, line, parametric=parametric, ID=source_id, save_runs_path=save_runs_path)
+	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(
+		output, master_cat, line, parametric=parametric, ID=source_id, save_runs_path=save_runs_path,
+		field=field, grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
+		factor=factor, wave_factor=wave_factor, model_name=model_name)
 
 	return inf_data
 
