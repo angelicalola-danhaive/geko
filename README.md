@@ -1,6 +1,15 @@
+<<<<<<< HEAD
 <div>
   <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200" align="left" style="margin-right: 20px;"/>
 
+=======
+<table>
+<tr>
+<td width="200">
+  <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200"/>
+</td>
+<td>
+>>>>>>> origin/main
   <h2>the <strong>G</strong>rism <strong>E</strong>mission-line <strong>K</strong>inematics t<strong>O</strong>ol</h2>
 
   <p>
