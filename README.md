@@ -1,10 +1,8 @@
 <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200" align="left"/>
 
-&nbsp;
 
 # the **G**rism **E**mission-line **K**inematics t**O**ol
 
-&nbsp;
 
 <br clear="left"/>
 
