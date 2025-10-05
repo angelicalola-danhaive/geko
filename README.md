@@ -1,6 +1,11 @@
 <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200" align="left"/>
 
-<h1 style="display: inline-block;">the <strong>G</strong>rism <strong>E</strong>mission-line <strong>K</strong>inematics t<strong>O</strong>ol</h1>
+&nbsp;
+
+# the **G**rism **E**mission-line **K**inematics t**O**ol
+
+&nbsp;
+
 <br clear="left"/>
 
 <p>
