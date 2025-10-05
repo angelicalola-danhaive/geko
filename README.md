@@ -1,17 +1,12 @@
-<img src="doc/_static/geko_logo.png" alt="Geko Logo" width="200" align="left"/>
+<div align="center">
+  <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="300"/>
 
+  # the **G**rism **E**mission-line **K**inematics t**O**ol
 
-# the **G**rism **E**mission-line **K**inematics t**O**ol
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+  [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
-
-<br clear="left"/>
-
-<p>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"/></a>
-  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.8+-blue.svg" alt="Python 3.8+"/></a>
-</p>
-
-<br clear="left"/>
+</div>
 
 ## Description
 
