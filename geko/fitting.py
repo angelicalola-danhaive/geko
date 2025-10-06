@@ -172,6 +172,40 @@ class Fit_Numpyro():
 		self.mcmc.print_summary()
 	
 	def run_inference_ns(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
+		"""
+		Run nested sampling inference (experimental).
+
+		Uses Numpyro's NestedSampler for Bayesian inference. This is an
+		alternative to MCMC that may be more efficient for certain problems.
+
+		Parameters
+		----------
+		num_samples : int, optional
+			Number of samples to draw (default: 2000)
+		num_warmup : int, optional
+			Number of warmup iterations (default: 2000)
+		high_res : bool, optional
+			Use high resolution model (default: False)
+		median : bool, optional
+			Initialize from median (default: True)
+		step_size : float, optional
+			Step size (default: 1)
+		adapt_step_size : bool, optional
+			Adapt step size (default: True)
+		target_accept_prob : float, optional
+			Target acceptance probability (default: 0.8)
+		max_tree_depth : int, optional
+			Maximum tree depth (default: 10)
+		num_chains : int, optional
+			Number of chains (default: 5)
+		init_vals : dict, optional
+			Initial values (default: None)
+
+		Notes
+		-----
+		This method is experimental and may not work for all models.
+		Results are stored in self.ns.
+		"""
 
 		constructor_kwargs = {"max_samples": 1000}
 		self.ns = NestedSampler(model = self.kin_model.inference_model, constructor_kwargs= constructor_kwargs)
@@ -185,6 +219,39 @@ class Fit_Numpyro():
 		print('done')
 
 	def diverging_parameters(self, chain_number, divergence_number):
+		"""
+		Extract parameter values at divergent MCMC transitions.
+
+		Retrieves the parameter values for a specific divergent transition,
+		useful for diagnosing MCMC sampling problems.
+
+		Parameters
+		----------
+		chain_number : int
+			Which MCMC chain to examine
+		divergence_number : int
+			Index of the divergent transition within the chain
+
+		Returns
+		-------
+		fluxes : jax.numpy.ndarray
+			Flux values at divergent point
+		PA : float
+			Position angle at divergent point
+		i : float
+			Inclination at divergent point
+		Va : float
+			Asymptotic velocity at divergent point
+		r_t : float
+			Turnover radius at divergent point
+		sigma0 : float
+			Velocity dispersion at divergent point
+
+		Notes
+		-----
+		Requires self.inference_data to be set with MCMC results.
+		Used for debugging pathological MCMC behavior.
+		"""
 		divergences = az.convert_to_dataset(
 		    self.inference_data, group="sample_stats").diverging.transpose("chain", "draw")
 		PA_div = self.inference_data.posterior['PA'][chain_number,
@@ -204,9 +271,27 @@ class Fit_Numpyro():
 
 
 	def create_mask(self):
-		'''
-		Create a mask for the grism object based on the obs_map and obs_error
-		'''
+		"""
+		Create a source mask for the grism spectrum using photutils segmentation.
+
+		Detects sources in the observed grism spectrum and creates a mask
+		that isolates the central source, excluding contaminating sources.
+
+		Returns
+		-------
+		numpy.ndarray
+			Binary mask array (1 for source, 0 for background) with same
+			shape as obs_map
+
+		Notes
+		-----
+		Uses photutils source detection with:
+		- 2D Gaussian smoothing kernel (sigma=3.0, size=5x5)
+		- Background estimation on 15x15 pixel boxes
+		- Detection threshold of 5-sigma above background
+		- Minimum source size of 10 pixels
+		The mask selects only the source at the central pixel position.
+		"""
 		sigma_rms = jnp.minimum((self.obs_map/self.obs_error).max(),5)
 		im_conv = convolve_astropy(self.obs_map, make_2dgaussian_kernel(3.0, size=5))
 
@@ -216,7 +301,7 @@ class Fit_Numpyro():
 		segment_map = detect_sources(im_conv, sigma_rms*np.abs(bkg.background_median), npixels=10)
 
 		main_label = segment_map.data[int(0.5*self.obs_map.shape[0]), int(0.5*self.obs_map.shape[1])]
-		
+
 		# construct mask
 		mask = segment_map.data
 		new_mask = np.zeros_like(mask)
