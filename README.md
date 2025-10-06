@@ -99,8 +99,7 @@ If you use Geko in your research, please cite the following paper:
 
 ## Acknowledgements
 
-We thank Amanda Stoffers for creating our beautiful logo. 
-We acknowledge support from the Royal Society Research Grants.
+We acknowledge support from the Royal Society Research Grants (G125142). We thank Amanda Stoffers for creating our beautiful logo. 
 
 This package makes use of:
 - [JAX](https://github.com/google/jax) for accelerated numerical computing
