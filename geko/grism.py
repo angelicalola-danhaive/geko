@@ -56,7 +56,33 @@ import jax
 
 @jax.jit
 def _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges):
-	"""Core Gaussian computation for dispersion (extracted from Grism.disperse)"""
+	"""
+	Core Gaussian computation for grism dispersion.
+
+	Integrates Gaussian profiles over wavelength bins to create spectral cube.
+	Uses error functions (CDF) for accurate bin integration.
+
+	Parameters
+	----------
+	F : jax.numpy.ndarray
+		2D flux map (spatial y, spatial x)
+	wave_centers : jax.numpy.ndarray
+		2D array of central wavelengths for each pixel (spatial y, spatial x)
+	wave_sigmas_eff : jax.numpy.ndarray
+		2D array of effective wavelength dispersions (spatial y, spatial x)
+	wave_space_edges : jax.numpy.ndarray
+		1D array of wavelength bin edges
+
+	Returns
+	-------
+	cube : jax.numpy.ndarray
+		3D spectral cube (spatial y, spatial x, wavelength)
+
+	Notes
+	-----
+	Extracted from Grism.disperse() for JIT compilation compatibility.
+	Computes integral of Gaussian from edge[i] to edge[i+1] for each bin.
+	"""
 	from jax.scipy import special
 	import math
 	
@@ -182,9 +208,30 @@ class Grism:
 		self.set_wave_array()
 	
 	def __str__(self):
+		"""
+		String representation of the Grism object.
+
+		Returns
+		-------
+		str
+			Formatted string with grism configuration details
+		"""
 		return 'Grism object: \n' + ' - direct shape: ' + str(self.im_shape) + '\n - grism shape: ' + str(self.sh_beam) + '\n - wave_scale = ' + str(self.wave_scale) + '\n - factor = ' + str(self.factor) + '\n - i_center = ' + str(self.icenter) + '\n - j_center = ' + str(self.jcenter)
 
 	def init_detector(self):
+		"""
+		Initialize detector coordinate system.
+
+		Creates 1D and 2D arrays mapping model pixels to detector coordinates,
+		accounting for oversampling and galaxy center position.
+
+		Notes
+		-----
+		Sets attributes:
+		- detector_xmin, detector_xmax: Detector coordinate bounds
+		- detector_space_1d: 1D detector coordinate array
+		- detector_space_2d: 2D detector coordinate grid
+		"""
 		self.detector_xmin = self.xcenter_detector - self.jcenter
 		self.detector_xmax = self.xcenter_detector + (self.im_shape//self.factor-1-self.jcenter) #need to check that this still works but should do!
 
@@ -199,16 +246,22 @@ class Grism:
 		self.detector_space_2d = self.detector_space_1d * jnp.ones_like(jnp.zeros( (self.im_shape,1) ))
 
 	def load_coefficients(self):
-		'''
-			Loading the parameters for the tracing, dispersion, and sensitivity functions
+		"""
+		Load JWST NIRCam grism calibration coefficients.
 
-			Parameters
-			----------
+		Loads tracing and dispersion polynomial coefficients from the
+		nircam_grism calibration files for the specified filter, module,
+		and pupil configuration.
 
-			Returns
-			----------
-			parameters
-		'''
+		Notes
+		-----
+		Sets attributes:
+		- fit_opt: Trace polynomial coefficients
+		- w_opt: Dispersion polynomial coefficients
+		- WRANGE: Valid wavelength range for the filter
+
+		Calibration files are read from the nircam_grism/FS_grism_config directory.
+		"""
 
 		### select the filter that we will work on:
 		tmp_filter = self.filter
@@ -266,15 +319,28 @@ class Grism:
 
 
 	def get_trace(self):
+		"""
+		Compute grism dispersion trace for the central galaxy pixel.
 
-		'''
-		Assuming a position on the detector for the galaxy (which we assume to be the center of the detector because we are looking at combined grism data), 
-		compute the dispersion space of the grism image, i.e. where does the central pixel end up on the detector if emitting at each wavelength in wave_space
+		Assuming the galaxy is at the detector center, computes where the central
+		pixel appears on the detector when emitting at each wavelength in wave_space.
+		Uses polynomial coefficients from NIRCam grism calibration.
 
-		Return/Compute:
+		Returns
+		-------
+		dxs : jax.numpy.ndarray
+			Uniformly spaced dispersion positions (detector x-coordinates)
+		disp_space : jax.numpy.ndarray
+			Dispersion positions for each wavelength in wave_space
 
-		-self.wavs: the wavelength corresponding to each pixel in the grism image, in the ref frame of the central pixel
-		'''
+		Notes
+		-----
+		Sets attributes:
+		- disp_space: Dispersion positions from polynomial trace equation
+		- dxs: Uniformly spaced array spanning min to max dispersion
+		- wavs: Wavelengths corresponding to each position in dxs
+		- inverse_wave_disp: Interpolator mapping dispersion to wavelength
+		"""
 		xpix = self.xcenter_detector
 		ypix = self.ycenter_detector
 		wave = self.wave_space
@@ -304,13 +370,23 @@ class Grism:
 		return self.dxs, self.disp_space
 
 	def set_wave_array(self):
-		'''
-			Compute the effective central wavelength of each pixel on the plane of the central pixel (i.e. how much are they spatially separated in wavelength space)
-			Steps:
-			1. Disperse each pixel with wavelength self.wavelength (and zero velocity) and see where it ends up on the detector
-			2. Find the wavelength corresponding to each of those pixels (in the ref frame of the central pixels)
+		"""
+		Compute effective wavelength for each model pixel.
 
-		'''
+		Determines the central wavelength of each pixel on the plane of the central
+		pixel by computing spatial separation in wavelength space. This accounts for
+		the wavelength shift each pixel experiences due to its position.
+
+		Notes
+		-----
+		Algorithm:
+		1. Disperse each pixel at self.wavelength with zero velocity
+		2. Find corresponding wavelength in central pixel's reference frame
+		3. Store result in self.wave_array
+
+		Sets attribute:
+		- wave_array: 2D array of effective wavelengths for each model pixel
+		"""
 
 		#disperse each pixel with wavelength self.wavelength (and zero velocity)
 		dispersion_indices = self.grism_dispersion(self.wavelength)
@@ -323,6 +399,26 @@ class Grism:
 		self.wave_array = self.wavs[wave_indices]
 
 	def load_poly_factors(self,a01, a02, a03, a04, a05, a06, b01, b02, b03, b04, b05, b06, c01, c02, c03, d01):
+		"""
+		Load polynomial dispersion coefficients.
+
+		Parameters
+		----------
+		a01-a06 : float
+			Constant term polynomial coefficients
+		b01-b06 : float
+			Linear (wavelength) term coefficients
+		c01-c03 : float
+			Quadratic (wavelength^2) term coefficients
+		d01 : float
+			Cubic (wavelength^3) term coefficient
+
+		Notes
+		-----
+		These coefficients define the NIRCam grism dispersion polynomial:
+		dx = (a_coeffs) + (b_coeffs)*wave + (c_coeffs)*wave^2 + d01*wave^3
+		where each set of coefficients also depends on x,y detector position.
+		"""
 		self.a01 = a01
 		self.a02 = a02
 		self.a03 = a03
@@ -341,8 +437,23 @@ class Grism:
 		self.d01 = d01
 	
 	def load_poly_coefficients(self):
+		"""
+		Pre-compute position-dependent polynomial coefficients.
 
-		xpix = self.detector_space_2d 
+		Evaluates the polynomial coefficients at each detector position in the
+		2D grid. This precomputation speeds up dispersion calculations by avoiding
+		repeated polynomial evaluations.
+
+		Notes
+		-----
+		Assumes horizontal dispersion only (all pixels on same detector row).
+		Sets attributes:
+		- coef1: Constant term coefficients (2D array)
+		- coef2: Linear wavelength term coefficients (2D array)
+		- coef3: Quadratic wavelength term coefficients (2D array)
+		- coef4: Cubic wavelength term coefficients (2D array)
+		"""
+		xpix = self.detector_space_2d
 		# print('xpix: ', xpix[0])
 		ypix = self.ycenter_detector * jnp.ones_like(xpix) #bcause we are not considering vertical dys, we can set this as if they are all on the same row
 		xpix -= 1024
@@ -358,34 +469,68 @@ class Grism:
 
 
 	def grism_dispersion(self, wave):
-		'''
-			from x0,y0 and the lamda of one pixel in direct image, get the dx in the grism image
+		"""
+		Compute grism dispersion offset for given wavelength.
 
-			Parameters
-			----------
-			data 
-				(x0,y0,lambda)
+		Calculates the x-axis offset (dx) in the grism image for a pixel at
+		wavelength wave using the NIRCam grism dispersion polynomial.
 
-			Returns
-			----------
-			dx
-				in the grism image
-		'''
+		Parameters
+		----------
+		wave : float or array_like
+			Wavelength in microns
 
+		Returns
+		-------
+		dx : jax.numpy.ndarray
+			Dispersion offset in detector pixels
+
+		Notes
+		-----
+		Uses pre-computed position-dependent coefficients (coef1-coef4) from
+		load_poly_coefficients(). Wavelength is normalized by subtracting 3.95 μm.
+		"""
 		wave -=3.95
 
 		return ((self.coef1 + self.coef2 * wave + self.coef3 * wave**2 + self.coef4 * wave**3))
 
 	def set_detector_scale(self, scale):
+		"""
+		Set detector pixel scale.
+
+		Parameters
+		----------
+		scale : float
+			Detector pixel scale in arcsec/pixel
+		"""
 		self.detector_scale = scale
 
 
 	def compute_lsf(self):
+		"""
+		Compute Line Spread Function (LSF) for NIRCam grism.
 
+		Calculates spectral resolution and LSF width at self.wavelength using
+		empirical polynomial fit to NIRCam grism resolving power.
+
+		Returns
+		-------
+		R : float
+			Spectral resolving power (R = λ/Δλ)
+
+		Notes
+		-----
+		Sets attributes:
+		- sigma_lsf: LSF width in wavelength units (microns)
+		- sigma_v_lsf: LSF width in velocity units (km/s)
+
+		The resolving power R is modeled as a 4th-order polynomial in wavelength.
+		Conversion to sigma assumes Gaussian profile (FWHM = 2.36 * sigma).
+		"""
 		#compute the sigma lsf for the wavelength of interest, wavelength must be in MICRONS
 		R = 3.35*self.wavelength**4 - 41.9*self.wavelength**3 + 95.5*self.wavelength**2 + 536*self.wavelength - 240
 
-		self.sigma_lsf = (1/2.36)*self.wavelength/R 
+		self.sigma_lsf = (1/2.36)*self.wavelength/R
 		# print('LSF: ', self.sigma_lsf)
 		self.sigma_v_lsf = (1/2.36)*(c/1000)/R #put c in km/s #0.5*
 		# print('LSF vel: ', self.sigma_v_lsf)
@@ -394,10 +539,28 @@ class Grism:
 		return R
 
 	
-	def compute_lsf_new(self):   
-		'''
-			New LSF computed by Fengwu from new data - sum of two Gaussians
-		'''
+	def compute_lsf_new(self):
+		"""
+		Compute improved LSF using double-Gaussian model.
+
+		Uses empirical two-component Gaussian model derived from NIRCam flight data.
+		The LSF is modeled as a weighted sum of two Gaussians with module-dependent
+		parameters (Module A vs B).
+
+		Returns
+		-------
+		lsf_kernel : jax.numpy.ndarray
+			Normalized 1D LSF convolution kernel
+
+		Notes
+		-----
+		Model parameters (fraction, FWHM) depend on NIRCam module and wavelength.
+		The kernel is constructed with 6-sigma width and normalized to unit sum.
+
+		References
+		----------
+		LSF model from Fengwu Sun based on updated NIRCam grism calibration data.
+		"""
 		if self.module_lsf == 'A':
 			frac_1 = 0.679*jnp.log10(self.wavelength/4) + 0.604
 			fwhm_1 = (2.23*jnp.log10(self.wavelength/4) + 2.22)/1000 #in microns
@@ -444,7 +607,27 @@ class Grism:
 		return float(R)
 	
 	def compute_PSF(self, PSF):
+		"""
+		Prepare Point Spread Function for grism modeling.
 
+		Oversamples the input PSF to match model resolution, crops to 11x11 pixels
+		(9x9 for factor>1 after oversampling), normalizes, and reshapes for 3D
+		convolution with spectral dimension.
+
+		Parameters
+		----------
+		PSF : numpy.ndarray or jax.numpy.ndarray
+			2D Point Spread Function at detector resolution
+
+		Notes
+		-----
+		Sets attributes:
+		- oversampled_PSF: PSF oversampled by self.factor and normalized
+		- PSF: 3D array with shape (spatial_y, spatial_x, 1) for broadcasting
+
+		If factor=1, uses input PSF directly. Otherwise oversamples using bilinear
+		interpolation and crops to central 11x11 pixels.
+		"""
 		#sets the grism object's oversampled PSF and the velocity space needed for the cube
 		if self.factor == 1:
 			self.oversampled_PSF = PSF
