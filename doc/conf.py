@@ -9,6 +9,23 @@ import os
 import sys
 sys.path.insert(0, os.path.abspath('..'))
 
+# Mock imports for dependencies that may not be available during doc build
+autodoc_mock_imports = [
+    'jax',
+    'jaxlib',
+    'numpyro',
+    'arviz',
+    'astropy',
+    'photutils',
+    'scipy',
+    'matplotlib',
+    'numpy',
+    'pysersic',
+    'skimage',
+    'xarray',
+    'pandas',
+]
+
 # -- Project information -----------------------------------------------------
 
 project = 'geko'
