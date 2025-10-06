@@ -19,7 +19,6 @@ autodoc_mock_imports = [
     'photutils',
     'scipy',
     'matplotlib',
-    'numpy',
     'pysersic',
     'skimage',
     'xarray',
