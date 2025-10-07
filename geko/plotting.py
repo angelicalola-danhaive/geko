@@ -351,7 +351,7 @@ def compute_r90(n, r_eff):
 	return result.root if result.converged else None
 
 
-def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None):
+def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None, ID = None):
 	"""
 	Create comprehensive summary plot for disk model fitting results.
 
@@ -398,6 +398,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		Sersic index
 	save_runs_path : str, optional
 		Base directory for saving
+	ID : int, optional
+		Source ID for output filenames
 
 	Returns
 	-------
@@ -692,7 +694,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# plt.tight_layout()
 	if save_to_folder != None:
 		if name == 'summary':
-			fig.savefig(save_runs_path + save_to_folder + '/' + str(save_to_folder).split('/')[0] + '_summary.png', dpi=300, bbox_inches="tight")
+			# Use ID for filename instead of extracting from folder name
+			filename = str(ID) + '_summary.png' if ID is not None else str(save_to_folder).split('/')[0] + '_summary.png'
+			fig.savefig(save_runs_path + save_to_folder + '/' + filename, dpi=300, bbox_inches="tight")
 		else:
 			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
 	plt.close()
@@ -772,9 +776,11 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# plt.gca().set(box_aspect=1)
 	if save_to_folder != None:
 		if name == 'summary':
-			plt.savefig(save_runs_path + save_to_folder + '/' + save_to_folder + '_cornerplot' + '.png', dpi=300)
+			# Use ID for filename instead of folder name
+			filename = str(ID) + '_cornerplot.png' if ID is not None else save_to_folder + '_cornerplot.png'
+			plt.savefig(save_runs_path + save_to_folder + '/' + filename, dpi=300)
 			plt.close()
-			figure_image = plt.imread(save_runs_path + save_to_folder + '/' + save_to_folder + '_cornerplot' + '.png')
+			figure_image = plt.imread(save_runs_path + save_to_folder + '/' + filename)
 		elif name == 'pretty':
 			plt.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
 			plt.close()
@@ -792,11 +798,15 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# corner_ax.set_title('Kinematic posteriors', fontsize=8)
 
 	corner_ax.title.set_position([.5, 0.9])
-	fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=10, fontweight='bold')
+	# Use ID for title if available
+	title_id = str(ID) if ID is not None else str(save_to_folder)
+	fig.suptitle('Object JADES ID: ' + title_id, fontsize=10, fontweight='bold')
 
 	if save_to_folder != None:
 		if name == 'summary':
-				fig.savefig(save_runs_path + save_to_folder + '/' + save_to_folder + '_summary_corner' + '.png', dpi=300)
+				# Use ID for filename instead of folder name
+				filename = str(ID) + '_summary_corner.png' if ID is not None else save_to_folder + '_summary_corner.png'
+				fig.savefig(save_runs_path + save_to_folder + '/' + filename, dpi=300)
 		elif name == 'pretty':
 			fig.savefig('FrescoHa/PrettySummaries/' + save_to_folder + '_corner.png', dpi=500)
 		else:

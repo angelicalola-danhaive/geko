@@ -230,7 +230,7 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 
 	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84, save_runs_path = save_runs_path)
 	
-	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med, save_runs_path = save_runs_path)
+	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med, save_runs_path = save_runs_path, ID = ID)
 
 	return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
 
