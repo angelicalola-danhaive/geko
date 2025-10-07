@@ -493,7 +493,8 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 	v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(
 		output, master_cat, line, parametric=parametric, ID=source_id, save_runs_path=save_runs_path,
 		field=field, grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
-		factor=factor, wave_factor=wave_factor, model_name=model_name)
+		factor=factor, wave_factor=wave_factor, model_name=model_name,
+		manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file)
 
 	return inf_data
 

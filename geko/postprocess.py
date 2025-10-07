@@ -158,17 +158,26 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 
 
 def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None,
-                     field=None, grism_filter='F444W', delta_wave_cutoff=0.005, factor=5, wave_factor=10, model_name='Disk'):
+                     field=None, grism_filter='F444W', delta_wave_cutoff=0.005, factor=5, wave_factor=10, model_name='Disk',
+                     manual_psf_name=None, manual_grism_file=None):
 	"""
 		Main function that automatically post-processes the inference data and saves all of the relevant plots
 		Returns the main data products so that data can be analyzed separately
+
+		Parameters
+		----------
+		manual_psf_name : str, optional
+			PSF filename (required if field='manual')
+		manual_grism_file : str, optional
+			Grism spectrum filename (required if field='manual')
 	"""
 
 	#pre-process the galaxy data
 	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = pre.run_full_preprocessing(
 		output, master_cat, line, mock_params=mock_params, save_runs_path=save_runs_path,
 		source_id=ID, field=field, grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
-		factor=factor, wave_factor=wave_factor, model_name=model_name)
+		factor=factor, wave_factor=wave_factor, model_name=model_name,
+		manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file)
 
 	#load inference data
 	if mock_params is None:
