@@ -23,6 +23,10 @@ autodoc_mock_imports = [
     'skimage',
     'xarray',
     'pandas',
+    'numpy',
+    'corner',
+    'jax_cosmo',
+    'PIL',
 ]
 
 # -- Project information -----------------------------------------------------
