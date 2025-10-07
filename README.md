@@ -10,12 +10,11 @@
 
 ## Description
 
-Geko is a Python package for analyzing grism spectroscopy and morphology data from JWST observations. The package uses JAX for accelerated computation and Numpyro for Bayesian inference to model galaxy kinematics and morphology from 2D dispersed spectra.
+Geko is a Python package for analyzing grism spectroscopy from JWST NIRCam observations. The package uses JAX for accelerated computation and Numpyro for Bayesian inference to recover emission-line kinematics and morphology from 2D slitless spectroscopy spectra.
 
 **Key Features:**
-- **JAX-accelerated grism modeling**: Fast forward modeling of 2D dispersed spectra with GPU support
+- **JAX-accelerated**: GPU support for fast inference
 - **Bayesian inference**: MCMC fitting using Numpyro's No-U-Turn Sampler (NUTS)
-- **Morphology integration**: Incorporates Sérsic profile fitting from PySersic
 - **Flexible configuration**: Easy-to-use configuration system for priors and MCMC parameters
 - **Comprehensive visualization**: Diagnostic plots and corner plots for fit results
 
@@ -25,7 +24,7 @@ Geko is a Python package for analyzing grism spectroscopy and morphology data fr
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/geko.git
+git clone https://github.com/angelicalola-danhaive/geko.git
 cd geko
 
 # Create conda environment
@@ -86,15 +85,14 @@ See the [documentation](https://geko.readthedocs.io) for detailed usage examples
 If you use Geko in your research, please cite the following paper:
 
 ```bibtex
-@article{geko2024,
-  author  = {Author, Name and Coauthor, Name},
-  title   = {Geko: A Tool for JWST Grism Emission-line Kinematics},
-  journal = {Journal Name},
-  year    = {2024},
-  volume  = {XXX},
-  pages   = {XXX},
-  doi     = {XX.XXXX/XXXXX}
-}
+
+@article{Danhaive:2025ac,
+	author = {{Danhaive}, A. Lola and {Tacchella}, Sandro},
+	journal = {arXiv e-prints},
+	month = oct,
+	pages = {arXiv:xxxx},
+	title = {{Modelling the kinematics and morphology of galaxies in slitless spectroscopy  with _geko_}},
+	year = 2025}
 ```
 
 ## Acknowledgements
