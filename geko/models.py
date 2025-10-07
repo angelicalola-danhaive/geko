@@ -820,7 +820,12 @@ class Disk():
 		self.r_eff_84 = jnp.array(inference_data.posterior['r_eff'].quantile(0.84, dim=["chain", "draw"]))
 
 		self.xc_morph_mean = jnp.array(inference_data.posterior['xc_morph'].median(dim=["chain", "draw"]))
+		self.xc_morph_16 = jnp.array(inference_data.posterior['xc_morph'].quantile(0.16, dim=["chain", "draw"]))
+		self.xc_morph_84 = jnp.array(inference_data.posterior['xc_morph'].quantile(0.84, dim=["chain", "draw"]))
+
 		self.yc_morph_mean = jnp.array(inference_data.posterior['yc_morph'].median(dim=["chain", "draw"]))
+		self.yc_morph_16 = jnp.array(inference_data.posterior['yc_morph'].quantile(0.16, dim=["chain", "draw"]))
+		self.yc_morph_84 = jnp.array(inference_data.posterior['yc_morph'].quantile(0.84, dim=["chain", "draw"]))
 
 		#compute the fluxes in the sersic way
 		factor = self.factor
@@ -929,9 +934,9 @@ class DiskModel(KinModels):
 		Pa, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params_parametric(r_eff=r_eff)      
 		# i = utils.compute_inclination(ellip = ellip) 
 
-		#set the velocity centroid to the morph one so that we don't have to fit for it!
-		x0_vel = xc_morph
-		y0_vel = yc_morph
+		# #set the velocity centroid to the morph one so that we don't have to fit for it!
+		# x0_vel = xc_morph
+		# y0_vel = yc_morph
 
 		fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
 
@@ -1048,6 +1053,14 @@ class DiskModel(KinModels):
 
 		self.r_eff_16 = self.disk.r_eff_16
 		self.r_eff_84 = self.disk.r_eff_84
+
+		self.xc_morph_mean = self.disk.xc_morph_mean
+		self.xc_morph_16 = self.disk.xc_morph_16
+		self.xc_morph_84 = self.disk.xc_morph_84
+
+		self.yc_morph_mean = self.disk.yc_morph_mean
+		self.yc_morph_16 = self.disk.yc_morph_16
+		self.yc_morph_84 = self.disk.yc_morph_84
 
 		self.ellip_mean = self.disk.ellip_mean
 		self.ellip_16 = self.disk.ellip_16
