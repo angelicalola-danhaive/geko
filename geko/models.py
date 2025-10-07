@@ -1209,7 +1209,7 @@ class DiskModel(KinModels):
 		theta_Ha = self.PA_morph_mean/(180/jnp.pi) + jnp.pi/2 #need to convert to radians and match plotting ref frame
 		n = self.n_mean
 
-		ymin,ymax = plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, v_re, self.fluxes_mean, inf_data, wave_space, x0 = self.x0, y0 = self.y0, factor = 1, direct_image_size = self.im_shape[0], save_to_folder = save_to_folder, name = name, PA = PA, i = i, Va = Va, r_t = r_t, sigma0 = sigma0, obs_radius = obs_radius, ellip = ellip, theta_obs = theta_obs, theta_Ha =theta_Ha, n = n, save_runs_path  = save_runs_path, ID = ID)
+		ymin,ymax = plotting.plot_disk_summary(obs_map, self.model_map, obs_error, self.model_velocities_low, self.model_dispersions_low, v_re, self.fluxes_mean, inf_data, wave_space, x0 = self.x0_vel_mean, y0 = self.y0_vel_mean, factor = 1, direct_image_size = self.im_shape[0], save_to_folder = save_to_folder, name = name, PA = PA, i = i, Va = Va, r_t = r_t, sigma0 = sigma0, obs_radius = obs_radius, ellip = ellip, theta_obs = theta_obs, theta_Ha =theta_Ha, n = n, save_runs_path  = save_runs_path, ID = ID)
 		return ymin, ymax
 
 
