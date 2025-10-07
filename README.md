@@ -78,7 +78,7 @@ inference_data = run_geko_fit(
 )
 ```
 
-See the [documentation](https://geko.readthedocs.io) for detailed usage examples and tutorials.
+See the [documentation](https://astro-geko.readthedocs.io) for detailed usage examples and tutorials.
 
 ## Citation
 
