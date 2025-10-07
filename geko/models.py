@@ -322,7 +322,7 @@ class Disk():
 		- Stores all prior parameters as class attributes (e.g., self.PA_morph_mu)
 		"""
 		#need to set sizes in kpc before converting to arcsecs then pxs
-		arcsec_per_kpc = cosmo.arcsec_per_kpc_proper(z=redshift).value
+		arcsec_per_kpc = cosmo.arcsec_per_kpc_proper(redshift).value
 		kpc_per_pixel = 0.063/arcsec_per_kpc
 
 		ellip = py_table['ellip_q50'][0] 
