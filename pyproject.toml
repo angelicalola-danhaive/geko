@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astro-geko"
-version = "0.1.2"
+version = "0.1.0"
 description = "Geko: the Grism Emission-line Kinematics tOol"
 authors = [{ name = "A. Lola Danhaive", email = "angelicalola.danhaive@gmail.com" }]
 readme = "README.md"
