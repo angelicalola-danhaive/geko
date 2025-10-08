@@ -51,7 +51,11 @@ from photutils.segmentation import detect_sources, SourceCatalog, SegmentationIm
 
 from skimage import color, data, restoration
 
-c_m = c*1e-9
+# Handle mocked scipy.constants for documentation builds
+try:
+	c_m = c*1e-9
+except TypeError:
+	c_m = 299792458.0*1e-9  # Speed of light in m/s * 1e-9
 
 
 
