@@ -178,36 +178,37 @@ class KinModels:
 
 		
 
-	def set_main_bounds(self, factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism):
+	def set_main_bounds(self, factor, wave_factor, x0, x0_vel, y0, y0_vel):
 		"""
-		Set the bounds for the model parameters by reading the ones from the config file.
-		The more specific bounds computations for the different models will be done inside their
-		class.
-		"""
+		Set basic configuration parameters for the kinematic model.
 
+		Parameters
+		----------
+		factor : int
+			Spatial oversampling factor
+		wave_factor : int
+			Wavelength oversampling factor
+		x0, y0 : float
+			Morphological centroid positions (pixels)
+		x0_vel, y0_vel : float
+			Velocity centroid positions (pixels)
+
+		Notes
+		-----
+		All priors (morphological and kinematic) are set separately via
+		set_priors_from_config() or set_parametric_priors().
+		"""
 		self.factor = factor
-
 		self.wave_factor = wave_factor
 
-		self.PA_sigma = PA_sigma
-		self.PA_grism = PA_grism
-		self.PA_morph = PA_morph
-		self.inclination = inclination
-		self.r_eff = r_eff
-		self.r_eff_grism = r_eff_grism
-		# these are in the form (low, high)
-		self.Va_bounds = Va_bounds
-		self.r_t_bounds = r_t_bounds
-		self.sigma0_bounds = sigma0_bounds
-
-
+		# Centroid positions
 		self.x0 = x0
 		self.y0 = y0
-
 		self.x0_vel = x0_vel
 		self.mu_y0_vel = y0_vel
 
-		if self.mu_y0_vel == None:
+		# Default velocity centroid to morphological centroid if not provided
+		if self.mu_y0_vel is None:
 			self.x0_vel = x0
 			self.mu_y0_vel = y0
 
@@ -280,9 +281,9 @@ class Disk():
 		print('fluxes scaling --- Uniform w/ bounds: ' + str(0.05) + ' ' + str(2))
 		print( 'PA --- Normal w/ mu: ' + str(self.mu_PA) + ' and sigma: ' + str(self.sigma_PA))
 		print( 'i --- Truncated Normal w/ mu: ' + str(self.mu_i) + ' and sigma: ' + str(self.sigma_i) + ' and bounds: ' + str(self.i_bounds))
-		print( 'Va --- Uniform w/ bounds: ' + str(self.Va_bounds))
-		print('r_t --- Normal w/ mu: ' + str(self.r_t_bounds[1]) + ' and bounds: ' + str(self.r_t_bounds[0]) + ' ' + str(self.r_t_bounds[2]))
-		print('sigma0 --- Uniform w/ bounds: ' + str(self.sigma0_bounds))
+		print(f'Va --- Uniform w/ bounds: [{self.Va_min}, {self.Va_max}]')
+		print(f'r_t --- TruncatedNormal w/ mu: {self.r_eff_mu} and bounds: [0.1, {self.r_eff_mu}]')
+		print(f'sigma0 --- Uniform w/ bounds: [{self.sigma0_min}, {self.sigma0_max}]')
 		print('y0_vel --- Truncated Normal w/ mu: ' + str(self.mu_y0_vel) + ' and sigma: ' + str(self.y0_std) + ' and bounds: ' + str(self.y_low) + ' ' + str(self.y_high))
 		print('v0 --- Normal w/ mu: 0 and sigma: 100')
 
@@ -877,18 +878,36 @@ class DiskModel(KinModels):
 		# self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0_max', 'sigma0_scale', 'sigma0_const']
 		# self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_{max}$', r'$\sigma_{scale}$', r'$\sigma_{const}$']
 
-	def set_bounds(self, im_shape, factor, wave_factor, PA_sigma,Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph, inclination, r_eff, r_eff_grism):
+	def set_bounds(self, im_shape, factor, wave_factor, x0, x0_vel, y0, y0_vel):
 		"""
+		Set grism-specific configuration for the disk model.
 
-		Compute all of the necessary bounds for the disk model sampling distributions
+		Parameters
+		----------
+		im_shape : tuple
+			Shape of the image
+		factor : int
+			Spatial oversampling factor
+		wave_factor : int
+			Wavelength oversampling factor
+		x0, y0 : float
+			Morphological centroid positions (pixels)
+		x0_vel, y0_vel : float
+			Velocity centroid positions (pixels)
 
+		Notes
+		-----
+		All priors (morphological and kinematic) should be set separately
+		using set_priors_from_config() or set_parametric_priors() after this method.
+		This method only handles grism configuration and centroid positions.
 		"""
-		# first set all of the main bounds taken from the config file
-		self.set_main_bounds(factor, wave_factor, PA_sigma, Va_bounds, r_t_bounds, sigma0_bounds, x0, x0_vel, y0, y0_vel, PA_grism, PA_morph,inclination,r_eff, r_eff_grism)
+		# Set basic configuration
+		self.set_main_bounds(factor, wave_factor, x0, x0_vel, y0, y0_vel)
 
 		self.im_shape = im_shape
-			
-		self.disk = Disk(self.im_shape, self.factor,self.x0_vel, self.mu_y0_vel, self.r_eff )
+
+		# Initialize disk with default r_eff (will be updated by set_priors_from_config)
+		self.disk = Disk(self.im_shape, self.factor, self.x0_vel, self.mu_y0_vel, self.r_eff if hasattr(self, 'r_eff') and self.r_eff is not None else 1.0)
 		
 		# self.disk.plot()
 
@@ -1097,7 +1116,7 @@ class DiskModel(KinModels):
 
 		log_prior_PA = dist.TruncatedNormal(Pa, 5,low = -10,high = 100).log_prob(self.mu_PA)
 		log_prior_i = dist.TruncatedNormal(i, 5,low = 0,high = 90).log_prob(self.mu_i)
-		log_prior_Va = dist.Uniform(self.Va_bounds[0], self.Va_bounds[1]).log_prob(Va)
+		log_prior_Va = dist.Uniform(self.Va_min, self.Va_max).log_prob(Va)
 		log_prior_r_t = dist.Normal(0,4).log_prob(r_t)
 		log_prior_sigma0 = dist.Uniform(0, 400).log_prob(sigma0)
 		log_prior_fluxes = dist.Normal(fluxes,fluxes_errors).log_prob(self.flux_prior)
