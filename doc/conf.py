@@ -72,8 +72,8 @@ autodoc_mock_imports = [
 # -- Project information -----------------------------------------------------
 
 project = 'astro-geko'
-copyright = '2024-2025, Geko Contributors'
-author = 'Geko Contributors'
+copyright = '2024-2025, A. Lola Danhaive'
+author = 'A. Lola Danhaive'
 version = '0.1.0'
 release = '0.1.0'
 

@@ -35,7 +35,13 @@ Key Features
    :maxdepth: 2
    :caption: API Reference
 
-   api
+   api_fitting
+   api_grism
+   api_preprocess
+   api_models
+   api_config
+   api_plotting
+   api_utils
 
 Indices and tables
 ==================
