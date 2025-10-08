@@ -1,4 +1,4 @@
-name: CI with Conda + pip
+name: Tests
 
 on:
   push:
