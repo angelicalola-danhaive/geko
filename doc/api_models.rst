@@ -1,12 +1,10 @@
 Kinematic Models
 ================
 
-.. autoclass:: geko.models.KinModel
+.. autoclass:: geko.models.KinModels
    :members:
    :special-members: __init__
 
 .. autoclass:: geko.models.Disk
-   :members:
+   :members: 
    :special-members: __init__
-
-.. autofunction:: geko.models.set_parametric_priors

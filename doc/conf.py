@@ -21,6 +21,7 @@ autodoc_mock_imports = [
     'jax.random',
     'jaxlib',
     'numpyro',
+    'numpyro.handlers',
     'numpyro.distributions',
     'numpyro.distributions.transforms',
     'numpyro.infer',
@@ -65,6 +66,7 @@ autodoc_mock_imports = [
     'jax_cosmo.scipy',
     'jax_cosmo.scipy.interpolate',
     'PIL',
+    'reproject'
 ]
 
 # -- Project information -----------------------------------------------------
