@@ -170,3 +170,4 @@ cython_debug/
 #.idea/
 nircam_grism_real/
 doc/_build/
+scripts/
