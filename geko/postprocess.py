@@ -166,7 +166,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 
 
 def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None,
-                     field=None, grism_filter='F444W', delta_wave_cutoff=0.005, factor=5, wave_factor=10, model_name='Disk',
+                     field=None, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5, wave_factor=10, model_name='Disk',
                      manual_psf_name=None, manual_grism_file=None):
 	"""
 		Main function that automatically post-processes the inference data and saves all of the relevant plots
