@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="doc/_static/geko_logo.png" alt="Geko Logo" width="300"/>
+  <img src="https://raw.githubusercontent.com/angelicalola-danhaive/geko/main/doc/_static/geko_logo.png" alt="Geko Logo" width="300"/>
 
   # the **G**rism **E**mission-line **K**inematics t**O**ol
 
