@@ -150,6 +150,17 @@ class Grism:
 	"""
 	def __init__(self, im_shape, im_scale = 0.031, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
 
+		# Validate pupil parameter
+		if grism_pupil == 'C':
+			raise NotImplementedError(
+				"Grism pupil 'C' is not yet implemented. "
+				"Only grism_pupil='R' (row dispersion) is currently supported."
+			)
+		elif grism_pupil not in ['R', 'C']:
+			raise ValueError(
+				f"Invalid grism_pupil '{grism_pupil}'. "
+				"Must be 'R' (row dispersion) or 'C' (column dispersion)."
+			)
 
 		self.im_shape = im_shape #used to be self.im_shape
 		self.im_scale = im_scale #used to be self.direct_scale
@@ -168,12 +179,12 @@ class Grism:
 		#initialize attributes
 
 		#center of the object on the detector image
-		self.xcenter_detector = 1024 #xcenter_detector 
+		self.xcenter_detector = 1024 #xcenter_detector
 		self.ycenter_detector =  1024 # ycenter_detector
 
-		#create the detector space 
+		#create the detector space
 		self.init_detector()
-		
+
 		self.wave_space = wave_space #already in the model resolution
 
 		self.wave_scale = jnp.diff(self.wave_space)[0] #in microns, this is the scale of the wavelength space in the model
@@ -183,7 +194,7 @@ class Grism:
 		self.wavelength = wavelength
 
 		self.filter = grism_filter
-		self.module = 'A' 
+		self.module = grism_module  # Use the actual module parameter (A or B)
 		self.module_lsf = grism_module
 		self.pupil = grism_pupil
 
@@ -315,6 +326,16 @@ class Grism:
 
 		self.fit_opt_fit = list_fit_opt_fit[list_mod_pupil == self.module + self.pupil][0] #module and pupil have to be taken from the grism image that we want to model
 		self.w_opt = list_w_opt[list_mod_pupil == self.module + self.pupil][0]
+
+		# For Module B: flip the sign of b01 coefficient to match the flipped observed data
+		# Module B naturally disperses left (negative b01), but we flip the data and coefficients
+		# to maintain consistent wavelength ordering (small to large wavelengths left to right)
+		if self.module == 'B':
+			original_b01 = self.w_opt[6]
+			self.w_opt = self.w_opt.copy()  # Make a copy to avoid modifying the original
+			self.w_opt[6] = -self.w_opt[6]  # Flip b01 coefficient (index 6 in w_opt array)
+			print(f"Module B detected: Flipping dispersion coefficient b01 from {original_b01:.4f} to {self.w_opt[6]:.4f}")
+
 		self.WRANGE = WRANGE
 		self.f_sens = list_f_sens[list_mod_pupil == self.module + self.pupil][0]
 

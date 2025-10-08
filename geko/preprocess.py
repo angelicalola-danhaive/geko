@@ -150,16 +150,21 @@ def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, fi
 
     #load number of module A and module B frames from the header
     if field == 'GOODS-S-FRESCO' or field == 'GOODS-N' or field == 'GOODS-N-CONGRESS' or field == 'manual':
-        # print('Manually setting the module because the N_A and N_B params are not in the header')
-        # module_A = 0
-        # module_B = 1
+
         modules = grism_spectrum_fits[5].data['module']
         module_A = int('A' in modules)
+
+        # Read pupil parameter from FITS file
+        pupils = grism_spectrum_fits[5].data['pupil']
+        pupil = pupils[0]  # Take first element from array
 
 
     else:
         module_A = grism_spectrum_fits[0].header['N_A']
         module_B = grism_spectrum_fits[0].header['N_B']
+
+        # Default to 'R' pupil for non-manual fields
+        pupil = 'R'
 
 
     #from 2D spectrum, extract wave_space (and the separate things like WRANGE, w_scale, and size), and aperture radius (to be used above)
@@ -188,7 +193,7 @@ def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, fi
         module = 'B'
 
 
-    return module,jnp.array(obs_map), jnp.array(obs_error),  wave_space, d_wave, index_min, index_max, wavelength
+    return module, pupil, jnp.array(obs_map), jnp.array(obs_error),  wave_space, d_wave, index_min, index_max, wavelength
 
 
 
@@ -359,7 +364,7 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
             #generate an error that says not updated
             raise ValueError("The field ALT is not updated in the preprocessing function. Please use a different field.")
         else:
-            module,obs_map, obs_error,wave_space, delta_wave, index_min, index_max, wavelength = preprocess_data(grism_spectrum_path, wavelength, delta_wave_cutoff, field)
+            module, pupil, obs_map, obs_error,wave_space, delta_wave, index_min, index_max, wavelength = preprocess_data(grism_spectrum_path, wavelength, delta_wave_cutoff, field)
         grism_object = None
     else:
         broad_filter, grism_filter, wavelength, redshift, line, y_factor, flux_threshold, factor, \
@@ -412,8 +417,8 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
         #the input index_max should be the index of the last element of the array +1 (since that is how array cropping works)
         #setting by default the dispersion center at the center of the image in its original resolution 
         icenter = jcenter = obs_map.shape[0]//2
-        grism_object = grism.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
-                       grism_filter = grism_filter, grism_module = module, grism_pupil = 'R', PSF = PSF)
+        grism_object = grism.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor,
+                       grism_filter = grism_filter, grism_module = module, grism_pupil = pupil, PSF = PSF)
 
 
 
