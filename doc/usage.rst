@@ -4,176 +4,309 @@ Usage Guide
 Quick Start
 -----------
 
-Basic Workflow
-^^^^^^^^^^^^^^
+The typical Geko workflow involves preparing your data files, running the MCMC fitting, and analyzing the results.
 
-The typical Geko workflow involves three main steps:
-
-1. **Data Preprocessing**: Load and prepare grism data
-2. **MCMC Fitting**: Run Bayesian inference
-3. **Visualization**: Analyze and plot results
-
-Example: Fitting a Single Galaxy
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Here's a minimal example of fitting a galaxy with Geko:
+Minimal Example
+^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
    from geko.fitting import run_geko_fit
-   import arviz as az
+   import jax
 
-   # Run the full fitting pipeline
+   # Enable 64-bit precision for JAX
+   jax.config.update('jax_enable_x64', True)
+
+   # Run the fit
    inference_data = run_geko_fit(
-       output='test_output',
-       master_cat='path/to/master_catalog.cat',
-       line='Ha',
+       output='my_galaxy',
+       master_cat='path/to/catalog.cat',
+       line='H_alpha',
        parametric=True,
-       save_runs_path='./saves/',
+       save_runs_path='./data/',
        num_chains=2,
        num_warmup=500,
        num_samples=1000,
        source_id=191250,
        field='manual',
-       grism_filter='F444W',
        manual_psf_name='mpsf_jw018950.gs.f444w.fits',
        manual_theta_rot=0.0,
        manual_pysersic_file='summary_191250_image_F150W_svi.cat',
        manual_grism_file='spec_2d_FRESCO_F444W_ID191250_comb.fits'
    )
 
-   # Print summary statistics
+   # Print summary
+   import arviz as az
    print(az.summary(inference_data))
 
-Configuration-Based Fitting
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Required Data Structure
+-----------------------
 
-For more control, you can use custom configuration files:
+Geko expects files to be organized in a specific directory structure:
 
-.. code-block:: python
+.. code-block:: text
 
-   from geko.config import FitConfiguration, MorphologyPriors, KinematicPriors
-   from geko.fitting import run_geko_fit
+   <save_runs_path>/                     # Base directory
+   ├── <output_name>/                    # Subfolder for your galaxy/run
+   │   └── spec_2d_*_ID<ID>_comb.fits    # 2D grism spectrum (required)
+   ├── morph_fits/                       # Morphology directory
+   │   └── summary_<ID>_image_F150W_svi.cat  # PySersic fits
+   ├── psfs/                             # PSF files directory
+   │   ├── mpsf_jw018950.gn.f444w.fits   # GOODS-N PSF
+   │   ├── mpsf_jw035770.f356w.fits      # GOODS-N-CONGRESS PSF
+   │   └── mpsf_jw018950.gs.f444w.fits   # GOODS-S-FRESCO PSF
+   └── catalogs/                         # Optional catalog directory
 
-   # Create custom configuration
-   config = FitConfiguration(
-       morphology=MorphologyPriors(
-           PA=0.0,
-           PA_sigma=10.0,
-           inc=45.0,
-           inc_sigma=5.0
-       ),
-       kinematics=KinematicPriors(
-           Va_min=10.0,
-           Va_max=500.0,
-           sigma0_min=10.0,
-           sigma0_max=300.0
-       )
-   )
+Required Files
+^^^^^^^^^^^^^^
 
-   # Run with configuration
-   inference_data = run_geko_fit(
-       output='configured_fit',
-       source_id=12345,
-       config=config,
-       # ... other parameters ...
-   )
+1. **Master Catalog** - ASCII table with source properties (can be anywhere)
+
+   Required columns: ``ID``, ``zspec``, ``<line>_lambda``, ``fit_flux_cgs``, ``fit_flux_cgs_e``
+
+2. **Grism Spectrum** - FITS file with 2D spectrum data
+
+   Location: ``<save_runs_path>/<output_name>/spec_2d_*_ID<source_id>_comb.fits``
+
+3. **PSF File** - Point spread function FITS file
+
+   Location: ``<save_runs_path>/psfs/mpsf_*.fits``
+
+4. **PySersic Morphology** (optional but recommended) - ASCII catalog from PySersic fits
+
+   Location: ``<save_runs_path>/morph_fits/summary_<source_id>_image_F150W_svi.cat``
+
+   Contains: Sersic parameters (n, r_eff, PA, q, x0, y0) used to set morphological priors
 
 Field Options
-^^^^^^^^^^^^^
+-------------
 
-Geko supports multiple field configurations:
+Predefined Fields
+^^^^^^^^^^^^^^^^^
 
-**Predefined Fields** (e.g., GOODS-S-FRESCO):
+For standard JWST fields, use predefined field names that automatically set PSF, rotation angles, and file naming:
 
 .. code-block:: python
 
    inference_data = run_geko_fit(
-       field='GOODS-S-FRESCO',
-       # ... other parameters ...
+       field='GOODS-S-FRESCO',  # or 'GOODS-N', 'GOODS-N-CONGRESS'
+       source_id=12345,
+       # ... other parameters
    )
 
-**Manual Field** (custom PSF and files):
+Predefined fields automatically select:
+
+- **GOODS-N**: PSF ``mpsf_jw018950.gn.f444w.fits``, rotation 230.5°, F444W filter
+- **GOODS-N-CONGRESS**: PSF ``mpsf_jw035770.f356w.fits``, rotation 228.2°, F356W filter
+- **GOODS-S-FRESCO**: PSF ``mpsf_jw018950.gs.f444w.fits``, rotation 0.0°, F444W filter
+
+Manual Field Mode
+^^^^^^^^^^^^^^^^^
+
+For custom data or other fields, use ``field='manual'`` and specify all parameters:
 
 .. code-block:: python
 
    inference_data = run_geko_fit(
        field='manual',
-       manual_psf_name='custom_psf.fits',
-       manual_theta_rot=0.0,
-       manual_pysersic_file='morphology.cat',
-       manual_grism_file='grism_spectrum.fits',
-       # ... other parameters ...
+       manual_psf_name='my_psf.fits',           # PSF filename in psfs/
+       manual_theta_rot=45.0,                    # Rotation angle in degrees
+       manual_pysersic_file='my_morphology.cat', # PySersic file in morph_fits/
+       manual_grism_file='my_spectrum.fits',     # Grism file in output_name/
+       # ... other parameters
    )
 
-Output Structure
-----------------
+Configuration System
+--------------------
 
-Geko creates the following output structure:
+The configuration system allows you to customize priors for your fit.
 
-.. code-block:: text
+Scenario 1: With PySersic Fits (Typical)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-   saves/
-   └── output_name_ID12345/
-       ├── output/
-       │   ├── corner_plot.png
-       │   ├── disk_summary.png
-       │   └── output_name_ID12345_summary.png
-       ├── trace.nc  # MCMC chains
-       └── all_params.pkl  # Fit parameters
+When you have PySersic morphology fits, morphological priors are loaded automatically. You can optionally override kinematic priors:
+
+.. code-block:: python
+
+   from geko.config import FitConfiguration, KinematicPriors
+
+   # Override kinematic priors only
+   config = FitConfiguration(
+       kinematics=KinematicPriors(
+           Va_min=50.0,        # Minimum asymptotic velocity (km/s)
+           Va_max=300.0,       # Maximum asymptotic velocity (km/s)
+           sigma0_min=10.0,    # Minimum velocity dispersion (km/s)
+           sigma0_max=150.0    # Maximum velocity dispersion (km/s)
+       )
+   )
+
+   # Run with custom kinematic priors (morphology from PySersic)
+   inference_data = run_geko_fit(
+       config=config,
+       manual_pysersic_file='summary_12345_image_F150W_svi.cat',
+       # ... other parameters
+   )
+
+Scenario 2: Without PySersic Fits (Manual)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you don't have PySersic fits, you must provide complete morphological priors:
+
+.. code-block:: python
+
+   from geko.config import FitConfiguration, MorphologyPriors
+
+   # Set all morphology priors manually
+   config = FitConfiguration(
+       morphology=MorphologyPriors(
+           PA_mean=90.0, PA_std=30.0,           # Position angle
+           inc_mean=55.0, inc_std=15.0,         # Inclination
+           r_eff_mean=3.0, r_eff_std=1.0,       # Effective radius
+           r_eff_min=0.5, r_eff_max=10.0,
+           n_mean=1.0, n_std=0.5,               # Sersic index
+           n_min=0.5, n_max=4.0,
+           xc_mean=0.0, xc_std=2.0,             # Centroid x
+           yc_mean=0.0, yc_std=2.0,             # Centroid y
+           amplitude_mean=100.0, amplitude_std=50.0,
+           amplitude_min=1.0, amplitude_max=1000.0
+       )
+   )
+
+   # Run without PySersic file
+   inference_data = run_geko_fit(
+       config=config,
+       manual_pysersic_file=None,  # Not needed with complete config
+       # ... other parameters
+   )
 
 Understanding Results
 ---------------------
 
-The inference_data object is an Arviz InferenceData object containing:
+The ``inference_data`` object is an ArviZ InferenceData object containing MCMC posterior samples.
 
-* **Posterior samples**: MCMC chains for all parameters
-* **Log probability**: Model likelihood values
-* **Divergences**: MCMC diagnostic information
+Key Parameters
+^^^^^^^^^^^^^^
 
-Access posterior samples:
+**Kinematic Parameters:**
+
+- ``Va``: Asymptotic rotation velocity (km/s)
+- ``sigma0``: Central velocity dispersion (km/s)
+- ``v_re``: Rotation velocity at effective radius (derived, km/s)
+- ``r_t``: Turnover radius (pixels)
+
+**Morphological Parameters:**
+
+- ``PA``: Position angle (degrees)
+- ``inc``: Inclination angle (degrees)
+- ``r_eff``: Effective radius (pixels)
+- ``n``: Sersic index
+- ``xc``, ``yc``: Centroid coordinates (pixels)
+
+Accessing Results
+^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
    import arviz as az
 
-   # Get parameter means
-   summary = az.summary(inference_data)
+   # Get summary statistics (median, std, HDI)
+   summary = az.summary(inference_data, hdi_prob=0.68)
    print(summary)
 
-   # Access specific parameters
-   pa_samples = inference_data.posterior['PA'].values
+   # Access specific parameter samples
    va_samples = inference_data.posterior['Va'].values
+   pa_samples = inference_data.posterior['PA'].values
 
-Advanced Topics
----------------
+   # Check convergence (r_hat should be < 1.01)
+   print(f"Va r_hat: {summary.loc['Va', 'r_hat']}")
 
-Custom Priors
-^^^^^^^^^^^^^
+Output Files
+------------
 
-Override specific priors using the configuration system:
+Geko saves several files in ``<save_runs_path>/<output_name>/``. **All output files are named using the source ID**, not the folder name:
+
+1. **<source_id>_output** - NetCDF file with full MCMC posterior and prior samples
+
+   Load with: ``az.InferenceData.from_netcdf()``
+
+2. **<source_id>_results** - ASCII table with summary statistics
+
+   Contains median values and 16th/84th percentiles for all parameters
+
+3. **<source_id>_summary.png** - Diagnostic plot showing:
+
+   - Observed 2D spectrum
+   - Best-fit model spectrum
+   - Residuals
+   - 1D velocity and dispersion profiles
+   - Rotation curve
+
+4. **<source_id>_v_sigma_corner.png** - Corner plot for v/σ ratio posteriors
+
+5. **<source_id>_summary_corner.png** - Full corner plot for all parameters
+
+Example: Loading Saved Results
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. code-block:: python
 
-   from geko.config import FitConfiguration, KinematicPriors
-   from numpyro import distributions as dist
+   import arviz as az
+   from astropy.table import Table
+   import os
 
-   config = FitConfiguration(
-       kinematics=KinematicPriors(
-           Va_min=50.0,
-           Va_max=300.0,
-           # Other parameters use defaults
-       )
+   # Define paths
+   output_dir = os.path.join(save_runs_path, output_name)
+
+   # Load inference data
+   inference_data = az.InferenceData.from_netcdf(
+       os.path.join(output_dir, f'{source_id}_output')
+   )
+
+   # Load results table
+   results = Table.read(
+       os.path.join(output_dir, f'{source_id}_results'),
+       format='ascii'
+   )
+   print(results)
+
+MCMC Parameters
+---------------
+
+Key MCMC parameters to tune for your fit:
+
+.. code-block:: python
+
+   inference_data = run_geko_fit(
+       num_chains=4,        # Number of parallel chains (typically 2-4)
+       num_warmup=500,      # Warmup iterations (typically 500-1000)
+       num_samples=1000,    # Sampling iterations (typically 1000-2000)
+       # ... other parameters
+   )
+
+For quick tests, use lower values:
+
+.. code-block:: python
+
+   # Quick test run
+   inference_data = run_geko_fit(
+       num_chains=1,
+       num_warmup=50,
+       num_samples=50,
+       factor=1,           # Spatial oversampling (default: 5)
+       wave_factor=1,      # Wavelength oversampling (default: 10)
+       # ... other parameters
    )
 
 GPU Acceleration
-^^^^^^^^^^^^^^^^
+----------------
 
 Geko automatically uses GPU if JAX detects CUDA:
 
 .. code-block:: python
 
    import jax
-   print(f"Using device: {jax.devices()}")
+   print(f"Available devices: {jax.devices()}")
+   # If GPU available: [cuda(id=0)]
+   # If CPU only: [cpu(id=0)]
 
-For more examples, see the ``demo/`` directory in the repository.
+For more detailed examples, see the demo notebook at ``doc/simple_fit_demo.ipynb``.
