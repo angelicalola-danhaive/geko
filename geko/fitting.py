@@ -1,4 +1,4 @@
-__all__ = ["Fit_Numpyro"]
+__all__ = ["Fit_Numpyro", "run_geko_fit"]
 
 # imports
 

@@ -3,6 +3,8 @@ Configuration system for geko fitting parameters.
 Provides programmatic setup for scientific parameters with validation.
 """
 
+__all__ = ["FitConfiguration", "MorphologyPriors", "KinematicPriors", "MCMCSettings"]
+
 import numpy as np
 import yaml
 from dataclasses import dataclass, asdict, fields
