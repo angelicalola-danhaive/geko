@@ -171,3 +171,5 @@ cython_debug/
 nircam_grism_real/
 doc/_build/
 scripts/
+demo/simple_fit_demo_files/my_galaxy/191250_output
+demo/simple_fit_demo_files/my_galaxy/191250_results
