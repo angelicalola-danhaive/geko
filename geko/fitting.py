@@ -472,10 +472,7 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
     run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric=parametric, config=config)
 
     rng_key = random.PRNGKey(4)
-    if parametric:
-        inference_model = run_fit.kin_model.inference_model_parametric
-    else:
-        inference_model = run_fit.kin_model.inference_model
+    inference_model = run_fit.kin_model.inference_model_parametric
     prior_predictive = Predictive(inference_model, num_samples=num_samples)
 
     prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error)
@@ -500,27 +497,3 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
 
 
-
-#==============================EXTRA STUFF = NEED TO PUT SOMEWHERE ELSE==================================================
-
-# -----------------------------------------------------------plotting model at point parameter space-----------------------------------------------------------------------------------
-
-#this should go in the kin models module
-# def generate_map(grism_object, fluxes, PA, i, Va, r_t, sigma0, x0, y0, factor=2, wave_factor=10, y_factor=1):
-#   x = jnp.linspace(0 - x0, fluxes.shape[1] - 1 - x0, fluxes.shape[1]*10*factor)
-#   y = jnp.linspace(0 - y0, fluxes.shape[0] - 1 - y0, fluxes.shape[0]*10*factor)
-#   x, y = jnp.meshgrid(x, y)
-
-#   highdim_flux = utils.oversample(fluxes, factor, factor)
-
-#   velocities = jnp.array(v(x, y, jnp.radians(PA), jnp.radians(i), Va, r_t))
-#   velocities = image.resize(velocities, (int(
-#       velocities.shape[0]/10), int(velocities.shape[1]/10)), method='bicubic')
-
-#   dispersions = jnp.array(sigma(x, y, sigma0))
-
-#   model_map_high = grism_object.disperse(highdim_flux, velocities, dispersions)
-
-#   generated_map = utils.resample(model_map_high, y_factor*factor, wave_factor)
-
-#   return generated_map

@@ -625,50 +625,26 @@ class Disk():
 	def sample_fluxes_parametric(self):
 
 		#sample the parameters needed for a disc model
-
-		#amplitude
-		# amplitude_mu= 0.0011 #1.0
-		# amplitude_std = 0.5*amplitude_mu
 		unscaled_amplitude = numpyro.sample('unscaled_amplitude', dist.TruncatedNormal(low = (0.0 - self.amplitude_mu)/self.amplitude_std))
 		amplitude = numpyro.deterministic('amplitude', unscaled_amplitude*self.amplitude_std + self.amplitude_mu)
-		# amplitude = 1
 
-		# r_eff_mu = 5.52 #self.r_eff
-		# r_eff_std = 1
 		unscaled_r_eff = numpyro.sample('unscaled_r_eff', dist.TruncatedNormal(low = (self.r_eff_min - self.r_eff_mu)/self.r_eff_std, high = (self.r_eff_max - self.r_eff_mu)/self.r_eff_std))
 		r_eff = numpyro.deterministic('r_eff', unscaled_r_eff*self.r_eff_std + self.r_eff_mu)
-		# r_eff = 4.19
 
-		# n_mu = 1.778 #1.0
-		# n_std = 0.4
 		unscaled_n = numpyro.sample('unscaled_n', dist.TruncatedNormal(low = (0.36 - self.n_mu)/self.n_std, high = (8.0 - self.n_mu)/self.n_std))
 		n = numpyro.deterministic('n', unscaled_n*self.n_std + self.n_mu)
-		# n = 1
 
-		# ellip_mu = 0.369 #0.5
-		# ellip_std = 0.1
-		# unscaled_ellip = numpyro.sample('unscaled_ellip', dist.TruncatedNormal(low = (0.0 - self.ellip_mu)/self.ellip_std, high = (1.0 - self.ellip_mu)/self.ellip_std))
-		# ellip = numpyro.deterministic('ellip', unscaled_ellip*self.ellip_std + self.ellip_mu)
-		# ellip = 0.5
 
 		i_low = (0-self.inc_mu)/self.inc_std
 		i_high = (90-self.inc_mu)/self.inc_std
 		unscaled_i = numpyro.sample('unscaled_i', dist.TruncatedNormal(low = i_low, high = i_high))
 		i = numpyro.deterministic('i', unscaled_i*self.inc_std + self.inc_mu)
-		# ellip = 1 - jnp.cos(i*jnp.pi/180)
-		ellip = 1 - utils.compute_axis_ratio(inc = i, q0 = 0.2)
-		# PA_morph_mu = self.mu_PA
-		# PA_morph_std = 10
 
-		# low_PA = (-10 - self.PA_morph_mu)/(self.PA_morph_std)
-		# high_PA = ( 190- self.PA_morph_mu)/(self.PA_morph_std)
-		# unscaled_PA_morph = numpyro.sample('unscaled_PA_morph' + self.number, dist.TruncatedNormal(low = low_PA, high = high_PA)) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
+		ellip = 1 - utils.compute_axis_ratio(inc = i, q0 = 0.2)
+
 		unscaled_PA_morph = numpyro.sample('unscaled_PA_morph', dist.Normal()) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
 		PA_morph = numpyro.deterministic('PA_morph', unscaled_PA_morph*self.PA_morph_std + self.PA_morph_mu)
-		# r_eff = numpyro.sample('r_eff', dist.TruncatedNormal(self.r_eff, 0.5, low = 0.0))
-		# n = numpyro.sample('n', dist.TruncatedNormal(1.0, 0.5, low = 0.36))
-		# ellip = (numpyro.sample('ellip', dist.TruncatedNormal(0.5, 0.1, low = 0.0)))
-		# PA_morph = (numpyro.sample('PA_morph', dist.TruncatedNormal(self.mu_PA, 5.0, low = 0.0)))
+
 
 		unscaled_xc_morph = numpyro.sample('unscaled_xc_morph', dist.Normal())
 		xc_morph = numpyro.deterministic('xc_morph', unscaled_xc_morph*self.xc_std + self.xc_morph)
@@ -677,10 +653,7 @@ class Disk():
 		unscaled_yc_morph = numpyro.sample('unscaled_yc_morph', dist.Normal())
 		yc_morph = numpyro.deterministic('yc_morph', unscaled_yc_morph*self.yc_std + self.yc_morph)  
 		# yc_morph = self.yc_morph                                 
-						
-
-		#create a mock galaxy using these parameters
-		# galaxy_model = GeneralSersic2D(amplitude=amplitude, r_eff =r_eff*27, n = n, x_0 = self.direct_shape[0]//2*27 + 13 , y_0 = self.direct_shape[0]//2*27 +13, ellip = ellip, theta=(90 - PA_morph)*math.pi/180) #function takes theta in rads
+					
 
 		factor = self.factor
 				
@@ -941,9 +914,6 @@ class DiskModel(KinModels):
 		fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
 
 		image_shape = self.im_shape[0]
-		# print(image_shape//2)
-		# x= jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape)
-		# y = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape)
 		x= jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape)
 		y = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape)
 		X, Y = jnp.meshgrid(x,y)
@@ -976,45 +946,6 @@ class DiskModel(KinModels):
 		# numpyro.sample('obs', dist.Normal(self.model_map[5:26,:], self.error_scaling*obs_error[5:26,:]), obs=obs_map[5:26,:])
 		numpyro.sample('obs', dist.Normal(self.model_map, self.error_scaling*obs_error_masked), obs=obs_map)
 
-
-	def compute_model_nonparam(self, inference_data, grism_object):
-		"""
-
-		Function used to post-process the MCMC samples and plot results from the model
-
-		"""
-
-		self.PA_mean,self.Va_mean, self.i_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean,self.x0_vel_mean, self.v0_mean = self.disk.compute_posterior_means(inference_data)
-		print('posterior means kinematics: ', self.PA_mean,self.Va_mean, self.i_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean,self.x0_vel_mean, self.v0_mean)
-		self.fluxes_mean, self.fluxes_scaling_mean = self.disk.compute_flux_posterior(inference_data, self.flux_type)
-
-		self.model_flux = utils.oversample(self.fluxes_mean, grism_object.factor, grism_object.factor, method= 'bilinear')
-
-
-		image_shape =  self.im_shape[0]
-		x_10 = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape*grism_object.factor)
-		y_10 = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape*grism_object.factor)
-		X, Y = jnp.meshgrid(x_10,y_10)
-
-
-		self.model_velocities = jnp.asarray(self.v(X, Y, self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
-		# self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
-		print('posterior velocities: ', self.model_velocities)
-		self.model_velocities = self.model_velocities  + self.v0_mean
-
-		self.model_dispersions = self.sigma0_mean_model *jnp.ones_like(self.model_velocities) #self.sigma0_mean_model *jnp.ones_like(self.model_velocities)
-
-		print(self.model_flux.shape, self.model_velocities.shape, self.model_dispersions.shape)
-		self.model_map_high = grism_object.disperse(self.model_flux, self.model_velocities, self.model_dispersions)
-		# self.model_map_high = grism_object.disperse(self.convolved_fluxes, self.convolved_velocities, self.convolved_dispersions)
-
-		self.model_map = utils.resample(self.model_map_high, grism_object.factor, self.wave_factor)
-
-		#compute velocity grid in flux image resolution for plotting velocity maps
-		self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='nearest')
-		self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='nearest')
-
-		return inference_data, self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
 
 	def compute_model_parametric(self, inference_data, grism_object):
 		"""
@@ -1108,7 +1039,7 @@ class DiskModel(KinModels):
 		if parametric:
 			return self.compute_model_parametric(inference_data, grism_object)
 		else:
-			return self.compute_model_nonparam(inference_data, grism_object)
+			raise NotImplementedError('Non-parametric flux model not implemented yet for DiskModel')
 
 	def log_likelihood(self, grism_object, obs_map, obs_error, values = {}):
 		Pa = values['PA']
@@ -1126,14 +1057,10 @@ class DiskModel(KinModels):
 		x_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*grism_object.factor)
 		y_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*grism_object.factor)
 		X_10, Y_10 = jnp.meshgrid(x_10,y_10)
-		# sample for a shift in the y velocity centroid (since the x vel centroid is degenerate with the delta V that is sampled below)
 
-		# start  = time.time()
 		
-		# self.compute_factors(Pa, i,X_10, Y_10)
 		velocities = jnp.array(self.v(X_10, Y_10, Pa, i, Va, r_t))
-		# velocities = velocities.at[15,15].set(3e-14)
-		# velocities = utils.resample(velocities, 10, 10)/10**2
+
 
 		velocities_scaled = velocities
 
@@ -1143,11 +1070,7 @@ class DiskModel(KinModels):
 
 
 		self.model_map = utils.resample(self.model_map, grism_object.y_factor*grism_object.factor, self.wave_factor)
-		# #plot the residuals
-		# plt.imshow((obs_map - self.model_map)/obs_error, origin = 'lower')
-		# plt.colorbar()
-		# plt.show()
-		# plt.close()
+
 
 		mask_obs = jnp.where(obs_map/obs_error > 5, 1, 0)
 		model_mask = jnp.where(mask_obs == 1, self.model_map, 0.0)
@@ -1156,22 +1079,6 @@ class DiskModel(KinModels):
 
 		#compute the gaussian likelihood for the model
 		log_likelihood = dist.Normal(model_mask, obs_error_mask).log_prob(obs_mask)
-
-
-		# const = jnp.log(jnp.sqrt(2*jnp.pi)*obs_error[0])
-		# value_scaled = (self.model_map - obs_map)/obs_error
-		# log_likelihood = -0.5*(value_scaled**2) - const
-
-		# print('Const: ', const)
-		# print('Value scaled: ', value_scaled)
-		# print('Log likelihood: ', log_likelihood)
-		# plot the log L for each point
-		# plt.imshow(log_likelihood, origin = 'lower')
-		# plt.colorbar()
-		# plt.show()
-		# plt.close()
-
-		# print(log_likelihood)
 
 		log_likelihood_sum = jnp.sum(log_likelihood)
 
@@ -1214,470 +1121,3 @@ class DiskModel(KinModels):
 
 
 
-##### BIN OF OLD NON-PARAM MODEL FUNCTIONS #####
-
-	# def sample_fluxes(self):
-	# 	# f = open("timing_total.txt", "a")
-	# 	#sample the fluxes within the mask
-	# 	fluxes_scaling = numpyro.sample('fluxes_scaling' + self.number, dist.Uniform())*(4-0.05) + 0.05
-	# 	# unscaled_fluxes_sample = numpyro.sample('unscaled_fluxes'+ self.number, dist.TruncatedNormal(jnp.zeros(int(len(self.masked_indices[0]))),jnp.ones(int(len(self.masked_indices[0]))),low = low, high = high), sample_shape=(int(len(self.masked_indices[0])),))
-	# 	# fluxes_sample = numpyro.deterministic('fluxes', unscaled_fluxes_sample*self.std + self.mu*fluxes_scaling)
-	# 	# fluxes_sample = numpyro.sample('unscaled_fluxes'+ self.number, dist.Uniform(), sample_shape=(int(len(self.masked_indices[0])),))
-	# 	# fluxes_sample = norm.ppf(norm.cdf(self.low) + fluxes_sample*(norm.cdf(self.high)-norm.cdf(self.low)))*self.std + self.mu*fluxes_scaling
-	# 	# reparam_config = {"fluxes": TransformReparam()}
-	# 	# with numpyro.handlers.reparam(config=reparam_config):
-	# 	#     fluxes_sample = numpyro.sample("fluxes",dist.TransformedDistribution(
-	# 	#             dist.TruncatedNormal(0.0, 1.0, low=low, high=high),
-	# 	#             AffineTransform(self.mu*fluxes_scaling, self.std*fluxes_scaling),
-	# 	#         ),
-	# 	#     )
-	# 	fluxes_error_scaling = 1 #numpyro.sample('fluxes_error_scaling' + self.number, dist.Uniform())*9 + 1
-	# 	#just sample from normal distribution
-	# 	# unscaled_fluxes = numpyro.sample('unscaled_fluxes'+ self.number, dist.Normal(jnp.zeros(int(len(self.masked_indices[0]))),jnp.ones(int(len(self.masked_indices[0]))))  )
-	# 	# unscaled_fluxes = numpyro.sample('unscaled_fluxes'+ self.number, dist.Normal(jnp.zeros(self.mu.shape),jnp.ones(self.mu.shape))  )
-
-	# 	# fluxes_sample = numpyro.deterministic('fluxes', unscaled_fluxes*self.std*fluxes_error_scaling + self.mu*fluxes_scaling)  
-	# 	# fluxes_sample = numpyro.sample('fluxes', dist.TruncatedNormal(self.mu*fluxes_scaling, self.std*fluxes_scaling, low = self.low))
-
-	# 	low = (jnp.zeros(self.mu.shape) - self.mu*fluxes_scaling)/(self.std*fluxes_error_scaling)
-	# 	high = (2*self.mu - self.mu*fluxes_scaling)/(self.std*fluxes_error_scaling)
-	# 	# reparam_config = {"fluxes": TransformReparam()}
-	# 	# with numpyro.handlers.reparam(config=reparam_config):
-	# 	#     fluxes_sample = numpyro.sample("fluxes",dist.TransformedDistribution(
-	# 	#             dist.TruncatedNormal(0.0, 1.0, low=low),
-	# 	#             AffineTransform(self.mu*fluxes_scaling, self.std*fluxes_error_scaling),
-	# 	#         ),
-	# 	#     )
-	# 	unscaled_fluxes_sample = numpyro.sample("unscaled_fluxes",dist.Normal(loc = jnp.zeros_like(self.mu), scale = jnp.ones_like(self.mu)))
-	# 	# unscaled_fluxes_sample = numpyro.sample("unscaled_fluxes",dist.MultivariateNormal(jnp.zeros_like(jnp.reshape(self.mu,(31*31))),jnp.diag(jnp.ones((31*31,)) ,k=0)))
-	# 	# fluxes_sample = numpyro.sample("fluxes",dist.Normal(self.mu,self.std))
-	# 	# print(unscaled_fluxes_sample.shape)
-	# 	fluxes_sample = numpyro.deterministic('fluxes', unscaled_fluxes_sample*self.std*fluxes_error_scaling + self.mu*fluxes_scaling)
-	# 	# f.write('fluxes_sample' + str(fluxes_sample[0]) +' \n')
-	# 	# fluxes_sample = self.mu
-	# 	fluxes = jnp.zeros(self.direct_shape)
-	# 	fluxes = fluxes.at[self.masked_indices].set(fluxes_sample)
-	# 	# fluxes = jnp.reshape(fluxes_sample, (31,31))
-	# 	# print(fluxes.shape)
-
-	# 	return fluxes
-
-
-		# def sample_params(self):
-		# """
-		# 	Sample all of the parameters needed to model a disk velocity field
-		# """
-		# # f = open("timing_total.txt", "a")
-		# # start = time.time()
-		# # unscaled_Pa = numpyro.sample('unscaled_PA'+ self.number, dist.Normal())
-		# # sample the mu_PA + 0 or 180 (orientation of velocity field)
-		# # rotation = numpyro.sample('rotation'+ self.number, dist.Uniform())
-
-		# # simulate a bernouilli discrete distribution
-		# # PA_morph = self.mu_PA + round(rotation)*180
-		# # Pa = numpyro.deterministic('PA', unscaled_Pa*self.sigma_PA + PA_morph)
-		# # unscaled_Pa = numpyro.sample('unscaled_Pa'+ self.number, dist.Uniform())
-		# # Pa = numpyro.deterministic('PA', unscaled_Pa*180)
-		# # Pa = norm.ppf(Pa)*self.sigma_PA + PA_morph
-
-		# #sample from circular normal distribution (in radians)
-
-
-		# # Pa_rad = numpyro.sample('PA_radians' + self.number, dist.VonMises(self.mu_PA*jnp.pi/180,1/((self.sigma_PA*jnp.pi/180)**2))) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
-		# # Pa = numpyro.deterministic('PA' + self.number, Pa_rad*180/jnp.pi)
-		# low_PA = (-10 - self.PA_morph_mu)/(self.PA_morph_std)
-		# high_PA = ( 100- self.PA_morph_mu)/(self.PA_morph_std)
-		# unscaled_PA = numpyro.sample('unscaled_PA' + self.number, dist.TruncatedNormal(low = low_PA, high = high_PA)) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
-		# # unscaled_PA = numpyro.sample('unscaled_PA' + self.number, dist.Normal()) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
-		# Pa = numpyro.deterministic('PA' + self.number, unscaled_PA*self.PA_morph_std + self.PA_morph_mu)
-		# # Pa = 0
-		# # Pa = numpyro.sample('PA', dist.Normal(self.mu_PA, self.sigma_PA))
-		# # Pa = 1.57
-		# # end = /time.time()
-		# # f.write('PA sampling time: '+ str(end-start)+ '\n')
-		# # Pa = norm.ppf(  norm.cdf(self.low_PA) + Pa*(norm.cdf(self.high_PA)-norm.cdf(self.low_PA)) )*self.sigma_PA + self.mu_PA
-
-		# #could probably use utils for this too
-		# # start = time.time()
-		# unscaled_i = numpyro.sample('unscaled_i' + self.number, dist.TruncatedNormal(low = self.i_low, high = self.i_high))
-
-
-		# # unscaled_i = numpyro.sample('unscaled_i' + self.number, dist.Normal())
-		# i = numpyro.deterministic('i', unscaled_i*self.sigma_i + self.mu_i)
-		# # i = 60
-
-
-		# # i = numpyro.deterministic('i', unscaled_i*self.sigma_i + self.mu_i)
-
-		# # unscaled_i = numpyro.sample('unscaled_i' + self.number, dist.Uniform())
-		# # i = numpyro.deterministic('i', unscaled_i*90)
-		# # i = numpyro.sample('i', dist.Normal(self.mu_i, self.sigma_i))
-		# # i = numpyro.sample('i', dist.Uniform())*(self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
-
-		# # i = 1.05
-		# # i = numpyro.sample('i' + self.number, dist.Uniform())*(self.i_bounds[1]-self.i_bounds[0]) + self.i_bounds[0]
-		# # end = time.time()
-		# # f.write('i sampling time: '+ str(end-start)+ '\n')
-
-		# #sample from circular normal distribution (in radians)
-		# # i_rad = numpyro.sample('i_radians' + self.number, dist.VonMises(self.mu_i*jnp.pi/180, 1/((self.sigma_i*jnp.pi/180)**2)))
-		# # i = numpyro.deterministic('i' + self.number, i_rad*180/jnp.pi)
-
-		# # start = time.time()
-		# unscaled_Va = numpyro.sample('unscaled_Va', dist.Uniform())  #* (self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0]
-		# Va = numpyro.deterministic('Va', unscaled_Va*(self.Va_bounds[1]-self.Va_bounds[0]) + self.Va_bounds[0])
-		# # Va = 300
-		# # end = time.time()
-		# # f.write('Va sampling time: '+ str(end-start)+ '\n')
-
-		# # ------- log normal distribution-------
-		# # r_t = numpyro.sample('r_t' + self.number, dist.Uniform(
-		# # ))*(self.r_t_bounds[1]-self.r_t_bounds[0]) + self.r_t_bounds[0]
-
-		# # r_t_sigma = jnp.log(self.r_t_bounds[1]/2)
-		# # r_t_high = (jnp.log(self.r_t_bounds[2]) - jnp.log(self.r_t_bounds[1]))/r_t_sigma
-		# # reparam_config = {"log_r_t": TransformReparam()}
-		# # with numpyro.handlers.reparam(config=reparam_config):
-		# #     log_r_t = numpyro.sample("log_r_t",dist.TransformedDistribution(
-		# #             dist.TruncatedNormal(0.0, 1.0, high=r_t_high),
-		# #             AffineTransform(jnp.log(self.r_t_bounds[1]), r_t_sigma),
-		# #         ),
-		# #     )
-
-		# # ------- normal distribution -------
-		# r_t_sigma = self.r_t_bounds[1]/2
-		# r_t_mu = self.r_t_bounds[1]
-		# r_t_max = self.r_t_bounds[2]
-		# r_t_high = (r_t_max - r_t_mu)/r_t_sigma
-		# r_t_low = (0.0 - r_t_mu)/r_t_sigma
-		# # reparam_config = {"r_t": TransformReparam()}
-		# # with numpyro.handlers.reparam(config=reparam_config):
-		# #     r_t = numpyro.sample("r_t",dist.TransformedDistribution(
-		# #             dist.TruncatedNormal(0.0, 1.0, high=r_t_high, low = r_t_low),
-		# #             AffineTransform(r_t_mu,r_t_sigma),
-		# #         ),
-		# #     )
-		# # unscaled_r_t = numpyro.sample('unscaled_r_t'+ self.number, dist.Normal())
-		# # r_t = numpyro.deterministic('r_t', unscaled_r_t*r_t_sigma + r_t_mu)
-		# # r_t = numpyro.sample('r_t', dist.Normal(r_t_mu, r_t_sigma))
-		# # r_t = 1
-		# # r_t = numpyro.deterministic('r_t', jnp.exp(log_r_t)) 
-		# # end = time.time()
-		# # f.write('r_t sampling time: '+ str(end-start)+ '\n')
-		# unscaled_r_t = numpyro.sample('unscaled_r_t', dist.Uniform())
-		# r_t = numpyro.deterministic('r_t', unscaled_r_t*4)
-		# # r_t = 1
-
-		# # start = time.time()
-		# # sigma0 = numpyro.sample('sigma0'+ self.number, dist.Uniform(
-		# # ))*(self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
-		# # sigma0 = numpyro.sample('sigma0', dist.TruncatedDistribution(dist.Logistic(70, 20), low = 0, high = 250))
-		# # reparam_config = {"sigma0": TransformReparam()}
-		# # with numpyro.handlers.reparam(config=reparam_config):
-		# #     sigma0 = numpyro.sample("sigma0",dist.TransformedDistribution(
-		# #             dist.TruncatedDistribution(dist.Logistic(0, 1),low = (0-70)/20, high = (250-70)/20),
-		# #             AffineTransform(70,20),
-		# #         ),
-		# #     )
-
-		# unscaled_sigma0 = numpyro.sample('unscaled_sigma0'+ self.number, dist.Uniform())
-		# sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*(600-self.sigma0_bounds[0]) + self.sigma0_bounds[0])
-		# # sigma0 = 80
-		# # unscaled_sigma0 = numpyro.sample('unscaled_sigma0'+ self.number,  dist.TruncatedDistribution(dist.Logistic(0, 1),low = (0-70)/20, high = (250-70)/20))
-		# # unscaled_sigma0 = numpyro.sample('unscaled_sigma0'+ self.number, dist.Normal())
-		# # sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*40 + 70)
-		# # sigma0 = numpyro.deterministic('sigma0', sigma0_unit*70)
-		# # sigma0 = 100
-		# # end = time.time()
-		# # f.write('sigma0 sampling time: '+ str(end-start)+ '\n')
-
-		# # sigma0_max = numpyro.sample('sigma0_max'+ self.number, dist.Uniform())*(self.sigma0_bounds[1]-self.sigma0_bounds[0]) + self.sigma0_bounds[0]
-		# # sigma0_scale =  numpyro.sample('sigma0_scale'+ self.number, dist.Uniform())*10
-		# # sigma0_const = numpyro.sample('sigma0_const'+ self.number, dist.Uniform())*sigma0_max
-
-		# # sampling the y axis velocity centroids
-  
-
-		# # start = time.time()
-		# # unscaled_y0_vel = numpyro.sample('unscaled_y0_vel'+ self.number, dist.TruncatedNormal(high=(self.y_high -self.mu_y0_vel )/self.y0_std, low = (self.y_low -self.mu_y0_vel )/self.y0_std))
-		# unscaled_y0_vel = numpyro.sample('unscaled_y0_vel'+ self.number, dist.Normal())
-
-		# y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.y0_std + self.mu_y0_vel)
-		
-		# unscaled_x0_vel = numpyro.sample('unscaled_x0_vel'+ self.number, dist.Normal())
-
-		# x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.y0_std + self.mu_y0_vel)
-		# # y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.y0_std + self.mu_y0_vel)
-		# # y0_vel = 15
-		# # y0_vel = numpyro.sample("y0_vel", dist.TruncatedNormal(self.mu_y0_vel, self.y0_std, low=self.y_low, high=self.y_high ))
-		# # reparam_config = {"y0_vel": TransformReparam()}
-		# # with numpyro.handlers.reparam(config=reparam_config):
-		# #     y0_vel = numpyro.sample("y0_vel",dist.TransformedDistribution(
-		# #             dist.TruncatedNormal(0.0, 1.0, high=(self.y_high -self.mu_y0_vel )/self.y0_std, low = (self.y_low -self.mu_y0_vel )/self.y0_std),
-		# #             AffineTransform(self.mu_y0_vel,self.y0_std),
-		# #         ),
-		# #     )
-
-
-		# # end = time.time()
-		# # f.write('y0_vel sampling time: '+ str(end-start)+ '\n')
-		# # sample a global velicity shift v0:
-		# # start = time.time()
-		# # unscaled_v0 = numpyro.sample('unscaled_v0'+ self.number, dist.Normal())
-		# # # v0 = norm.ppf(v0)*100
-		# # v0 = numpyro.deterministic('v0', unscaled_v0*100)
-		# v0 = 0
-		# # end = time.time()
-		# # f.write('v0 sampling time: '+ str(end-start)+ '\n')
-
-		# return Pa, i, Va, r_t,sigma0, y0_vel, x0_vel, v0
-
-
-
-# def compute_posterior_means(self, inference_data):
-# 		"""
-# 			Retreive the best sample from the MCMC chains for the main disk variables
-# 		"""
-# 		# best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
-# 		# ), inference_data['sample_stats']['lp'].shape)
-
-# 		# rescale all of the posteriors from uniform to the actual parameter space
-# 		# rotation = float(inference_data.posterior['rotation' + self.number].median(dim=["chain", "draw"]))
-# 		#create lists with variables and their scaling parameters 
-# 		# variables = ['PA'+ self.number, 'i'+ self.number, 'Va'+ self.number, 'r_t'+ self.number, 'sigma0'+ self.number, 'y0_vel'+ self.number, 'v0'+ self.number]
-# 		variables = ['Va'+ self.number]
-# 		# variables = ['PA' + self.number, 'i'+ self.number, 'Va'+ self.number, 'r_t'+ self.number, 'sigma0_max'+ self.number,'sigma0_scale'+ self.number , 'sigma0_const'+ self.number, 'y0_vel'+ self.number, 'v0'+ self.number]
-# 		#for variables drawn from uniform dist, the scaling parameters are (low, high) so mu and sigma are set to none
-# 		# mus = [self.mu_PA + round(rotation)*180, self.mu_i, None, None, None, self.y0_vel, 0.0]
-# 		# sigmas = [self.sigma_PA, self.sigma_i, None, None, None,2.0, 100.0]
-# 		#when using numpyro.deterministic, don't need to change posteriors
-# 		mus = [ None]
-# 		sigmas = [None]
-
-# 		#for variables drawn from normal dist, the scaling parameters are (mu, sigma) so low and high are set to none
-# 		# highs = [None, self.i_high, self.Va_bounds[1], self.r_t_bounds[1], self.sigma0_bounds[1],None, None]
-# 		# lows = [None,self.i_low, self.Va_bounds[0], self.r_t_bounds[0], self.sigma0_bounds[0], None, None]
-# 		highs = [self.Va_bounds[1]]
-# 		lows = [self.Va_bounds[0]]
-
-# 		#find the best sample for each variable in the list of variables
-# 		# best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, best_indices)
-# 		#taking the median:
-# 		# best_sample = utils.find_best_sample(inference_data, variables, mus, sigmas, highs, lows, MLS = None)
-
-
-# 		# self.Va_mean = best_sample[0]
-# 		# self.sigma0_mean_model*=0.5
-# 		# self.Va_mean*=0.05
-# 				# self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean, self.y0_vel_mean, self.v0_mean = best_sample
-
-# 		#taking best sample
-# 		# self.PA_mean =  jnp.array(inference_data.posterior['PA'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-# 		# self.i_mean = jnp.array(inference_data.posterior['i'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-# 		# self.y0_vel_mean = jnp.array(inference_data.posterior['y0_vel'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-# 		# self.v0_mean = jnp.array(inference_data.posterior['v0'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-
-
-# 		#update PA and i distributions to degrees
-# 		# inference_data.posterior['PA'+ self.number] = inference_data.posterior['PA'+ self.number]
-# 		# inference_data.posterior['i'+ self.number] = inference_data.posterior['i'+ self.number]
-
-# 		# inference_data.prior['PA'+ self.number] = inference_data.prior['PA'+ self.number]
-# 		# inference_data.prior['i'+ self.number] = inference_data.prior['i'+ self.number]
-# 		#taking the median:
-# 		self.PA_mean = jnp.array(inference_data.posterior['PA'+ self.number].median(dim=["chain", "draw"]))
-# 		self.i_mean = jnp.array(inference_data.posterior['i'+ self.number].median(dim=["chain", "draw"]))
-# 		self.y0_vel_mean = jnp.array(inference_data.posterior['y0_vel'+ self.number].median(dim=["chain", "draw"]))
-# 		self.x0_vel_mean = jnp.array(inference_data.posterior['x0_vel'+ self.number].median(dim=["chain", "draw"]))
-# 		self.v0_mean = 0 #jnp.array(inference_data.posterior['v0'+ self.number].median(dim=["chain", "draw"]))
-# 		self.r_t_mean = jnp.array(inference_data.posterior['r_t'+ self.number].median(dim=["chain", "draw"]))
-# 		self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'+ self.number].median(dim=["chain", "draw"]))
-# 		self.Va_mean = jnp.array(inference_data.posterior['Va'+ self.number].median(dim=["chain", "draw"]))
-# 		# log_r_t_mean = jnp.array(inference_data.posterior['log_r_t'].median(dim=["chain", "draw"]))
-# 		# print('r_t mean: ', self.r_t_mean)
-# 		# print('log_r_t mean: ', log_r_t_mean)
-
-
-
-
-
-# 		# self.PA_mean = 180 - self.PA_mean
-# 				# self.Va_mean = jnp.array(inference_data.posterior['Va'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-# 		# self.r_t_mean = jnp.array(inference_data.posterior['r_t'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-# 		# self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-
-
-# 		return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
-# 		# return  self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean,  self.sigma0_max_mean, self.sigma0_scale_mean, self.sigma0_const_mean, self.y0_vel_mean, self.v0_mean
-
-
-# def compute_flux_posterior(self, inference_data, flux_type = 'auto'):
-
-# 		best_indices = np.unravel_index(inference_data['sample_stats']['lp'].argmin(
-# 		), inference_data['sample_stats']['lp'].shape)
-
-# 		inference_data.posterior['fluxes_scaling'+ self.number].data = inference_data.posterior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1
-# 		inference_data.prior['fluxes_scaling'+ self.number].data = inference_data.prior['fluxes_scaling'+ self.number].data*(4-0.05) + 0.05 #*(1-0.1) + 0.1
-
-# 		# inference_data.posterior['fluxes_error_scaling'+ self.number].data = inference_data.posterior['fluxes_error_scaling'+ self.number].data*4 + 1
-# 		# inference_data.prior['fluxes_error_scaling'+ self.number].data = inference_data.prior['fluxes_error_scaling'+ self.number].data*4 + 1
-
-# 		# inference_data.posterior['regularization_strength'+ self.number].data = inference_data.posterior['regularization_strength'+ self.number].data*(1-0.01) + 0.01 #*(1-0.1) + 0.1
-# 		# inference_data.prior['regularization_strength'+ self.number].data = inference_data.prior['regularization_strength'+ self.number].data*(1-0.01) + 0.01  #*(1-0.1) + 0.1
-# 		#if the fluxes are manually rescaled in the prior, then rescale them
-# 		# self.fluxes_scaling_mean = jnp.array(inference_data.posterior['fluxes_scaling'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-# 		self.fluxes_scaling_mean = jnp.array(inference_data.posterior['fluxes_scaling'+ self.number].median(dim=["chain", "draw"]))
-# 		print('Flux scaling mean: ', self.fluxes_scaling_mean)
-# 		self.fluxes_error_scaling_mean = 1 #jnp.array(inference_data.posterior['fluxes_error_scaling'+ self.number].median(dim=["chain", "draw"]))
-# 		# print(flux_type)
-# 		if flux_type == 'manual':
-# 			best_flux_sample = utils.find_best_sample(inference_data, ['fluxes'+ self.number], [self.mu*self.fluxes_scaling_mean], [self.std], [self.high], [self.low], best_indices)
-
-# 		# self.fluxes_sample_mean = jnp.array(inference_data.posterior['fluxes'+ self.number].isel(chain=best_indices[0], draw=best_indices[1]))
-# 		self.fluxes_sample_mean = jnp.array(inference_data.posterior['fluxes'+ self.number].median(dim=["chain", "draw"]))
-
-# 		# self.fluxes_sample_mean = self.mu
-# 		self.fluxes_mean = jnp.zeros(self.direct_shape)
-# 		self.fluxes_mean =self.fluxes_mean.at[self.masked_indices].set(self.fluxes_sample_mean)
-# 		return self.fluxes_mean, self.fluxes_scaling_mean
-
-
-
-# def inference_model(self, grism_object, obs_map, obs_error, mask = None):
-# 		"""
-
-# 		Model used to infer the disk parameters from the data => called in fitting.py as the forward
-# 		model used for the inference
-
-# 		"""
-# 		# f = open("timing_total.txt", "a")
-# 		# sample the fluxes within the mask from a truncated normal distribution
-# 		# start = time.time()
-		
-# 		# end =  time.time()
-# 		# Pa, i, Va, r_t, sigma0_max, sigma0_scale, sigma0_const, y0_vel, v0 = self.disk.sample_params()
-# 		# f.write("Time to sample params: " + str(end-start) + "\n")
-
-
-# 		fluxes = self.disk.sample_fluxes()
-# 		# fluxes,r_eff, ellip = self.disk.sample_fluxes_parametric() 
-# 		Pa, i, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params()      
-
-# 		# sample_fluxes_reparam = numpyro.handlers.reparam(self.disk.sample_fluxes, config={'fluxes': LocScaleReparam(centered = 0)})
-# 		# fluxes = sample_fluxes_reparam()
-# 		# end =  time.time()
-# 		# f.write("Time to sample fluxes: " + str(end-start) + "\n")
-
-# 		# oversample the fluxes to match the grism object
-# 		# start = time.time()
-# 		fluxes_high = utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
-# 		# end =  time.time()
-# 		# f.write("Time to oversample fluxes: " + str(end-start) + "\n")
-
-# 		# create new grid centered on those centroids
-# 		# x = jnp.linspace(0 - self.x0_vel, self.im_shape[1]-1 - self.x0_vel, self.im_shape[1]*grism_object.factor)
-# 		# y = jnp.linspace(0 - 15, self.im_shape[0]-1 -15, self.im_shape[0]*grism_object.factor)
-# 		# X, Y = jnp.meshgrid(x, y)
-# 		# x_10 = jnp.linspace(0 - 15, self.im_shape[1]-1 - 15, self.im_shape[1]*grism_object.factor*1)
-# 		# y_10 = jnp.linspace(0 - 15, self.im_shape[0]-1 -15, self.im_shape[0]*grism_object.factor*1)
-# 		image_shape = self.im_shape[0]
-# 		# print(image_shape//2)
-# 		x_10 = jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape*grism_object.factor)
-# 		y_10 = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape*grism_object.factor)
-# 		X_10, Y_10 = jnp.meshgrid(x_10,y_10)
-# 		# sample for a shift in the y velocity centroid (since the x vel centroid is degenerate with the delta V that is sampled below)
-
-# 		# start  = time.time()
-		
-# 		# self.compute_factors(Pa, i,X_10, Y_10)
-# 		velocities = jnp.asarray(self.v(X_10, Y_10, Pa, i, Va, r_t))
-# 		# velocities = velocities.at[15,15].set(3e-14)
-# 		# velocities = utils.resample(velocities, 10, 10)/10**2
-# 		# end =  time.time()
-# 		# f.write("Time to compute velocities: " + str(end-start) + "\n")
-
-# 		# velocities = jnp.array(v(self.x, self.y, jnp.radians(Pa),jnp.radians(i), Va, r_t))
-# 		# velocities = image.resize(velocities, (int(velocities.shape[0]/10), int(velocities.shape[1]/10)), method='nearest')
-
-# 		velocities_scaled = velocities + v0
-
-# 		dispersions = sigma0*jnp.ones_like(velocities_scaled)
-# 		# dispersions = self.sigma_disk(sigma0_max, sigma0_scale, sigma0_const, fluxes)
-
-		
-# 		# #make a data cube with the 'spectra' in each pixel
-# 		# broadcast_velocity_space = grism_object.velocity_space
-# 		# cube = fluxes*norm.pdf(broadcast_velocity_space, velocities, dispersions)
-
-# 		# #the PSF is already oversampled here and in 3D form
-# 		# PSF_kernel = grism_object.PSF
-
-# 		# convolved_cube = convolve(cube, PSF_kernel, mode='same')
-
-# 		# convolved_fluxes = jnp.sum(convolved_cube, axis=0)
-
-# 		# convolved_velocities = jnp.mean(convolved_cube, axis = 2)
-# 		# convolved_dispersions = jnp.std(convolved_cube, axis = 2)
-
-# 		# start = time.time()
-# 		self.model_map = grism_object.disperse(fluxes_high, velocities_scaled, dispersions)
-# 		# end =  time.time()
-# 		# f.write("Time to disperse: " + str(end-start) + "\n")
-# 		# self.model_map = grism_object.disperse(convolved_fluxes, convolved_velocities, convolved_dispersions)
-
-# 		# start = time.time()
-# 		self.model_map = utils.resample(self.model_map, grism_object.y_factor*grism_object.factor, self.wave_factor)
-# 		# end = time.time()
-# 		# f.write("Time to resample: " + str(end-start) + "\n")
-
-# 		self.error_scaling = 1 #numpyro.sample('error_scaling', dist.Uniform(0, 1))*5
-# 		#regularize the fluxes
-		
-# 		# reg_strength = numpyro.sample('regularization_strength', dist.Uniform()) #*(1-0.00001) + 0.00001
-
-# 		# laplace_fluxes = convolve(fluxes, self.Laplace_kernel, mode='same')
-# 		# sum and renormalize regularization term
-# 		# threshold_grism = 0.2*obs_map.max()
-# 		# sum_reg = jnp.sum(jnp.abs(laplace_fluxes))
-# 		# #use a cut to be consistent  with grism/direct renormalization + avoid negative pixels
-# 		# sum_reg_norm = sum_reg/jnp.sum(jnp.where(obs_map>threshold_grism,obs_map, 0.0)) #*self.model_map.shape[0]*self.model_map.shape[1]
-# 		# error_reg = jnp.sqrt(jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0)**2))/jnp.sum(jnp.where(obs_map>threshold_grism,obs_error, 0.0))
-# 		# # error_reg_norm = error_reg*self.model_map.shape[0]*self.model_map.shape[1]/self.model_map.sum()
-
-# 		#new renormalization of reg term
-
-# 		# sum_reg = jnp.sum(jnp.abs(laplace_fluxes))/jnp.sum(jnp.abs(fluxes))
-# 		# sum_reg_norm = sum_reg*jnp.max(obs_map)
-
-# 		# error_reg = obs_error[jnp.unravel_index(jnp.argmax(obs_map), (obs_map.shape[0], obs_map.shape[1]))]
-
-
-# 		# laplace_fluxes_r = jnp.reshape(sum_reg_norm, (1,1))
-# 		# laplace_fluxes_err_r = jnp.reshape(error_reg, (1,1))
-
-# 		# reshaping the grism items to add the regularization term
-# 		# model_map_r = jnp.reshape(self.model_map, (1,self.model_map.shape[0]*self.model_map.shape[1]))
-# 		# obs_error_r = jnp.reshape(obs_error, (1,obs_error.shape[0]*obs_error.shape[1]))
-# 		# obs_map_r = jnp.reshape(obs_map, (1,obs_map.shape[0]*obs_map.shape[1]))
-
-# 		# self.error_scaling = 1
-# 		# start = time.time()
-# 		#make a mask to only fit high sn regions in the grism
-
-
-# 		# numpyro.sample('obs', dist.Normal(self.model_map[:,self.model_map.shape[1]//2-fluxes.shape[1]//2], self.error_scaling*obs_error[:,self.model_map.shape[1]//2-fluxes.shape[1]//2]), obs=obs_map[:,self.model_map.shape[1]//2-fluxes.shape[1]//2])
-# 		mask = jnp.where(obs_map/obs_error < 5, 0, 1)
-# 		model_masked = jnp.where(mask == 1, self.model_map, 0)
-# 		obs_masked = jnp.where(mask == 1, obs_map, 0)
-# 		obs_error_masked = jnp.where(mask == 1, obs_error, 1e6)
-
-# 		numpyro.sample('obs', dist.Normal(model_masked, self.error_scaling*obs_error_masked), obs=obs_masked)
-
-# 		# numpyro.sample('obs', dist.Normal(jnp.concatenate((model_map_r,reg_strength*laplace_fluxes_r), axis = 1),
-# 		#             jnp.concatenate((self.error_scaling*obs_error_r, laplace_fluxes_err_r), axis = 1)), 
-# 		#             obs=jnp.concatenate((obs_map_r, jnp.zeros_like(laplace_fluxes_r)), axis = 1))
-
-# 		# end = time.time()
-# 		# f.write("Time to sample obs: " + str(end-start) + "\n")
-# 		# end_all = time.time()
-# 		# f.write("Total time: " + str(end_all-start_all) + "\n")
