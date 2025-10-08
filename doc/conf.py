@@ -86,7 +86,7 @@ napoleon_include_special_with_doc = True
 napoleon_use_admonition_for_examples = False
 napoleon_use_admonition_for_notes = False
 napoleon_use_admonition_for_references = False
-napoleon_use_ivar = False
+napoleon_use_ivar = True
 napoleon_use_param = True
 napoleon_use_rtype = True
 napoleon_preprocess_types = False
@@ -102,6 +102,11 @@ autodoc_default_options = {
     'undoc-members': True,
     'exclude-members': '__weakref__'
 }
+
+# Show warnings for autodoc
+autodoc_warningiserror = False
+autodoc_inherit_docstrings = True
+add_module_names = False
 
 # Intersphinx mapping
 intersphinx_mapping = {
