@@ -644,9 +644,10 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
 def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual = None):
     # Get number of chains from the inference data
     num_chains = inf_data.posterior['PA'].shape[0]
+    num_samples_prior = inf_data.prior['PA'].shape[1]
 
     inf_data.posterior['v_re'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims = ('chain', 'draw'))
-    inf_data.prior['v_re'] = xr.DataArray(np.zeros((1,num_samples)), dims = ('chain', 'draw'))
+    inf_data.prior['v_re'] = xr.DataArray(np.zeros((1, num_samples_prior)), dims = ('chain', 'draw'))
     #make the prior array based on the shape of another prior from inf_data
     for i in range(num_chains):
         for sample in range(num_samples):
@@ -658,8 +659,18 @@ def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual = None):
             else:
                 re = float(inf_data.posterior['r_eff'][i,int(sample)].values)
             inf_data.posterior['v_re'][i,int(sample)] = np.abs(kin_model.v_rad(X,Y, np.radians( float(inf_data.posterior['PA'][i,int(sample)].values)), np.radians(float(inf_data.posterior['i'][i,int(sample)].values)), float(inf_data.posterior['Va'][i,int(sample)].values),  float(inf_data.posterior['r_t'][i,int(sample)].values), re)/np.sin(np.radians( float(inf_data.posterior['i'][i,int(sample)].values)))) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
-            if i == 0:
-                inf_data.prior['v_re'][i,int(sample)] = np.abs(kin_model.v_rad(X,Y, np.radians( float(inf_data.prior['PA'][i,int(sample)].values)), np.radians(float(inf_data.prior['i'][i,int(sample)].values)), float(inf_data.prior['Va'][i,int(sample)].values),  float(inf_data.prior['r_t'][i,int(sample)].values), re)/np.sin(np.radians( float(inf_data.prior['i'][i,int(sample)].values)))) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
+
+    # Process prior samples separately with their own loop
+    for sample in range(num_samples_prior):
+        x = np.linspace(0 - kin_model.x0_vel_mean, kin_model.im_shape[1]-1 - kin_model.x0_vel_mean, kin_model.im_shape[1]*kin_model.factor)
+        y = np.linspace(0 - kin_model.y0_vel_mean, kin_model.im_shape[0]-1 - kin_model.y0_vel_mean, kin_model.im_shape[0]*kin_model.factor)
+        X, Y = np.meshgrid(x, y)
+        if re_manual is not None:
+            re = re_manual
+        else:
+            # Use posterior median r_eff for prior v_re calculation
+            re = float(inf_data.posterior['r_eff'].median(dim=["chain", "draw"]).values)
+        inf_data.prior['v_re'][0,int(sample)] = np.abs(kin_model.v_rad(X,Y, np.radians( float(inf_data.prior['PA'][0,int(sample)].values)), np.radians(float(inf_data.prior['i'][0,int(sample)].values)), float(inf_data.prior['Va'][0,int(sample)].values),  float(inf_data.prior['r_t'][0,int(sample)].values), re)/np.sin(np.radians( float(inf_data.prior['i'][0,int(sample)].values)))) #np.radians(float(inf_data.posterior['i'][i,int(sample)].values))
 
     v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values
     v_re_med =inf_data.posterior['v_re'].quantile(0.50).values

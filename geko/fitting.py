@@ -473,13 +473,14 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
     rng_key = random.PRNGKey(4)
     inference_model = run_fit.kin_model.inference_model_parametric
-    prior_predictive = Predictive(inference_model, num_samples=num_samples)
+    num_samples_prior = np.max([1000, num_samples])
+    prior_predictive = Predictive(inference_model, num_samples=num_samples_prior)
 
     prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error)
 
     # Run inference - config parameters will be used automatically if provided
     run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
-                              median=True, step_size=0.001, adapt_step_size=True, target_accept_prob=0.8,  num_chains=num_chains)
+                              median=True, adapt_step_size=True, num_chains=num_chains)
 
     inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
 

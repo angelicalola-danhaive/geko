@@ -386,9 +386,6 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
     elif field == 'GOODS-S-FRESCO':
         psf_path = save_runs_path + 'psfs/mpsf_jw018950.gs.f444w.fits'
 
-    #manually set the psf path to what it was in the previous version
-    #THIS IS FOR TESTING PURPOSES, REMOVE AFTER!
-    # psf_path = 'mpsf_gds/mpsf_' + str(grism_filter).lower() + '.fits'
 
     PSF = fits.getdata(psf_path)
 
