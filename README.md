@@ -83,7 +83,7 @@ See the [documentation](https://astro-geko.readthedocs.io) for detailed usage ex
 
 ## Citation
 
-If you use Geko in your research, please cite the following paper:
+If you use Geko in your research, please cite the following [paper](https://arxiv.org/abs/2510.07369):
 
 ```bibtex
 
@@ -91,7 +91,7 @@ If you use Geko in your research, please cite the following paper:
 	author = {{Danhaive}, A. Lola and {Tacchella}, Sandro},
 	journal = {arXiv e-prints},
 	month = oct,
-	pages = {arXiv:xxxx},
+	pages = {arXiv:2510.07369},
 	title = {{Modelling the kinematics and morphology of galaxies in slitless spectroscopy  with _geko_}},
 	year = 2025}
 ```
