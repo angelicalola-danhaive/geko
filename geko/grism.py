@@ -732,7 +732,85 @@ class Grism:
 		psf_cube = fftconvolve(cube, self.PSF, mode='same') 
 
 		#collapse across the x axis
-		grism_full = jnp.sum(psf_cube, axis = 1) 
+		grism_full = jnp.sum(psf_cube, axis = 1)
 		return grism_full
-	
-	
+
+
+# ============================================================================
+# GRISM OBSERVATION CLASS
+# ============================================================================
+
+class GrismObservation:
+	"""
+	Container for a single grism observation.
+
+	Bundles a Grism object with its observed data and metadata for multi-observation fitting.
+
+	Parameters
+	----------
+	grism : Grism
+		Grism object with calibration for this observation (includes PSF)
+	obs_map : jax.numpy.ndarray
+		Observed 2D grism spectrum
+	obs_error : jax.numpy.ndarray
+		Error map for observation
+	theta_rot : float
+		Rotation angle in degrees to align galaxy morphology to grism observation
+		Same as theta_rot used in fitting.py - rotates morphology from imaging survey
+		to match grism observation orientation
+	dispersion : str
+		Dispersion direction: 'R' (row) or 'C' (column)
+	name : str, optional
+		Descriptive name for this observation (e.g., 'PA0_R', 'PA90_C')
+		If not provided, auto-generated from theta_rot and dispersion
+
+	Notes
+	-----
+	theta_rot aligns the galaxy model (morphology, kinematics) to match the
+	orientation it had during this grism observation. For multi-observation fitting
+	at different position angles, each observation will have a different theta_rot.
+
+	Examples
+	--------
+	>>> grism_R = Grism(..., grism_pupil='R')
+	>>> obs = GrismObservation(
+	...     grism=grism_R,
+	...     obs_map=data,
+	...     obs_error=error,
+	...     theta_rot=230.5,  # GOODS-N field rotation
+	...     dispersion='R',
+	...     name='GOODS-N_R'
+	... )
+	"""
+	def __init__(self, grism, obs_map, obs_error, theta_rot, dispersion, name=None):
+		# Validation
+		if dispersion not in ['R', 'C']:
+			raise ValueError(f"dispersion must be 'R' or 'C', got {dispersion}")
+
+		if dispersion == 'C':
+			raise NotImplementedError(
+				"Column dispersion 'C' not yet implemented. "
+				"Currently only 'R' (row dispersion) is supported."
+			)
+
+		if obs_map.shape != obs_error.shape:
+			raise ValueError("obs_map and obs_error must have same shape")
+
+		if grism.pupil != dispersion:
+			raise ValueError(
+				f"Grism pupil '{grism.pupil}' doesn't match "
+				f"specified dispersion '{dispersion}'"
+			)
+
+		# Store attributes
+		self.grism = grism
+		self.obs_map = obs_map
+		self.obs_error = obs_error
+		self.theta_rot = theta_rot
+		self.dispersion = dispersion
+		self.name = name if name is not None else f"theta{int(theta_rot)}_{dispersion}"
+
+	def __str__(self):
+		return (f"GrismObservation(name='{self.name}', "
+				f"theta_rot={self.theta_rot}°, dispersion={self.dispersion}, "
+				f"shape={self.obs_map.shape})")

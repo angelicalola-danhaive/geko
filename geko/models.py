@@ -623,8 +623,33 @@ class Disk():
 			print("No config overrides applied (all parameters at default values)")
 
 
-	def sample_fluxes_parametric(self):
+	def sample_morphology_params(self):
+		"""
+		Sample morphological parameters for parametric disk model.
 
+		Returns morphology parameters without generating the flux map.
+		This allows flux maps to be generated separately for each observation
+		with adjusted PA and centroids in multi-observation fitting.
+
+		Returns
+		-------
+		amplitude : float
+			Flux normalization
+		r_eff : float
+			Effective radius in pixels
+		n : float
+			Sersic index
+		i : float
+			Inclination in degrees
+		ellip : float
+			Ellipticity
+		PA_morph : float
+			Morphological position angle in degrees
+		xc_morph : float
+			X-centroid in pixels
+		yc_morph : float
+			Y-centroid in pixels
+		"""
 		#sample the parameters needed for a disc model
 		unscaled_amplitude = numpyro.sample('unscaled_amplitude', dist.TruncatedNormal(low = (0.0 - self.amplitude_mu)/self.amplitude_std))
 		amplitude = numpyro.deterministic('amplitude', unscaled_amplitude*self.amplitude_std + self.amplitude_mu)
@@ -635,7 +660,6 @@ class Disk():
 		unscaled_n = numpyro.sample('unscaled_n', dist.TruncatedNormal(low = (0.36 - self.n_mu)/self.n_std, high = (8.0 - self.n_mu)/self.n_std))
 		n = numpyro.deterministic('n', unscaled_n*self.n_std + self.n_mu)
 
-
 		i_low = (0-self.inc_mu)/self.inc_std
 		i_high = (90-self.inc_mu)/self.inc_std
 		unscaled_i = numpyro.sample('unscaled_i', dist.TruncatedNormal(low = i_low, high = i_high))
@@ -643,21 +667,44 @@ class Disk():
 
 		ellip = 1 - utils.compute_axis_ratio(inc = i, q0 = 0.2)
 
-		unscaled_PA_morph = numpyro.sample('unscaled_PA_morph', dist.Normal()) #self.mu_PA*jnp.pi/180, 1/((self.sigma_PA*jnp.pi/180)**2)
+		unscaled_PA_morph = numpyro.sample('unscaled_PA_morph', dist.Normal())
 		PA_morph = numpyro.deterministic('PA_morph', unscaled_PA_morph*self.PA_morph_std + self.PA_morph_mu)
-
 
 		unscaled_xc_morph = numpyro.sample('unscaled_xc_morph', dist.Normal())
 		xc_morph = numpyro.deterministic('xc_morph', unscaled_xc_morph*self.xc_std + self.xc_morph)
-		# xc_morph = self.xc_morph
 
 		unscaled_yc_morph = numpyro.sample('unscaled_yc_morph', dist.Normal())
-		yc_morph = numpyro.deterministic('yc_morph', unscaled_yc_morph*self.yc_std + self.yc_morph)  
-		# yc_morph = self.yc_morph                                 
-					
+		yc_morph = numpyro.deterministic('yc_morph', unscaled_yc_morph*self.yc_std + self.yc_morph)
 
+		return amplitude, r_eff, n, i, ellip, PA_morph, xc_morph, yc_morph
+
+	def generate_flux_map(self, amplitude, r_eff, n, ellip, PA_morph, xc_morph, yc_morph):
+		"""
+		Generate flux map from morphological parameters.
+
+		Parameters
+		----------
+		amplitude : float
+			Flux normalization
+		r_eff : float
+			Effective radius in pixels
+		n : float
+			Sersic index
+		ellip : float
+			Ellipticity
+		PA_morph : float
+			Morphological position angle in degrees
+		xc_morph : float
+			X-centroid in pixels
+		yc_morph : float
+			Y-centroid in pixels
+
+		Returns
+		-------
+		model_image_masked : jax.numpy.ndarray
+			2D flux map at oversampled resolution (shape: image_shape*factor)
+		"""
 		factor = self.factor
-				
 		sersic_factor = 25
 		image_shape = self.direct_shape[0]
 
@@ -668,23 +715,40 @@ class Disk():
 		amplitude_re = utils.flux_to_Ie(amplitude, n, r_eff, ellip)
 
 		#-------------------------constant oversampling---------------------------------
-
 		x_grid = image.resize(x, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
 		y_grid = image.resize(y, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
 		#the center is set at 0,0 because the grid is already centered at xc_morph, yc_morph
 		model_image_highres = utils.sersic_profile(x_grid, y_grid, amplitude_re/(sersic_factor*factor)**2, r_eff, n,0.0,0.0, ellip, (90 - PA_morph)*jnp.pi/180)
 		model_image = utils.resample(model_image_highres, int(sersic_factor), int(sersic_factor))
 
-		#-------------------------adaptive oversampling---------------------------------
-		# x_grid = image.resize(x, (image_shape*factor, image_shape*factor), method='linear')
-		# y_grid = image.resize(y, (image_shape*factor, image_shape*factor), method='linear')
-		# model_image = utils.compute_adaptive_sersic_profile(x_grid, y_grid, amplitude/factor**2, r_eff, n, 0.0,0.0, ellip, (90 - PA_morph)*jnp.pi/180)
-		#------------------------------------------------------------------------------
-
 		#mask the low fluxes of the model image
-		model_image_masked = model_image #jnp.where(model_image>0.01*model_image.max(), model_image, 0.0)
+		model_image_masked = model_image
 
-		#the returned image has a shape of image_shape*factor
+		return model_image_masked
+
+	def sample_fluxes_parametric(self):
+		"""
+		Sample morphological parameters and generate flux map (backward compatible).
+
+		This method maintains backward compatibility with single-observation fitting
+		by combining sample_morphology_params() and generate_flux_map().
+
+		Returns
+		-------
+		model_image_masked : jax.numpy.ndarray
+			2D flux map
+		r_eff : float
+			Effective radius
+		i : float
+			Inclination
+		xc_morph : float
+			X-centroid
+		yc_morph : float
+			Y-centroid
+		"""
+		amplitude, r_eff, n, i, ellip, PA_morph, xc_morph, yc_morph = self.sample_morphology_params()
+		model_image_masked = self.generate_flux_map(amplitude, r_eff, n, ellip, PA_morph, xc_morph, yc_morph)
+
 		return model_image_masked, r_eff, i, xc_morph, yc_morph
 
 
@@ -919,55 +983,144 @@ class DiskModel(KinModels):
 	
 	def inference_model_parametric(self, grism_object, obs_map, obs_error, mask = None):
 		"""
+		Single-observation inference (backward compatible).
 
-		Model used to infer the disk parameters from the data => called in fitting.py as the forward
-		model used for the inference
+		This method wraps the multi-observation framework for single observations.
+		It creates a GrismObservation with theta_rot=0 (assumes priors are already
+		in the grism observation frame) and calls inference_model_parametric_multi().
 
+		Parameters
+		----------
+		grism_object : Grism
+			Grism object for this observation
+		obs_map : jax.numpy.ndarray
+			Observed 2D grism spectrum
+		obs_error : jax.numpy.ndarray
+			Error map for observation
+		mask : jax.numpy.ndarray, optional
+			Source mask (default: None)
 		"""
-		# fluxes = self.disk.sample_fluxes()
-		fluxes,r_eff, i, xc_morph, yc_morph = self.disk.sample_fluxes_parametric() 
-		Pa, Va, r_t, sigma0, y0_vel, x0_vel, v0 = self.disk.sample_params_parametric(r_eff=r_eff)      
-		# i = utils.compute_inclination(ellip = ellip) 
+		from .grism import GrismObservation
 
-		# #set the velocity centroid to the morph one so that we don't have to fit for it!
-		# x0_vel = xc_morph
-		# y0_vel = yc_morph
+		# Create a GrismObservation from the inputs
+		# theta_rot=0 assumes priors were already set in grism observation frame
+		obs = GrismObservation(
+			grism=grism_object,
+			obs_map=obs_map,
+			obs_error=obs_error,
+			theta_rot=0.0,  # Priors already in observation frame
+			dispersion=grism_object.pupil,
+			name='single'
+		)
 
-		fluxes_high = fluxes #utils.oversample(fluxes, grism_object.factor, grism_object.factor, method= 'bilinear')
+		# Call multi-observation method with single observation
+		masks = [mask] if mask is not None else None
+		return self.inference_model_parametric_multi([obs], masks=masks)
+
+	def inference_model_parametric_multi(self, observations, masks=None):
+		"""
+		Joint inference model for multiple grism observations.
+
+		Parameters
+		----------
+		observations : list of GrismObservation
+			List of grism observations to fit jointly
+		masks : list of jax.numpy.ndarray, optional
+			Source masks for each observation (default: None)
+			If provided, must be same length as observations
+
+		Notes
+		-----
+		The galaxy's physical properties (kinematics, morphology) are sampled
+		once and shared across all observations. The morphology and kinematics
+		are defined in the reference frame used when setting priors
+		(typically theta_rot=0 for sky frame).
+
+		For each observation, the PA and centroids are rotated by theta_rot
+		to match that observation's orientation.
+		"""
+		from .grism import GrismObservation
+
+		if not isinstance(observations, list):
+			observations = [observations]
+
+		# Handle masks
+		if masks is None:
+			masks = [None] * len(observations)
+		elif len(masks) != len(observations):
+			raise ValueError(
+				f"Number of masks ({len(masks)}) must match "
+				f"number of observations ({len(observations)})"
+			)
+
+		print(f"\nFitting {len(observations)} observations jointly:")
+		for obs in observations:
+			print(f"  - {obs}")
+
+		# Sample galaxy parameters ONCE (in prior reference frame)
+		amplitude, r_eff, n, i, ellip, PA_morph_ref, xc_morph_ref, yc_morph_ref = self.disk.sample_morphology_params()
+		Pa_ref, Va, r_t, sigma0, y0_vel_ref, x0_vel_ref, v0 = self.disk.sample_params_parametric(r_eff=r_eff)
 
 		image_shape = self.im_shape[0]
-		x= jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape)
-		y = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape)
-		X, Y = jnp.meshgrid(x,y)
+		center = (image_shape - 1) / 2
 
-		X_grid = image.resize(X, (int(X.shape[0]*grism_object.factor), int(X.shape[1]*grism_object.factor)), method='linear')
-		Y_grid = image.resize(Y, (int(Y.shape[0]*grism_object.factor), int(Y.shape[1]*grism_object.factor)), method='linear')
+		# Loop over observations and compute likelihood for each
+		for idx, (obs, mask) in enumerate(zip(observations, masks)):
 
-		velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa, i, Va, r_t))
+			# Apply rotation for this observation
+			theta_rot_rad = jnp.radians(obs.theta_rot)
 
-		velocities_scaled = velocities + v0
+			# Adjust PA for this observation (rotate by -theta_rot)
+			PA_morph_obs = PA_morph_ref - obs.theta_rot
+			Pa_obs = Pa_ref - obs.theta_rot
 
-		dispersions = sigma0*jnp.ones_like(velocities_scaled)
+			# Rotate morphological centroids for this observation
+			xc_morph_obs, yc_morph_obs = utils.rotate_coords(
+				xc_morph_ref, yc_morph_ref,
+				center, center,
+				theta_rot_rad
+			)
 
-		self.model_map = grism_object.disperse(fluxes_high, velocities_scaled, dispersions)
+			# Rotate velocity centroids for this observation
+			x0_vel_obs, y0_vel_obs = utils.rotate_coords(
+				x0_vel_ref, y0_vel_ref,
+				center, center,
+				theta_rot_rad
+			)
 
-		self.model_map = utils.resample(self.model_map, grism_object.factor, self.wave_factor)
+			# Generate flux map for this observation with adjusted PA and centroids
+			fluxes_high = self.disk.generate_flux_map(amplitude, r_eff, n, ellip, PA_morph_obs, xc_morph_obs, yc_morph_obs)
 
+			# Build coordinate grids for velocity field
+			x = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape)
+			y = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape)
+			X, Y = jnp.meshgrid(x, y)
 
-		self.error_scaling = 1 #numpyro.sample('error_scaling', dist.Uniform(0, 1))*5
-		# SN_min = jnp.minimum((obs_map/obs_error).max()/10,5)
-		# mask = jnp.where(obs_map/obs_error < SN_min, 0, 1)
-		# model_masked = jnp.where(mask == 1, self.model_map, 0)
-		# obs_masked = jnp.where(mask == 1, obs_map, 0)
-		# obs_error_masked = jnp.where(mask == 1, obs_error, 1e6)
+			X_grid = image.resize(X, (int(X.shape[0]*obs.grism.factor), int(X.shape[1]*obs.grism.factor)), method='linear')
+			Y_grid = image.resize(Y, (int(Y.shape[0]*obs.grism.factor), int(Y.shape[1]*obs.grism.factor)), method='linear')
 
-		obs_error_masked = obs_error #jnp.where(mask == 1, obs_error, 1e6)
+			# Compute velocity field with adjusted PA
+			velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa_obs, i, Va, r_t))
+			velocities_scaled = velocities + v0
 
+			# Compute dispersion field
+			dispersions = sigma0 * jnp.ones_like(velocities_scaled)
 
+			# Disperse through grism
+			model_map = obs.grism.disperse(fluxes_high, velocities_scaled, dispersions)
+			model_map = utils.resample(model_map, obs.grism.factor, self.wave_factor)
 
-		# numpyro.sample('obs', dist.Normal(self.model_map[5:26,:], self.error_scaling*obs_error[5:26,:]), obs=obs_map[5:26,:])
-		numpyro.sample('obs', dist.Normal(self.model_map, self.error_scaling*obs_error_masked), obs=obs_map)
+			# Apply mask if provided
+			obs_error_masked = obs.obs_error if mask is None else jnp.where(
+				mask == 1, obs.obs_error, 1e6
+			)
 
+			# Add likelihood for this observation
+			numpyro.sample(
+				f'obs_{obs.name}',
+				dist.Normal(model_map, obs_error_masked),
+				obs=obs.obs_map
+			)
 
 	def compute_model_parametric(self, inference_data, grism_object):
 		"""
@@ -1050,7 +1203,166 @@ class DiskModel(KinModels):
 		self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='nearest')
 		self.model_dispersions_low = jnp.where(self.fluxes_mean == 0, np.nan, self.model_dispersions_low)
 		return inference_data, self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
-	
+
+	def compute_model_parametric_multi(self, inference_data, observations):
+		"""
+		Post-process MCMC samples for multiple observations.
+
+		Computes posterior statistics (shared across observations) and generates
+		model predictions for each observation with appropriate rotations.
+
+		Parameters
+		----------
+		inference_data : arviz.InferenceData
+			MCMC results from multi-observation fit
+		observations : list of GrismObservation
+			List of observations that were fit
+
+		Returns
+		-------
+		inference_data : arviz.InferenceData
+			Updated inference data
+		results : dict
+			Dictionary with keys being observation names, values being dicts with:
+			- 'model_map': 2D grism model prediction
+			- 'model_flux': High-res flux map
+			- 'fluxes_mean': Low-res flux map
+			- 'model_velocities': High-res velocity field
+			- 'model_dispersions': High-res dispersion field
+			- 'model_velocities_low': Low-res velocity field
+			- 'model_dispersions_low': Low-res dispersion field
+		"""
+		from .grism import GrismObservation
+
+		if not isinstance(observations, list):
+			observations = [observations]
+
+		# Compute posterior statistics (shared across all observations)
+		self.PA_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean = self.disk.compute_posterior_means_parametric(inference_data)
+
+		# Save percentiles
+		self.PA_16 = self.disk.PA_16
+		self.PA_84 = self.disk.PA_84
+		self.Va_16 = self.disk.Va_16
+		self.Va_84 = self.disk.Va_84
+		self.r_t_16 = self.disk.r_t_16
+		self.r_t_84 = self.disk.r_t_84
+		self.sigma0_16 = self.disk.sigma0_16
+		self.sigma0_84 = self.disk.sigma0_84
+		self.y0_vel_16 = self.disk.y0_vel_16
+		self.y0_vel_84 = self.disk.y0_vel_84
+		self.x0_vel_16 = self.disk.x0_vel_16
+		self.x0_vel_84 = self.disk.x0_vel_84
+		self.v0_16 = self.disk.v0_16
+		self.v0_84 = self.disk.v0_84
+
+		# Compute morphology posterior
+		inference_data, self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
+
+		self.amplitude_16 = self.disk.amplitude_16
+		self.amplitude_84 = self.disk.amplitude_84
+		self.n_16 = self.disk.n_16
+		self.n_84 = self.disk.n_84
+		self.r_eff_16 = self.disk.r_eff_16
+		self.r_eff_84 = self.disk.r_eff_84
+		self.xc_morph_mean = self.disk.xc_morph_mean
+		self.xc_morph_16 = self.disk.xc_morph_16
+		self.xc_morph_84 = self.disk.xc_morph_84
+		self.yc_morph_mean = self.disk.yc_morph_mean
+		self.yc_morph_16 = self.disk.yc_morph_16
+		self.yc_morph_84 = self.disk.yc_morph_84
+		self.ellip_mean = self.disk.ellip_mean
+		self.ellip_16 = self.disk.ellip_16
+		self.ellip_84 = self.disk.ellip_84
+		self.i_16 = self.disk.i_16
+		self.i_84 = self.disk.i_84
+
+		image_shape = self.im_shape[0]
+		center = (image_shape - 1) / 2
+
+		# Generate model predictions for each observation
+		results = {}
+
+		for obs in observations:
+			print(f"\nGenerating model for observation: {obs.name}")
+
+			# Apply rotation for this observation
+			theta_rot_rad = jnp.radians(obs.theta_rot)
+
+			# Adjust PA and centroids for this observation
+			PA_morph_obs = self.PA_morph_mean - obs.theta_rot
+			Pa_obs = self.PA_mean - obs.theta_rot
+
+			# Rotate morphological centroids
+			xc_morph_obs, yc_morph_obs = utils.rotate_coords(
+				self.xc_morph_mean, self.yc_morph_mean,
+				center, center,
+				theta_rot_rad
+			)
+
+			# Rotate velocity centroids
+			x0_vel_obs, y0_vel_obs = utils.rotate_coords(
+				self.x0_vel_mean, self.y0_vel_mean,
+				center, center,
+				theta_rot_rad
+			)
+
+			# Generate flux map for this observation
+			model_flux = self.disk.generate_flux_map(
+				self.amplitude_mean, self.r_eff_mean, self.n_mean,
+				self.ellip_mean, PA_morph_obs, xc_morph_obs, yc_morph_obs
+			)
+
+			# Build coordinate grids
+			x = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape)
+			y = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape)
+			X, Y = jnp.meshgrid(x, y)
+
+			X_grid = image.resize(X, (int(X.shape[0]*obs.grism.factor), int(X.shape[1]*obs.grism.factor)), method='nearest')
+			Y_grid = image.resize(Y, (int(Y.shape[0]*obs.grism.factor), int(Y.shape[1]*obs.grism.factor)), method='nearest')
+
+			# Compute velocity and dispersion fields
+			model_velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa_obs, self.i_mean, self.Va_mean, self.r_t_mean))
+			model_velocities = model_velocities + self.v0_mean
+			model_dispersions = self.sigma0_mean_model * jnp.ones_like(model_velocities)
+
+			# Generate grism model
+			model_map_high = obs.grism.disperse(model_flux, model_velocities, model_dispersions)
+			model_map = utils.resample(model_map_high, obs.grism.factor, self.wave_factor)
+
+			# Downsample for plotting
+			model_velocities_low = image.resize(model_velocities, (int(model_velocities.shape[0]/obs.grism.factor), int(model_velocities.shape[1]/obs.grism.factor)), method='nearest')
+			model_dispersions_low = image.resize(model_dispersions, (int(model_dispersions.shape[0]/obs.grism.factor), int(model_dispersions.shape[1]/obs.grism.factor)), method='nearest')
+
+			# Downsample flux map for this observation
+			fluxes_mean = utils.resample(model_flux, self.disk.factor, self.disk.factor)
+			model_velocities_low = np.where(fluxes_mean == 0, np.nan, model_velocities_low)
+			model_dispersions_low = jnp.where(fluxes_mean == 0, np.nan, model_dispersions_low)
+
+			# Store results for this observation
+			results[obs.name] = {
+				'model_map': model_map,
+				'model_flux': model_flux,
+				'fluxes_mean': fluxes_mean,
+				'model_velocities': model_velocities,
+				'model_dispersions': model_dispersions,
+				'model_velocities_low': model_velocities_low,
+				'model_dispersions_low': model_dispersions_low,
+				'observation': obs  # Keep reference to observation
+			}
+
+		# Store first observation's results as default (for backward compatibility)
+		first_obs_name = observations[0].name
+		self.model_map = results[first_obs_name]['model_map']
+		self.model_flux = results[first_obs_name]['model_flux']
+		self.fluxes_mean = results[first_obs_name]['fluxes_mean']
+		self.model_velocities = results[first_obs_name]['model_velocities']
+		self.model_dispersions = results[first_obs_name]['model_dispersions']
+		self.model_velocities_low = results[first_obs_name]['model_velocities_low']
+		self.model_dispersions_low = results[first_obs_name]['model_dispersions_low']
+
+		return inference_data, results
+
 	def compute_model(self,inference_data, grism_object, parametric = False):
 		"""
 

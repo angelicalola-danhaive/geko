@@ -170,7 +170,124 @@ class Fit_Numpyro():
         print('done')
 
         self.mcmc.print_summary()
-    
+
+    def run_inference_multi(self, observations, masks=None, num_samples=None, num_warmup=None,
+                           num_chains=None, step_size=1, adapt_step_size=True,
+                           target_accept_prob=None, max_tree_depth=None):
+        """
+        Run MCMC inference with multiple grism observations.
+
+        Parameters
+        ----------
+        observations : list of GrismObservation
+            List of observations to fit jointly
+        masks : list of jax.numpy.ndarray, optional
+            Source masks for each observation (default: None, will auto-generate)
+            If provided, must be same length as observations
+        num_samples : int, optional
+            Number of MCMC samples (default: from config or 1000)
+        num_warmup : int, optional
+            Number of warmup iterations (default: from config or 500)
+        num_chains : int, optional
+            Number of MCMC chains (default: from config or 4)
+        step_size : float, optional
+            NUTS step size (default: 1 or from config)
+        adapt_step_size : bool, optional
+            Adapt step size during warmup (default: True)
+        target_accept_prob : float, optional
+            Target acceptance probability (default: from config or 0.8)
+        max_tree_depth : int, optional
+            Maximum NUTS tree depth (default: from config or 10)
+
+        Notes
+        -----
+        Results are stored in self.mcmc and printed to console.
+        If masks not provided, they will be auto-generated for each observation.
+        """
+        from .grism import GrismObservation
+
+        if not isinstance(observations, list):
+            observations = [observations]
+
+        # Get MCMC settings from config
+        from .config import MCMCSettings
+        if self.config is not None:
+            mcmc_config = self.config.mcmc
+        else:
+            mcmc_config = MCMCSettings()
+
+        # Use config values if parameters not explicitly provided
+        if num_samples is None:
+            num_samples = mcmc_config.num_samples
+        if num_warmup is None:
+            num_warmup = mcmc_config.num_warmup
+        if target_accept_prob is None:
+            target_accept_prob = mcmc_config.target_accept_prob
+        if max_tree_depth is None:
+            max_tree_depth = mcmc_config.max_tree_depth
+        if num_chains is None:
+            num_chains = mcmc_config.num_chains
+        if mcmc_config.step_size is not None:
+            step_size = mcmc_config.step_size
+
+        # Auto-generate masks if not provided
+        if masks is None:
+            print("\nAuto-generating masks for each observation...")
+            masks = []
+            for obs in observations:
+                # Temporarily set obs_map/obs_error to generate mask
+                old_obs_map = self.obs_map
+                old_obs_error = self.obs_error
+                self.obs_map = obs.obs_map
+                self.obs_error = obs.obs_error
+                mask = self.create_mask()
+                masks.append(mask)
+                # Restore
+                self.obs_map = old_obs_map
+                self.obs_error = old_obs_error
+
+        # Check parametric mode
+        if not self.parametric:
+            raise ValueError("Multi-observation fitting only supported for parametric mode")
+
+        # Create inference model that captures observations and masks
+        def inference_model():
+            return self.kin_model.inference_model_parametric_multi(observations, masks)
+
+        # Setup NUTS kernel
+        self.nuts_kernel = NUTS(
+            inference_model,
+            step_size=step_size,
+            adapt_step_size=adapt_step_size,
+            init_strategy=init_to_median(num_samples=2000),
+            target_accept_prob=target_accept_prob,
+            find_heuristic_step_size=True,
+            max_tree_depth=max_tree_depth,
+            dense_mass=False,
+            adapt_mass_matrix=True
+        )
+
+        print(f'\n{"="*60}')
+        print(f'Multi-Observation MCMC Fitting')
+        print(f'{"="*60}')
+        print(f'Number of observations: {len(observations)}')
+        for obs in observations:
+            print(f'  - {obs}')
+        print(f'MCMC settings: {num_chains} chains, {num_samples} samples, {num_warmup} warmup')
+        print(f'               max_tree_depth={max_tree_depth}, target_accept={target_accept_prob}')
+        print(f'{"="*60}\n')
+
+        # Setup and run MCMC
+        self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
+                        num_warmup=num_warmup, num_chains=num_chains)
+        self.rng_key = random.PRNGKey(100)
+
+        # Run MCMC (observations and masks are captured in the closure)
+        self.mcmc.run(self.rng_key)
+
+        print('\nMCMC complete!')
+        self.mcmc.print_summary()
+
     def run_inference_ns(self, num_samples=2000, num_warmup=2000, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=0.8, max_tree_depth=10, num_chains=5, init_vals = None):
         """
         Run nested sampling inference (experimental).
