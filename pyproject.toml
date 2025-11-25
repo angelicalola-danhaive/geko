@@ -4,14 +4,45 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "astro-geko"
-version = "0.1.0"
+version = "1.0.0"
 description = "Geko: the Grism Emission-line Kinematics tOol"
 authors = [{ name = "A. Lola Danhaive", email = "angelicalola.danhaive@gmail.com" }]
 readme = "README.md"
 requires-python = ">=3.8"
+license = { text = "MIT" }
+keywords = ["astronomy", "jwst", "grism", "spectroscopy", "kinematics", "bayesian", "mcmc"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+
+dependencies = [
+    "corner>=2.2.0",
+    "jax>=0.4.0",
+    "jaxlib>=0.4.0",
+    "numpyro>=0.15.0",
+    "jax-cosmo>=0.1.0",
+    "numpy",
+    "scipy",
+    "matplotlib",
+    "astropy",
+    "photutils",
+    "arviz",
+    "xarray",
+    "scikit-image",
+    "reproject",
+]
 
 [project.optional-dependencies]
 dev = ["pytest"]
+
+[project.urls]
+Homepage = "https://github.com/angelicalola-danhaive/geko"
+Documentation = "https://astro-geko.readthedocs.io"
+Repository = "https://github.com/angelicalola-danhaive/geko"
 
 [tool.setuptools]
 packages = ["geko"]

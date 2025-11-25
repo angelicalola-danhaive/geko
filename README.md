@@ -21,7 +21,15 @@ Geko is a Python package for analyzing grism spectroscopy from JWST NIRCam obser
 
 ## Installation
 
-### Using Conda (Recommended)
+### Using pip (Recommended)
+
+```bash
+pip install astro-geko
+```
+
+### Using Conda
+
+For a complete environment with all dependencies:
 
 ```bash
 # Clone the repository
@@ -32,15 +40,17 @@ cd geko
 conda env create -f environment.yml
 conda activate geko_env
 
-# Install geko in development mode
-pip install -e .
+# Install geko
+pip install astro-geko
 ```
 
-### Using pip
+### Development Installation
+
+If you want to install the development version:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/geko.git
+git clone https://github.com/angelicalola-danhaive/geko.git
 cd geko
 
 # Install in editable mode
