@@ -18,7 +18,7 @@
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
-__all__ = ["Grism"]
+__all__ = ["Grism", "GrismObservation"]
 
 from . import utils
 
