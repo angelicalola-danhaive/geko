@@ -151,12 +151,7 @@ class Grism:
 	def __init__(self, im_shape, im_scale = 0.031, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
 
 		# Validate pupil parameter
-		if grism_pupil == 'C':
-			raise NotImplementedError(
-				"Grism pupil 'C' is not yet implemented. "
-				"Only grism_pupil='R' (row dispersion) is currently supported."
-			)
-		elif grism_pupil not in ['R', 'C']:
+		if grism_pupil not in ['R', 'C']:
 			raise ValueError(
 				f"Invalid grism_pupil '{grism_pupil}'. "
 				"Must be 'R' (row dispersion) or 'C' (column dispersion)."
@@ -468,16 +463,23 @@ class Grism:
 
 		Notes
 		-----
-		Assumes horizontal dispersion only (all pixels on same detector row).
+		For R (row) dispersion: assumes horizontal dispersion (all pixels on same detector row)
+		For C (column) dispersion: assumes vertical dispersion (all pixels on same detector column)
 		Sets attributes:
 		- coef1: Constant term coefficients (2D array)
 		- coef2: Linear wavelength term coefficients (2D array)
 		- coef3: Quadratic wavelength term coefficients (2D array)
 		- coef4: Cubic wavelength term coefficients (2D array)
 		"""
-		xpix = self.detector_space_2d
-		# print('xpix: ', xpix[0])
-		ypix = self.ycenter_detector * jnp.ones_like(xpix) #bcause we are not considering vertical dys, we can set this as if they are all on the same row
+		if self.pupil == 'R':
+			# Row dispersion: dispersion varies in x, constant in y
+			xpix = self.detector_space_2d
+			ypix = self.ycenter_detector * jnp.ones_like(xpix)
+		elif self.pupil == 'C':
+			# Column dispersion: dispersion varies in y, constant in x
+			ypix = self.detector_space_2d
+			xpix = self.xcenter_detector * jnp.ones_like(ypix)
+
 		xpix -= 1024
 		ypix -= 1024
 		xpix2 = xpix**2
@@ -692,13 +694,19 @@ class Grism:
 		Returns
 		-------
 		jax.numpy.ndarray
-			2D dispersed grism spectrum (spatial y, wavelength)
+			2D dispersed grism spectrum
+			- For R (row) dispersion: shape (spatial_y, n_wavelengths)
+			- For C (column) dispersion: shape (spatial_x, n_wavelengths)
 
 		Notes
 		-----
 		Uses Gaussian profile convolution for spectral dispersion and
 		FFT convolution for spatial PSF. Velocity is converted to wavelength
 		shift via Doppler formula.
+
+		Dispersion direction is determined by self.pupil:
+		- 'R': Row dispersion (horizontal), collapses along x-axis
+		- 'C': Column dispersion (vertical), collapses along y-axis
 		"""
 
 		J_min = self.index_min
@@ -728,11 +736,19 @@ class Grism:
 		# Use JIT-compiled core for Gaussian computation
 		cube = _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges)
 
-		# psf_cube = fftconvolve(cube, self.full_kernel, mode='same') 
-		psf_cube = fftconvolve(cube, self.PSF, mode='same') 
+		# psf_cube = fftconvolve(cube, self.full_kernel, mode='same')
+		psf_cube = fftconvolve(cube, self.PSF, mode='same')
 
-		#collapse across the x axis
-		grism_full = jnp.sum(psf_cube, axis = 1)
+		# Collapse along appropriate axis based on dispersion direction
+		if self.pupil == 'R':
+			# Row dispersion: collapse along x axis (sum over spatial columns)
+			# Output shape: (spatial_y, n_wavelengths)
+			grism_full = jnp.sum(psf_cube, axis=1)
+		elif self.pupil == 'C':
+			# Column dispersion: collapse along y axis (sum over spatial rows)
+			# Output shape: (spatial_x, n_wavelengths)
+			grism_full = jnp.sum(psf_cube, axis=0)
+
 		return grism_full
 
 
