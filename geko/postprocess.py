@@ -247,6 +247,171 @@ def process_results(output, master_cat, line,  mock_params = None, test = None, 
 	return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
 
 
+def process_results_multi(observations, results, output, master_cat, line, parametric, ID, save_runs_path,
+                          field, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5, wave_factor=10,
+                          model_name='Disk', manual_psf_name=None, manual_grism_file=None):
+	"""
+	Post-process multi-observation inference data and generate summary plots.
+
+	Similar to process_results but handles multiple observations. Computes v_re, v/sigma,
+	saves fit results, and generates multi-observation summary plot.
+
+	Parameters
+	----------
+	observations : list of GrismObservation
+		List of GrismObservation objects that were fit
+	results : dict
+		Dictionary mapping observation names to their results
+	output : str
+		Output subfolder name
+	master_cat : str
+		Path to master catalog file
+	line : str
+		Emission line name (e.g., 'H_alpha')
+	parametric : bool
+		Whether parametric morphology was used
+	ID : int
+		Source ID number
+	save_runs_path : str
+		Base directory for saving
+	field : str
+		Field name
+	grism_filter : str, optional
+		Grism filter name (default: 'F444W')
+	delta_wave_cutoff : float, optional
+		Wavelength bin size cutoff (default: 0.02)
+	factor : int, optional
+		Spatial oversampling factor (default: 5)
+	wave_factor : int, optional
+		Wavelength oversampling factor (default: 10)
+	model_name : str, optional
+		Kinematic model type (default: 'Disk')
+
+	Returns
+	-------
+	v_re_16 : float
+		16th percentile of v_re
+	v_re_med : float
+		Median v_re
+	v_re_84 : float
+		84th percentile of v_re
+	kin_model : KinModels
+		Kinematic model object with computed results
+	inf_data : arviz.InferenceData
+		Updated inference data with additional posteriors
+	"""
+	from . import plotting
+
+	# Load inference data
+	inf_data = az.InferenceData.from_netcdf(save_runs_path + output + '/' + str(ID) + '_output_multi')
+
+	num_samples = inf_data.posterior['sigma0'].shape[1]
+	num_chains = inf_data.posterior['sigma0'].shape[0]
+	num_samples_prior = inf_data.prior['sigma0'].shape[1]
+
+	# Use first observation's grism object for v_re calculation
+	# (v_re is an intrinsic property, not observation-dependent)
+	first_obs = observations[0]
+	grism_object = first_obs.grism
+
+	# Get kin_model from results (it was already computed in run_geko_fit_multi)
+	# We need to reload preprocessing to get the kin_model structure
+	# Actually, we can extract the kin_model from the fit that was run
+	# But we need to recreate it here for the plot
+	z_spec, wavelength, wave_space_ref, obs_map_ref, obs_error_ref, kin_model, grism_object_ref, delta_wave = \
+		pre.run_full_preprocessing(
+			output=output,
+			master_cat=master_cat,
+			line=line,
+			save_runs_path=save_runs_path,
+			source_id=ID,
+			field=field,
+			grism_filter=grism_filter,
+			delta_wave_cutoff=delta_wave_cutoff,
+			factor=factor,
+			wave_factor=wave_factor,
+			model_name=model_name,
+			manual_psf_name=manual_psf_name,
+			manual_grism_file=manual_grism_file
+		)
+
+	# Compute model posteriors to populate kin_model attributes
+	# This sets all the _mean and percentile attributes on kin_model
+	inf_data, _ = kin_model.compute_model_parametric_multi(inf_data, observations)
+
+	# Define wave_space
+	index_min = grism_object.index_min
+	index_max = grism_object.index_max
+	len_wave = int((wave_space_ref[len(wave_space_ref)-1] - wave_space_ref[0])/(delta_wave))
+	wave_space = jnp.linspace(wave_space_ref[0], wave_space_ref[len(wave_space_ref)-1], len_wave+1)
+	wave_space = wave_space[index_min:index_max]
+
+	# Add v_re to posterior
+	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
+
+	# Compute v/sigma posterior and quantiles
+	inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims=('chain', 'draw'))
+	inf_data.prior['sigma0_trunc'] = xr.DataArray(np.zeros((1, num_samples_prior)), dims=('chain', 'draw'))
+
+	for i in range(num_chains):
+		for sample in range(num_samples):
+			if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
+				inf_data.posterior['sigma0_trunc'][i,sample] = np.random.uniform(
+					inf_data.posterior['sigma0'].quantile(0.84),
+					0.5*inf_data.posterior['sigma0'].quantile(0.16)
+				)
+			else:
+				inf_data.posterior['sigma0_trunc'][i,sample] = inf_data.posterior['sigma0'][i,sample]
+
+	# Process prior samples separately
+	for sample in range(num_samples_prior):
+		if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
+			inf_data.prior['sigma0_trunc'][0,sample] = np.random.uniform(
+				inf_data.prior['sigma0'].quantile(0.84),
+				0.5*inf_data.prior['sigma0'].quantile(0.16)
+			)
+		else:
+			inf_data.prior['sigma0_trunc'][0,sample] = inf_data.prior['sigma0'][0,sample]
+
+	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0_trunc']
+	inf_data['prior']['v_sigma'] = inf_data.prior['v_re'] / inf_data.prior['sigma0_trunc']
+
+	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
+	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
+	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
+
+	# Save fit results
+	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84,
+	                save_runs_path=save_runs_path)
+
+	# Generate multi-observation summary plot
+	obs_radius = kin_model.r_eff_mean
+	ellip = kin_model.ellip_mean
+	theta_Ha = kin_model.PA_morph_mean/(180/jnp.pi) + jnp.pi/2  # Convert to radians
+	n = kin_model.n_mean
+
+	plotting.plot_disk_summary_multi(
+		observations=observations,
+		results=results,
+		inf_data=inf_data,
+		wave_space=wave_space,
+		x0=kin_model.x0_vel_mean,
+		y0=kin_model.y0_vel_mean,
+		factor=1,
+		direct_image_size=kin_model.im_shape[0],
+		save_to_folder=output,
+		name='summary',
+		obs_radius=obs_radius,
+		ellip=ellip,
+		theta_Ha=theta_Ha,
+		n=n,
+		save_runs_path=save_runs_path,
+		ID=ID
+	)
+
+	return v_re_16, v_re_med, v_re_84, kin_model, inf_data
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=str, default='',
 					help='folder of the galaxy you want to postprocess')

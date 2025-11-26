@@ -1336,14 +1336,17 @@ class DiskModel(KinModels):
 
 			# Downsample flux map for this observation
 			fluxes_mean = utils.resample(model_flux, self.disk.factor, self.disk.factor)
-			model_velocities_low = np.where(fluxes_mean == 0, np.nan, model_velocities_low)
-			model_dispersions_low = jnp.where(fluxes_mean == 0, np.nan, model_dispersions_low)
+			# Apply masking to flux map (mask out low-flux regions, similar to compute_parametrix_flux_posterior)
+			fluxes_mean_masked = jnp.where(fluxes_mean > 0.01 * fluxes_mean.max(), fluxes_mean, 0.0)
+			# Mask velocity and dispersion maps where flux is zero
+			model_velocities_low = np.where(fluxes_mean_masked == 0, np.nan, model_velocities_low)
+			model_dispersions_low = jnp.where(fluxes_mean_masked == 0, np.nan, model_dispersions_low)
 
 			# Store results for this observation
 			results[obs.name] = {
 				'model_map': model_map,
 				'model_flux': model_flux,
-				'fluxes_mean': fluxes_mean,
+				'fluxes_mean': fluxes_mean_masked,  # Store masked flux for plotting
 				'model_velocities': model_velocities,
 				'model_dispersions': model_dispersions,
 				'model_velocities_low': model_velocities_low,
@@ -1355,11 +1358,11 @@ class DiskModel(KinModels):
 		first_obs_name = observations[0].name
 		self.model_map = results[first_obs_name]['model_map']
 		self.model_flux = results[first_obs_name]['model_flux']
-		self.fluxes_mean = results[first_obs_name]['fluxes_mean']
+		self.fluxes_mean = results[first_obs_name]['fluxes_mean']  # Already masked
 		self.model_velocities = results[first_obs_name]['model_velocities']
 		self.model_dispersions = results[first_obs_name]['model_dispersions']
-		self.model_velocities_low = results[first_obs_name]['model_velocities_low']
-		self.model_dispersions_low = results[first_obs_name]['model_dispersions_low']
+		self.model_velocities_low = results[first_obs_name]['model_velocities_low']  # Already masked
+		self.model_dispersions_low = results[first_obs_name]['model_dispersions_low']  # Already masked
 
 		return inference_data, results
 
