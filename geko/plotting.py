@@ -701,6 +701,324 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
 	plt.close()
 
+	return None, None
+
+def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, y0=31, factor=2,
+                            direct_image_size=62, save_to_folder=None, name=None, PA=None, i=None,
+                            Va=None, r_t=None, sigma0=None, obs_radius=None, ellip=None,
+                            theta_obs=None, theta_Ha=None, n=None, save_runs_path=None, ID=None):
+	"""
+	Create comprehensive summary plot for multi-observation disk model fitting results.
+
+	Similar to plot_disk_summary but handles multiple observations. Creates a figure with:
+	- N rows for N observations (each showing observed, model, and residual grism spectra)
+	- 1 final row showing intrinsic velocity field, dispersion field, and flux map (shared)
+
+	Parameters
+	----------
+	observations : list of GrismObservation
+		List of GrismObservation objects that were fit
+	results : dict
+		Dictionary mapping observation names to their results, each containing:
+		- 'observation': GrismObservation object
+		- 'model_map': model grism spectrum
+		- 'model_velocities_low': downsampled velocity field
+		- 'model_dispersions_low': downsampled dispersion field
+		- 'fluxes_mean': flux map
+	inf_data : arviz.InferenceData
+		MCMC inference results
+	wave_space : numpy.ndarray
+		Wavelength array
+	x0, y0 : int, optional
+		Center coordinates (default: 31)
+	factor : int, optional
+		Oversampling factor (default: 2)
+	direct_image_size : int, optional
+		Direct image size (default: 62)
+	save_to_folder : str, optional
+		Output folder path for saving figure
+	name : str, optional
+		Base filename for saving
+	PA, i, Va, r_t, sigma0 : float, optional
+		Best-fit kinematic parameters
+	obs_radius, ellip : float, optional
+		Morphological parameters
+	theta_obs, theta_Ha : float, optional
+		Position angles
+	n : float, optional
+		Sersic index
+	save_runs_path : str, optional
+		Base directory for saving
+	ID : int, optional
+		Source ID for output filenames
+
+	Returns
+	-------
+	None
+
+	Notes
+	-----
+	Saves figure as '{save_to_folder}_summary_multi.png' if save_to_folder is provided.
+	Figure size scales with number of observations.
+	"""
+	from .grism import GrismObservation
+
+	n_obs = len(observations)
+
+	# Calculate figure size based on number of observations
+	# Each observation row gets same height as original, intrinsic row gets same height
+	row_height = 2.5  # Height per row in inches
+	fig_height = row_height * (n_obs + 1)  # n_obs rows + 1 intrinsic row
+	fig_width = 7
+
+	fig = plt.figure(constrained_layout=True)
+	fig.set_size_inches(fig_width, fig_height)
+
+	# Create gridspec: n_obs + 1 rows, 3 columns
+	height_ratios = [1] * (n_obs + 1)  # Equal height for all rows
+	gs0 = fig.add_gridspec(n_obs + 1, 3, width_ratios=[4, 4, 4],
+	                       height_ratios=height_ratios, hspace=0.05)
+
+	# Get coordinate grids
+	y = np.linspace(0 - y0, direct_image_size - 1 - y0, direct_image_size)
+	x = np.linspace(0 - x0, direct_image_size - 1 - x0, direct_image_size)
+	X_obs, Y_obs = np.meshgrid(x, y)
+
+	X_intrinsic, Y_intrinsic = np.meshgrid(
+		np.linspace(0 - x0, direct_image_size - 1 - x0, direct_image_size),
+		np.linspace(0 - y0, direct_image_size - 1 - y0, direct_image_size)
+	)
+
+	# Extract shared parameters for intrinsic plots
+	v0 = inf_data.posterior['v0'].quantile(0.5, dim=["chain", "draw"]).values
+	x0_morph = inf_data.posterior['xc_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	y0_morph = inf_data.posterior['yc_morph'].quantile(0.5, dim=["chain", "draw"]).values
+	x0_vel = inf_data.posterior['x0_vel'].quantile(0.5, dim=["chain", "draw"]).values
+	y0_vel = inf_data.posterior['y0_vel'].quantile(0.5, dim=["chain", "draw"]).values
+
+	re_50 = float(inf_data.posterior['r_eff'].quantile(0.5, dim=["chain", "draw"]).values)
+	re_50_minor = re_50 * (1 - ellip)
+	re_50_proj = np.maximum(re_50 * np.abs(np.cos(np.pi/2 - theta_Ha)), re_50_minor)
+
+	# Plot each observation in its own row
+	for obs_idx, obs in enumerate(observations):
+		obs_name = obs.name
+		obs_results = results[obs_name]
+		obs_map = obs.obs_map
+		obs_error = obs.obs_error
+		model_map = obs_results['model_map']
+
+		# Adjust coordinates for this observation's shape
+		y_obs = np.linspace(0 - y0, obs_map.shape[0] - 1 - y0, obs_map.shape[0])
+		x_obs = np.linspace(0 - x0, obs_map.shape[1] - 1 - x0, obs_map.shape[1])
+		X_this, Y_this = np.meshgrid(x_obs, y_obs)
+
+		# Try to compute obs_radius for this observation
+		try:
+			im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 5, save_to_folder)
+			obs_radius_this = rmax
+			obs_radius_proj_this = rmax_proj
+		except:
+			try:
+				im_conv, segment_map, rmax, rmax_proj = make_mask(obs_map, 3, save_to_folder)
+				obs_radius_this = rmax
+				obs_radius_proj_this = rmax_proj
+			except:
+				obs_radius_this = 0.0
+				obs_radius_proj_this = 0.0
+
+		obs_radius_ax_scale = obs_radius_proj_this / obs_map.shape[0] if obs_map.shape[0] > 0 else 0
+		re_ax_scale = re_50_proj / obs_map.shape[0] if obs_map.shape[0] > 0 else 0
+
+		# Panel 1: Observed grism
+		ax_obs = fig.add_subplot(gs0[obs_idx, 0])
+		cp = ax_obs.pcolormesh(X_this, Y_this, obs_map, shading='nearest', cmap='BuPu',
+		                       vmax=obs_map.max(), vmin=obs_map.min())
+		ax_obs.axis('off')
+
+		# Add scale bar
+		ax_obs.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=ax_obs.transAxes)
+		ax_obs.text(0.18, 0.5, '0.5"', color='black', fontsize=10, ha='center',
+		           va='center', rotation=90, transform=ax_obs.transAxes)
+
+		# Add axis labels for first row
+		if obs_idx == 0:
+			ax_obs.plot([0.05, 0.15], [0.05, 0.05], '-', lw=2, transform=ax_obs.transAxes,
+			           clip_on=False, c='mediumblue')
+			ax_obs.plot([0.05, 0.05], [0.05, 0.15], '-', lw=2, transform=ax_obs.transAxes,
+			           clip_on=False, c='forestgreen')
+			ax_obs.text(0.2, 0.05, "Dispersion", fontsize=10, color="mediumblue",
+			           ha="left", va="center", transform=ax_obs.transAxes)
+			ax_obs.text(0.03, 0.3, "Spatial", fontsize=10, color="forestgreen",
+			           ha="left", va="center", rotation=90, transform=ax_obs.transAxes)
+
+		# Add radius markers
+		ax_obs.text(0.75, 0.5, r'$2r_{\text{e}}$', color='crimson', fontsize=10,
+		           ha='center', va='center', transform=ax_obs.transAxes)
+		ax_obs.plot([0.7, 0.7], [0.5 - re_ax_scale, 0.5 + re_ax_scale], c='crimson',
+		           lw=2, transform=ax_obs.transAxes)
+
+		ax_obs.text(0.9, 0.5, r'$2r_{\text{obs}}$', color='orange', fontsize=10,
+		           ha='center', va='center', transform=ax_obs.transAxes)
+		ax_obs.plot([0.8, 0.8], [0.5 - obs_radius_ax_scale, 0.5 + obs_radius_ax_scale],
+		           c='orange', lw=2, transform=ax_obs.transAxes)
+
+		ax_obs.set_title(f'Observed grism ({obs_name})', fontsize=10)
+
+		# Panel 2: Model grism
+		ax_model = fig.add_subplot(gs0[obs_idx, 1])
+		cp = ax_model.pcolormesh(X_this, Y_this, model_map, shading='nearest', cmap='BuPu',
+		                         vmax=obs_map.max(), vmin=obs_map.min())
+		ax_model.axis('off')
+
+		ax_model.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=ax_model.transAxes)
+		ax_model.text(0.18, 0.5, '0.5"', color='black', fontsize=10, ha='center',
+		             va='center', rotation=90, transform=ax_model.transAxes)
+
+		ax_model.text(0.75, 0.5, r'$2r_{\text{e}}$', color='crimson', fontsize=10,
+		             ha='center', va='center', transform=ax_model.transAxes)
+		ax_model.plot([0.7, 0.7], [0.5 - re_ax_scale, 0.5 + re_ax_scale], c='crimson',
+		             lw=2, transform=ax_model.transAxes)
+
+		ax_model.text(0.9, 0.5, r'$2r_{\text{obs}}$', color='orange', fontsize=10,
+		             ha='center', va='center', transform=ax_model.transAxes)
+		ax_model.plot([0.8, 0.8], [0.5 - obs_radius_ax_scale, 0.5 + obs_radius_ax_scale],
+		             c='orange', lw=2, transform=ax_model.transAxes)
+
+		ax_model.set_title(f'Model grism ({obs_name})', fontsize=10)
+
+		# Panel 3: Residuals
+		chi = (model_map - obs_map) / obs_error
+		ax_residuals = fig.add_subplot(gs0[obs_idx, 2])
+		cp = ax_residuals.pcolormesh(X_this, Y_this, chi, shading='nearest', cmap='BuPu',
+		                             vmin=-5, vmax=5)
+		ax_residuals.axis('off')
+
+		ax_residuals.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=ax_residuals.transAxes)
+		ax_residuals.text(0.2, 0.5, '0.5"', color='black', fontsize=10, ha='center',
+		                 va='center', rotation=90, transform=ax_residuals.transAxes)
+
+		ax_residuals.text(0.75, 0.5, r'$2r_{\text{e}}$', color='crimson', fontsize=10,
+		                 ha='center', va='center', transform=ax_residuals.transAxes)
+		ax_residuals.plot([0.7, 0.7], [0.5 - re_ax_scale, 0.5 + re_ax_scale], c='crimson',
+		                 lw=2, transform=ax_residuals.transAxes)
+
+		ax_residuals.text(0.9, 0.5, r'$2r_{\text{obs}}$', color='orange', fontsize=10,
+		                 ha='center', va='center', transform=ax_residuals.transAxes)
+		ax_residuals.plot([0.8, 0.8], [0.5 - obs_radius_ax_scale, 0.5 + obs_radius_ax_scale],
+		                 c='orange', lw=2, transform=ax_residuals.transAxes)
+
+		ax_residuals.set_title(r'Residual $\chi$ map', fontsize=10)
+
+	# Last row: Intrinsic velocity, dispersion, and flux maps (shared across observations)
+	# Use results from first observation for the intrinsic fields
+	first_obs_name = observations[0].name
+	model_velocities = results[first_obs_name]['model_velocities_low']
+	model_dispersions = results[first_obs_name]['model_dispersions_low']
+	fluxes_mean = results[first_obs_name]['fluxes_mean']
+
+	velocites_center = model_velocities[int(x0_vel), int(y0_vel)] if model_velocities.shape[0] > int(x0_vel) and model_velocities.shape[1] > int(y0_vel) else 0
+
+	# Ellipse parameters for intrinsic plots
+	from matplotlib.patches import Ellipse
+	center_x = (x0_morph - x0)
+	center_y = (y0_morph - y0)
+	width_obs = 2 * obs_radius if obs_radius is not None else 0
+	height_obs = 2 * (1 - ellip) * obs_radius if obs_radius is not None else 0
+	width_re = 2 * re_50
+	height_re = 2 * (1 - ellip) * re_50
+	angle = -np.degrees(theta_Ha)
+
+	# Panel 1: Velocity map
+	vel_map_ax = fig.add_subplot(gs0[n_obs, 0])
+	cp = vel_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, (model_velocities - v0),
+	                           shading='nearest', cmap='RdBu_r')
+	vel_map_ax.axis('off')
+
+	# Add ellipses
+	if obs_radius is not None and obs_radius > 0:
+		ellipse_robs = Ellipse((center_x, center_y), width_obs, height_obs, angle=angle,
+		                       edgecolor='orange', facecolor='none', linewidth=2, alpha=0.5)
+		vel_map_ax.add_patch(ellipse_robs)
+
+	ellipse_re = Ellipse((center_x, center_y), width_re, height_re, angle=angle,
+	                     edgecolor='crimson', facecolor='none', linewidth=2, alpha=0.5)
+	vel_map_ax.add_patch(ellipse_re)
+
+	from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+	cax = inset_axes(vel_map_ax, width="30%", height="5%", loc="lower right", borderpad=0.5)
+	cbar = plt.colorbar(cp, cax=cax, orientation='horizontal')
+	cbar.ax.tick_params(labelsize=10)
+	vel_map_ax.set_title(r'$v_{\text{obs}}$ map', fontsize=10)
+
+	vel_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=vel_map_ax.transAxes)
+	vel_map_ax.text(0.2, 0.5, '0.5"', color='black', fontsize=10, ha='center',
+	               va='center', rotation=90, transform=vel_map_ax.transAxes)
+
+	vel_map_ax.plot((x0_vel - x0), (y0_vel - y0), '+', markersize=10, color='black')
+	vel_map_ax.plot((x0_morph - x0), (y0_morph - y0), '.', markersize=10, color='crimson')
+
+	# Panel 2: Dispersion map
+	veldisp_map_ax = fig.add_subplot(gs0[n_obs, 1])
+	veldisp_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, model_dispersions, shading='nearest',
+	                          cmap='RdBu_r', vmin=np.nanmin(model_velocities - velocites_center),
+	                          vmax=np.nanmax(model_velocities - velocites_center))
+	veldisp_map_ax.axis('off')
+	veldisp_map_ax.set_title(r'$\sigma_0$ map', fontsize=10)
+
+	veldisp_map_ax.plot((x0_vel - x0), (y0_vel - y0), '+', markersize=10, label='velocity centroid', color='black')
+	veldisp_map_ax.plot((x0_morph - x0), (y0_morph - y0), '.', markersize=10, label='flux centroid', color='crimson')
+	veldisp_map_ax.legend(fontsize=8, loc='lower right', borderaxespad=2)
+
+	veldisp_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=veldisp_map_ax.transAxes)
+	veldisp_map_ax.text(0.2, 0.5, '0.5"', color='black', fontsize=10, ha='center',
+	                   va='center', rotation=90, transform=veldisp_map_ax.transAxes)
+
+	cax = inset_axes(veldisp_map_ax, width="30%", height="5%", loc="upper right", borderpad=0.5)
+	cbar = plt.colorbar(cp, cax=cax, orientation='horizontal')
+	cbar.ax.tick_params(labelsize=10)
+
+	if obs_radius is not None and obs_radius > 0:
+		ellipse_robs2 = Ellipse((center_x, center_y), width_obs, height_obs, angle=angle,
+		                        edgecolor='orange', facecolor='none', linewidth=2, alpha=0.5)
+		veldisp_map_ax.add_patch(ellipse_robs2)
+
+	ellipse_re2 = Ellipse((center_x, center_y), width_re, height_re, angle=angle,
+	                      edgecolor='crimson', facecolor='none', linewidth=2, alpha=0.5)
+	veldisp_map_ax.add_patch(ellipse_re2)
+
+	# Panel 3: Flux map
+	flux_map_ax = fig.add_subplot(gs0[n_obs, 2])
+	cp = flux_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, fluxes_mean, shading='nearest', cmap='BuPu')
+	flux_map_ax.axis('off')
+	flux_map_ax.set_title(r'H$\alpha$ map', fontsize=10)
+
+	flux_map_ax.plot((x0_vel - x0), (y0_vel - y0), '+', markersize=10, label='velocity centroid', color='black')
+	flux_map_ax.plot((x0_morph - x0), (y0_morph - y0), '.', markersize=10, label='flux centroid', color='crimson')
+	flux_map_ax.legend(fontsize=8, loc='lower right', borderaxespad=2)
+
+	flux_map_ax.plot([0.1, 0.1], [0.37, 0.63], 'k-', lw=2, transform=flux_map_ax.transAxes)
+	flux_map_ax.text(0.2, 0.5, '0.5"', color='black', fontsize=10, ha='center',
+	                va='center', rotation=90, transform=flux_map_ax.transAxes)
+
+	if obs_radius is not None and obs_radius > 0:
+		ellipse_robs3 = Ellipse((center_x, center_y), width_obs, height_obs, angle=angle,
+		                        edgecolor='orange', facecolor='none', linewidth=2, alpha=0.5)
+		flux_map_ax.add_patch(ellipse_robs3)
+
+	ellipse_re3 = Ellipse((center_x, center_y), width_re, height_re, angle=angle,
+	                      edgecolor='crimson', facecolor='none', linewidth=2, alpha=0.5)
+	flux_map_ax.add_patch(ellipse_re3)
+
+	# Save figure
+	if save_to_folder is not None:
+		if name == 'summary':
+			filename = str(ID) + '_summary_multi.png' if ID is not None else str(save_to_folder).split('/')[0] + '_summary_multi.png'
+			fig.savefig(save_runs_path + save_to_folder + '/' + filename, dpi=300, bbox_inches="tight")
+		else:
+			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary_multi.png', dpi=500)
+	plt.close()
+
 
 	# gs1 = gs0[2,:]
 

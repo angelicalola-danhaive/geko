@@ -1,4 +1,4 @@
-__all__ = ["Fit_Numpyro", "run_geko_fit"]
+__all__ = ["Fit_Numpyro", "run_geko_fit", "run_geko_fit_multi"]
 
 # imports
 
@@ -6,6 +6,7 @@ __all__ = ["Fit_Numpyro", "run_geko_fit"]
 # from . import grism_dev
 from . import preprocess as pre
 from . import postprocess as post
+from . import grism
 
 import os
 
@@ -613,5 +614,279 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
     return inf_data
 
+
+def run_geko_fit_multi(observations_config, output, master_cat, line, parametric, save_runs_path,
+                       num_chains, num_warmup, num_samples, source_id, field, grism_filter='F444W',
+                       delta_wave_cutoff=0.005, factor=5, wave_factor=10, model_name='Disk', config=None,
+                       manual_psf_name=None, manual_pysersic_file=None, step_size=0.1,
+                       adapt_step_size=True, target_accept_prob=0.8):
+    """
+    Run geko multi-observation fitting for multiple grism observations.
+
+    This function jointly fits multiple grism observations (e.g., at different position angles
+    or dispersion directions) by sharing galaxy parameters across observations while computing
+    separate likelihoods for each.
+
+    Parameters
+    ----------
+    observations_config : list of dict
+        List of observation configurations. Each dict should contain:
+            - 'grism_file': str, grism spectrum filename
+            - 'theta_rot': float, rotation angle in degrees (for morphology alignment)
+            - 'dispersion': str, 'R' (row) or 'C' (column) dispersion direction
+            - 'name': str, optional name for this observation (default: 'obsN')
+        Example:
+            [
+                {'grism_file': 'spec_2d_PA0.fits', 'theta_rot': 0.0, 'dispersion': 'R', 'name': 'PA0'},
+                {'grism_file': 'spec_2d_PA90.fits', 'theta_rot': 90.0, 'dispersion': 'R', 'name': 'PA90'}
+            ]
+    output : str
+        Name of output subfolder
+    master_cat : str
+        Path to master catalog file
+    line : int
+        Emission line wavelength in Angstroms (e.g., 6562 for H-alpha)
+    parametric : bool
+        Use parametric morphology fitting
+    save_runs_path : str
+        Base directory containing data files
+    num_chains : int
+        Number of MCMC chains
+    num_warmup : int
+        Number of warmup iterations
+    num_samples : int
+        Number of MCMC samples
+    source_id : int
+        Source ID number
+    field : str
+        Field name: 'GOODS-N', 'GOODS-N-CONGRESS', 'GOODS-S-FRESCO', or 'manual'
+    grism_filter : str, optional
+        Grism filter name (default: 'F444W')
+    delta_wave_cutoff : float, optional
+        Wavelength bin size cutoff in microns (default: 0.005)
+    factor : int, optional
+        Spatial oversampling factor (default: 5)
+    wave_factor : int, optional
+        Wavelength oversampling factor (default: 10)
+    model_name : str, optional
+        Kinematic model type (default: 'Disk')
+    config : FitConfiguration, optional
+        Optional configuration object to override priors
+    manual_psf_name : str, optional
+        PSF filename (required if field='manual')
+    manual_pysersic_file : str, optional
+        PySersic results filename (required if field='manual' and parametric=True)
+    step_size : float, optional
+        MCMC step size (default: 0.1)
+    adapt_step_size : bool, optional
+        Adapt step size during warmup (default: True)
+    target_accept_prob : float, optional
+        Target acceptance probability (default: 0.8)
+
+    Returns
+    -------
+    arviz.InferenceData
+        MCMC inference results with posterior samples
+    dict
+        Dictionary mapping observation names to their model predictions, including:
+            - 'model_map': median model prediction
+            - 'model_map_16': 16th percentile prediction
+            - 'model_map_84': 84th percentile prediction
+    """
+
+    # Run preprocessing on the first observation to initialize model
+    first_obs_file = observations_config[0]['grism_file']
+
+    print("Running preprocessing on first observation...")
+    z_spec, wavelength, wave_space, obs_map_ref, obs_error_ref, kin_model, grism_object_ref, delta_wave = \
+        pre.run_full_preprocessing(
+            output=output,
+            master_cat=master_cat,
+            line=line,
+            save_runs_path=save_runs_path,
+            source_id=source_id,
+            field=field,
+            grism_filter=grism_filter,
+            delta_wave_cutoff=delta_wave_cutoff,
+            factor=factor,
+            wave_factor=wave_factor,
+            model_name=model_name,
+            manual_psf_name=manual_psf_name,
+            manual_grism_file=first_obs_file
+        )
+
+    # Set up parametric priors if needed
+    if parametric:
+        # Load PySersic morphology file
+        pysersic_available = False
+
+        if field == 'manual':
+            if manual_pysersic_file is None:
+                if config is None:
+                    raise ValueError(
+                        "When field='manual', you must provide either:\n"
+                        "  1. manual_pysersic_file parameter, or\n"
+                        "  2. Complete morphological priors via the config parameter"
+                    )
+                print(f"WARNING: No manual_pysersic_file provided for field='manual'. Will use config priors.")
+            else:
+                try:
+                    pysersic_summary = Table.read(save_runs_path + 'morph_fits/' + manual_pysersic_file, format='ascii')
+                    pysersic_available = True
+                except:
+                    if config is None:
+                        raise FileNotFoundError(
+                            f"PySersic file not found at {save_runs_path}morph_fits/{manual_pysersic_file}\n"
+                            f"To run without PySersic, you must provide morphological priors via the config parameter."
+                        )
+                    print(f"WARNING: PySersic file not found. Will use config priors.")
+        else:
+            # Standard field-based loading
+            try:
+                pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F150W_svi.cat', format='ascii')
+                pysersic_available = True
+            except:
+                try:
+                    pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F182M_svi.cat', format='ascii')
+                    pysersic_available = True
+                except:
+                    if config is None:
+                        raise FileNotFoundError(
+                            f"No PySersic morphology file found for source {source_id}\n"
+                            f"To run without PySersic, you must provide morphological priors via the config parameter."
+                        )
+                    print(f"WARNING: No PySersic file found for source {source_id}. Will use config priors.")
+
+        # Load emission line flux from master catalog
+        master_cat_table = Table.read(master_cat, format="ascii")
+        log_int_flux = master_cat_table['fit_flux_cgs'][master_cat_table['ID'] == source_id][0]
+        int_flux = 10**log_int_flux
+        log_int_flux_err = master_cat_table['fit_flux_cgs_e'][master_cat_table['ID'] == source_id][0]
+        int_flux_err_high = 10**(log_int_flux + log_int_flux_err) - 10**log_int_flux
+        int_flux_err_low = 10**log_int_flux - 10**(log_int_flux - log_int_flux_err)
+        int_flux_err = np.mean([int_flux_err_high, int_flux_err_low])
+
+        # For multi-observation fitting, we use the reference frame (first observation)
+        # and rotation angles are applied per-observation
+        theta_rot_ref = jnp.radians(observations_config[0]['theta_rot'])
+
+        # Set priors based on what's available
+        if pysersic_available:
+            kin_model.disk.set_parametric_priors(
+                pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
+                delta_wave, theta_rot=theta_rot_ref, shape=obs_map_ref.shape[0]
+            )
+            if config is not None:
+                print("\nApplying selective config overrides to PySersic priors...")
+                kin_model.disk.apply_config_overrides(config)
+        else:
+            print("\nUsing config priors (no PySersic file available)...")
+            kin_model.disk.set_priors_from_config(config)
+    else:
+        raise ValueError("Non-parametric fitting is not implemented yet. Please set parametric=True.")
+
+    # Create GrismObservation objects for all observations
+    print(f"\nCreating {len(observations_config)} GrismObservation objects...")
+    observations = []
+
+    for i, obs_config in enumerate(observations_config):
+        obs_name = obs_config.get('name', f'obs{i}')
+        grism_file = obs_config['grism_file']
+        theta_rot = obs_config['theta_rot']
+        dispersion = obs_config['dispersion']
+
+        # Load this observation's data
+        if i == 0:
+            # Use already loaded reference observation
+            obs_map = obs_map_ref
+            obs_error = obs_error_ref
+            grism_obj = grism_object_ref
+        else:
+            # Load additional observations
+            print(f"  Loading observation {obs_name}...")
+            _, _, _, obs_map, obs_error, _, grism_obj, _ = pre.run_full_preprocessing(
+                output=output,
+                master_cat=master_cat,
+                line=line,
+                save_runs_path=save_runs_path,
+                source_id=source_id,
+                field=field,
+                grism_filter=grism_filter,
+                delta_wave_cutoff=delta_wave_cutoff,
+                factor=factor,
+                wave_factor=wave_factor,
+                model_name=model_name,
+                manual_psf_name=manual_psf_name,
+                manual_grism_file=grism_file
+            )
+
+        # Create GrismObservation
+        obs = grism.GrismObservation(
+            grism=grism_obj,
+            obs_map=obs_map,
+            obs_error=obs_error,
+            theta_rot=theta_rot,
+            dispersion=dispersion,
+            name=obs_name
+        )
+        observations.append(obs)
+        print(f"  Created: {obs}")
+
+    # Initialize Fit_Numpyro
+    print("\nInitializing Fit_Numpyro...")
+    run_fit = Fit_Numpyro(
+        obs_map=obs_map_ref,  # Use reference observation
+        obs_error=obs_error_ref,
+        grism_object=grism_object_ref,
+        kin_model=kin_model,
+        inference_data=None,
+        parametric=parametric,
+        config=config
+    )
+
+    # Generate prior predictive samples
+    rng_key = random.PRNGKey(4)
+    inference_model = run_fit.kin_model.inference_model_parametric_multi
+    num_samples_prior = np.max([1000, num_samples])
+    prior_predictive = Predictive(inference_model, num_samples=num_samples_prior)
+
+    print("\nGenerating prior predictive samples...")
+    prior = prior_predictive(rng_key, observations=observations, masks=None)
+
+    # Run multi-observation inference
+    print(f"\nRunning multi-observation MCMC inference...")
+    print(f"  Observations: {len(observations)}")
+    print(f"  Chains: {num_chains}")
+    print(f"  Warmup: {num_warmup}")
+    print(f"  Samples: {num_samples}")
+
+    run_fit.run_inference_multi(
+        observations=observations,
+        masks=None,  # Auto-generate masks
+        num_samples=num_samples,
+        num_warmup=num_warmup,
+        num_chains=num_chains,
+        step_size=step_size,
+        adapt_step_size=adapt_step_size,
+        target_accept_prob=target_accept_prob
+    )
+
+    # Convert to arviz InferenceData
+    inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)
+
+    # Save results
+    output_file = save_runs_path + output + '/' + str(source_id) + '_output_multi'
+    print(f"\nSaving results to: {output_file}")
+    inf_data.to_netcdf(output_file)
+
+    # Post-process results for each observation
+    print("\nPost-processing results for each observation...")
+    inf_data, results = kin_model.compute_model_parametric_multi(inf_data, observations)
+
+    print("\nMulti-observation fitting complete!")
+    print(f"  Posterior samples: {inf_data.posterior.dims}")
+    print(f"  Results available for: {list(results.keys())}")
+
+    return inf_data, results
 
 
