@@ -236,21 +236,39 @@ class Grism:
 		-----
 		Sets attributes:
 		- detector_xmin, detector_xmax: Detector coordinate bounds
-		- detector_space_1d: 1D detector coordinate array
-		- detector_space_2d: 2D detector coordinate grid
+		- detector_ymin, detector_ymax: Detector coordinate bounds (for C dispersion)
+		- detector_space_1d_x: 1D detector x-coordinate array
+		- detector_space_1d_y: 1D detector y-coordinate array
+		- detector_space_2d_x: 2D detector x-coordinate grid
+		- detector_space_2d_y: 2D detector y-coordinate grid
+		- detector_space_1d: Alias for detector_space_1d_x (backward compatibility)
+		- detector_space_2d: Alias for detector_space_2d_x (backward compatibility)
 		"""
+		# X-coordinates (for row dispersion)
 		self.detector_xmin = self.xcenter_detector - self.jcenter
-		self.detector_xmax = self.xcenter_detector + (self.im_shape//self.factor-1-self.jcenter) #need to check that this still works but should do!
+		self.detector_xmax = self.xcenter_detector + (self.im_shape//self.factor-1-self.jcenter)
 
 		detector_x_space_low = jnp.linspace(self.detector_xmin, self.detector_xmax, int(self.im_shape//self.factor))
-
 		detector_x_space_low_2d = jnp.reshape(detector_x_space_low, (1, int(self.im_shape//self.factor)))
 
-		#oversampling it to high resolution
-		self.detector_space_1d = image.resize(detector_x_space_low_2d, (1,self.im_shape), method = 'linear')[0] #taking only the first row since all rows are the same - and I want it in 1D
+		# Oversample to high resolution
+		self.detector_space_1d_x = image.resize(detector_x_space_low_2d, (1, self.im_shape), method='linear')[0]
+		self.detector_space_2d_x = self.detector_space_1d_x * jnp.ones_like(jnp.zeros((self.im_shape, 1)))
 
-		#the position on the detector of each pixel in the high res model
-		self.detector_space_2d = self.detector_space_1d * jnp.ones_like(jnp.zeros( (self.im_shape,1) ))
+		# Y-coordinates (for column dispersion)
+		self.detector_ymin = self.ycenter_detector - self.icenter
+		self.detector_ymax = self.ycenter_detector + (self.im_shape//self.factor-1-self.icenter)
+
+		detector_y_space_low = jnp.linspace(self.detector_ymin, self.detector_ymax, int(self.im_shape//self.factor))
+		detector_y_space_low_2d = jnp.reshape(detector_y_space_low, (int(self.im_shape//self.factor), 1))
+
+		# Oversample to high resolution
+		self.detector_space_1d_y = image.resize(detector_y_space_low_2d, (self.im_shape, 1), method='linear')[:, 0]
+		self.detector_space_2d_y = self.detector_space_1d_y[:, jnp.newaxis] * jnp.ones_like(jnp.zeros((1, self.im_shape)))
+
+		# Backward compatibility aliases
+		self.detector_space_1d = self.detector_space_1d_x
+		self.detector_space_2d = self.detector_space_2d_x
 
 	def load_coefficients(self):
 		"""
@@ -325,7 +343,7 @@ class Grism:
 		# For Module B: flip the sign of b01 coefficient to match the flipped observed data
 		# Module B naturally disperses left (negative b01), but we flip the data and coefficients
 		# to maintain consistent wavelength ordering (small to large wavelengths left to right)
-		if self.module == 'B':
+		if self.module == 'B' and self.pupil == 'R':
 			original_b01 = self.w_opt[6]
 			self.w_opt = self.w_opt.copy()  # Make a copy to avoid modifying the original
 			self.w_opt[6] = -self.w_opt[6]  # Flip b01 coefficient (index 6 in w_opt array)
@@ -408,9 +426,18 @@ class Grism:
 		#disperse each pixel with wavelength self.wavelength (and zero velocity)
 		dispersion_indices = self.grism_dispersion(self.wavelength)
 
-		#put the dxs in the rest frame of the central pixel (since otherwise they are dx wrt to their original pixel in self.detector_space_1d)
-		dispersion_indices += (self.detector_space_1d - self.xcenter_detector)
-		#for each dx, find the closest in the uniformly distrubuted dxs
+		# Put dispersion indices in the rest frame of the central pixel
+		# For R: use x-coordinates and xcenter, for C: use y-coordinates and ycenter
+		if self.pupil == 'R':
+			# Row dispersion: add x-offset (broadcasts along columns, varies along rows)
+			dispersion_indices += (self.detector_space_1d_x - self.xcenter_detector)
+		elif self.pupil == 'C':
+			# Column dispersion: add y-offset (needs to broadcast along rows, vary along columns)
+			# Reshape from (im_shape,) to (im_shape, 1) to broadcast correctly
+			y_offset = (self.detector_space_1d_y - self.ycenter_detector)[:, jnp.newaxis]
+			dispersion_indices += y_offset
+
+		#for each dispersion offset, find the closest in the uniformly distributed dxs
 		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
 		#translate this to a wavelength in the rest frame of the central pixel
 		self.wave_array = self.wavs[wave_indices]
@@ -473,11 +500,11 @@ class Grism:
 		"""
 		if self.pupil == 'R':
 			# Row dispersion: dispersion varies in x, constant in y
-			xpix = self.detector_space_2d
+			xpix = self.detector_space_2d_x
 			ypix = self.ycenter_detector * jnp.ones_like(xpix)
 		elif self.pupil == 'C':
 			# Column dispersion: dispersion varies in y, constant in x
-			ypix = self.detector_space_2d
+			ypix = self.detector_space_2d_y
 			xpix = self.xcenter_detector * jnp.ones_like(ypix)
 
 		xpix -= 1024
