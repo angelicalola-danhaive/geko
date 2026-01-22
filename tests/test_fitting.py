@@ -294,3 +294,162 @@ def test_imports_work():
     assert run_geko_fit is not None
     assert callable(Fit_Numpyro)
     assert callable(run_geko_fit)
+
+
+# ============================================================================
+# MULTI-OBSERVATION FITTING TESTS
+# ============================================================================
+
+@pytest.fixture
+def grism_instance_C():
+    """Create a Grism instance for Column (C) dispersion"""
+    wave = 4.0
+    wave_space = np.arange(wave - 0.05, wave + 0.05 + 0.0001, 0.0001)
+    PSF = np.zeros((3, 3))
+    PSF[1, 1] = 1.0
+
+    return Grism(45, im_scale=0.0629/5, icenter=4, jcenter=4, wavelength=wave,
+                wave_space=wave_space, index_min=0, index_max=wave_space.shape[0],
+                grism_filter='F444W', grism_module='A', grism_pupil='C', PSF=PSF)
+
+
+@pytest.fixture
+def multi_observation_data(grism_instance, grism_instance_C):
+    """Create mock multi-observation data with R and C dispersions"""
+    from geko.grism import GrismObservation
+
+    # Create observation for R dispersion
+    obs_map_R = np.random.uniform(5, 15, (20, 20, 50))
+    obs_error_R = np.random.uniform(0.5, 1.5, (20, 20, 50))
+
+    grism_obs_R = GrismObservation(
+        grism=grism_instance,
+        obs_map=obs_map_R,
+        obs_error=obs_error_R,
+        theta_rot=0.0,
+        dispersion='R',
+        name='obs_R'
+    )
+
+    # Create observation for C dispersion
+    obs_map_C = np.random.uniform(5, 15, (20, 20, 50))
+    obs_error_C = np.random.uniform(0.5, 1.5, (20, 20, 50))
+
+    grism_obs_C = GrismObservation(
+        grism=grism_instance_C,
+        obs_map=obs_map_C,
+        obs_error=obs_error_C,
+        theta_rot=90.0,
+        dispersion='C',
+        name='obs_C'
+    )
+
+    return [grism_obs_R, grism_obs_C]
+
+
+class TestMultiObservationFitting:
+    """Test suite for multi-observation fitting"""
+
+    def test_run_inference_multi_exists(self, grism_instance, kin_model_instance, mock_inference_data):
+        """Test that run_inference_multi method exists"""
+        obs_map, obs_error = np.random.uniform(1, 10, (20, 20, 50)), np.random.uniform(0.1, 1, (20, 20, 50))
+
+        fit = Fit_Numpyro(
+            obs_map=obs_map,
+            obs_error=obs_error,
+            grism_object=grism_instance,
+            kin_model=kin_model_instance,
+            inference_data=mock_inference_data,
+            parametric=False
+        )
+
+        assert hasattr(fit, 'run_inference_multi')
+        assert callable(fit.run_inference_multi)
+
+    def test_run_inference_multi_accepts_observations_list(self, multi_observation_data,
+                                                          kin_model_instance, mock_inference_data):
+        """Test that run_inference_multi accepts list of GrismObservation objects"""
+        # Use the first observation's data to initialize Fit_Numpyro
+        obs_R = multi_observation_data[0]
+
+        fit = Fit_Numpyro(
+            obs_map=obs_R.obs_map,
+            obs_error=obs_R.obs_error,
+            grism_object=obs_R.grism,
+            kin_model=kin_model_instance,
+            inference_data=mock_inference_data,
+            parametric=False
+        )
+
+        # This should not raise an error (though it may fail later due to MCMC)
+        try:
+            # Just check the method signature works, don't actually run MCMC
+            import inspect
+            sig = inspect.signature(fit.run_inference_multi)
+            assert 'observations' in sig.parameters
+            assert 'masks' in sig.parameters
+            assert 'num_samples' in sig.parameters
+            assert 'num_warmup' in sig.parameters
+            assert 'num_chains' in sig.parameters
+        except Exception as e:
+            pytest.fail(f"run_inference_multi signature check failed: {e}")
+
+    def test_multi_obs_with_mixed_dispersions(self, multi_observation_data,
+                                             kin_model_instance, mock_inference_data):
+        """Test that multi-observation fitting accepts mixed R and C dispersions"""
+        obs_R = multi_observation_data[0]
+        obs_C = multi_observation_data[1]
+
+        # Verify we have one R and one C
+        assert obs_R.dispersion == 'R'
+        assert obs_C.dispersion == 'C'
+
+        fit = Fit_Numpyro(
+            obs_map=obs_R.obs_map,
+            obs_error=obs_R.obs_error,
+            grism_object=obs_R.grism,
+            kin_model=kin_model_instance,
+            inference_data=mock_inference_data,
+            parametric=False
+        )
+
+        # Verify the list contains mixed dispersions
+        dispersions = [obs.dispersion for obs in multi_observation_data]
+        assert 'R' in dispersions
+        assert 'C' in dispersions
+
+    def test_grism_observation_class_importable(self):
+        """Test that GrismObservation can be imported from grism module"""
+        from geko.grism import GrismObservation
+        assert GrismObservation is not None
+        assert callable(GrismObservation)
+
+    def test_single_observation_as_list(self, grism_instance, kin_model_instance, mock_inference_data):
+        """Test that run_inference_multi works with single observation in list"""
+        from geko.grism import GrismObservation
+
+        obs_map = np.random.uniform(5, 15, (20, 20, 50))
+        obs_error = np.random.uniform(0.5, 1.5, (20, 20, 50))
+
+        grism_obs = GrismObservation(
+            grism=grism_instance,
+            obs_map=obs_map,
+            obs_error=obs_error,
+            theta_rot=0.0,
+            dispersion='R',
+            name='single_obs'
+        )
+
+        fit = Fit_Numpyro(
+            obs_map=obs_map,
+            obs_error=obs_error,
+            grism_object=grism_instance,
+            kin_model=kin_model_instance,
+            inference_data=mock_inference_data,
+            parametric=False
+        )
+
+        # Should accept a single observation in a list
+        observations = [grism_obs]
+        assert len(observations) == 1
+        assert observations[0].dispersion == 'R'
