@@ -534,9 +534,9 @@ class Disk():
 		self.xc_std_vel = 2 * self.xc_std
 		self.yc_std_vel = 2 * self.yc_std
 
-		print(f"Set priors from config: PA={self.PA_morph_min}-{self.PA_morph_max}°, "
-		      f"inc={self.inc_min}-{self.inc_max}°, Va={self.Va_min}-{self.Va_max} km/s, "
-		      f"sigma0={self.sigma0_min}-{self.sigma0_max} km/s")
+		print(f"Set priors from config: PA={self.PA_morph_mu}±{self.PA_morph_std}°, "
+		      f"inc={self.inc_mu}±{self.inc_std}°, Va=[{self.Va_min},{self.Va_max}] km/s, "
+		      f"sigma0=[{self.sigma0_min},{self.sigma0_max}] km/s")
 
 	def apply_config_overrides(self, config):
 		"""

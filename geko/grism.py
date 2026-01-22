@@ -812,29 +812,11 @@ class GrismObservation:
 	theta_rot aligns the galaxy model (morphology, kinematics) to match the
 	orientation it had during this grism observation. For multi-observation fitting
 	at different position angles, each observation will have a different theta_rot.
-
-	Examples
-	--------
-	>>> grism_R = Grism(..., grism_pupil='R')
-	>>> obs = GrismObservation(
-	...     grism=grism_R,
-	...     obs_map=data,
-	...     obs_error=error,
-	...     theta_rot=230.5,  # GOODS-N field rotation
-	...     dispersion='R',
-	...     name='GOODS-N_R'
-	... )
 	"""
 	def __init__(self, grism, obs_map, obs_error, theta_rot, dispersion, name=None):
 		# Validation
 		if dispersion not in ['R', 'C']:
 			raise ValueError(f"dispersion must be 'R' or 'C', got {dispersion}")
-
-		if dispersion == 'C':
-			raise NotImplementedError(
-				"Column dispersion 'C' not yet implemented. "
-				"Currently only 'R' (row dispersion) is supported."
-			)
 
 		if obs_map.shape != obs_error.shape:
 			raise ValueError("obs_map and obs_error must have same shape")

@@ -428,7 +428,7 @@ class Fit_Numpyro():
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
 def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples,
-                 source_id, field, grism_filter='F444W', delta_wave_cutoff=0.005, factor=5, wave_factor=10,
+                 source_id, field, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5, wave_factor=9,
                  model_name='Disk', config=None,
                  manual_psf_name=None, manual_theta_rot=None, manual_pysersic_file=None,
                  manual_grism_file=None):
@@ -617,7 +617,7 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
 def run_geko_fit_multi(observations_config, output, master_cat, line, parametric, save_runs_path,
                        num_chains, num_warmup, num_samples, source_id, field, grism_filter='F444W',
-                       delta_wave_cutoff=0.005, factor=5, wave_factor=10, model_name='Disk', config=None,
+                       delta_wave_cutoff=0.02, factor=5, wave_factor=9, model_name='Disk', config=None,
                        manual_psf_name=None, manual_pysersic_file=None, step_size=0.1,
                        adapt_step_size=True, target_accept_prob=0.8):
     """
