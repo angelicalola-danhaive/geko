@@ -159,7 +159,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 		divergences=False)
 
 	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
-						color='dodgerblue', **CORNER_KWARGS)
+						color='royalblue', range=[0.55, 1.0, 1.0, 1.0], **CORNER_KWARGS)
 	plt.tight_layout()
 	plt.savefig(save_runs_path + output + '/' + str(ID)+'_v_sigma_corner.png', dpi=300)
 	plt.close()
