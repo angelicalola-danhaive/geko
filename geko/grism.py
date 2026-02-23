@@ -778,6 +778,89 @@ class Grism:
 
 		return grism_full
 
+	def disperse_2d_psf(self, F, V, D, use_lsf=True):
+		"""
+		Disperse a 3D data cube with PSF convolution AFTER 2D projection.
+
+		Alternative forward modeling approach that:
+		1. Shifts wavelengths based on velocity field
+		2. Broadens by velocity dispersion and LSF
+		3. Collapses to 2D grism spectrum first
+		4. Convolves with 2D PSF treating grism image as 2D detector image
+
+		Parameters
+		----------
+		F : jax.numpy.ndarray
+			2D flux map (spatial y, spatial x)
+		V : jax.numpy.ndarray
+			2D velocity field in km/s (spatial y, spatial x)
+		D : jax.numpy.ndarray
+			2D velocity dispersion field in km/s (spatial y, spatial x)
+		use_lsf : bool, optional
+			If True, include LSF broadening (default: True)
+
+		Returns
+		-------
+		jax.numpy.ndarray
+			2D dispersed grism spectrum
+			- For R (row) dispersion: shape (spatial_y, n_wavelengths)
+			- For C (column) dispersion: shape (spatial_x, n_wavelengths)
+
+		Notes
+		-----
+		This method differs from disperse() in the order of operations:
+		- disperse(): PSF convolution in 3D cube space → collapse to 2D
+		- disperse_2d_psf(): collapse to 2D → PSF convolution on 2D detector image
+
+		The grism detector image (spatial, wavelength) is convolved with the
+		2D PSF as if it were a regular 2D image on the detector.
+		"""
+
+		J_min = self.index_min
+		J_max = self.index_max
+
+		#self.wave_array contains the wavelength of each pixel in the grism image, in the ref frame of the central pixel
+		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
+		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
+
+		#set the effective dispersion which also accounts for the LSF
+		if use_lsf:
+			sigma_LSF = self.sigma_lsf
+			wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF))
+		else:
+			wave_sigmas_eff = wave_sigmas
+
+		#make a 3D cube (spacial, spectral, wavelengths)
+		mu = wave_centers[:,:,jnp.newaxis]
+		sigma = wave_sigmas_eff[:,:,jnp.newaxis]
+
+		#compute the edges of the wave space in order to evaluate the gaussian at those points - focusing only on the region of interest
+		wave_space_crop = self.wave_space[J_min:J_max]
+		wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
+		wave_space_edges_prov2 = jnp.insert(wave_space_edges_prov, 0, wave_space_edges_prov[0] - jnp.diff(wave_space_crop)[0])
+		wave_space_edges = jnp.append(wave_space_edges_prov2, wave_space_edges_prov2[-1] + jnp.diff(wave_space_crop)[-1])
+
+
+		# Use JIT-compiled core for Gaussian computation
+		cube = _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges)
+
+		# Collapse to 2D BEFORE PSF convolution
+		if self.pupil == 'R':
+			# Row dispersion: collapse along x axis (sum over spatial columns)
+			# Output shape: (spatial_y, n_wavelengths)
+			grism_2d = jnp.sum(cube, axis=1)
+		elif self.pupil == 'C':
+			# Column dispersion: collapse along y axis (sum over spatial rows)
+			# Output shape: (spatial_x, n_wavelengths)
+			grism_2d = jnp.sum(cube, axis=0)
+
+		# Convolve the 2D grism image with the 2D PSF
+		# Treating the (spatial, wavelength) grism image as a 2D detector image
+		psf_2d = self.oversampled_PSF
+		grism_full = fftconvolve(grism_2d, psf_2d, mode='same')
+
+		return grism_full
+
 
 # ============================================================================
 # GRISM OBSERVATION CLASS
