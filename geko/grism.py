@@ -213,6 +213,10 @@ class Grism:
 
 		self.set_wave_array()
 
+		# Flags to disable instrument effects (useful for ideal/noiseless tests)
+		self.use_psf = True
+		self.use_lsf = True
+
 
 	def __str__(self):
 		"""
@@ -699,14 +703,14 @@ class Grism:
 		# self.full_kernel = jnp.array(self.PSF) * self.lsf_kernel
 
 	
-	def disperse(self, F, V, D):
+	def disperse(self, F, V, D, use_lsf=True):
 		"""
 		Disperse a 3D data cube (flux, velocity, dispersion) through the grism.
 
 		Forward models the grism spectroscopy by:
 		1. Shifting wavelengths based on velocity field
 		2. Broadening by velocity dispersion and LSF
-		3. Convolving with spatial PSF
+		3. Convolving with spatial PSF in 3D cube space
 		4. Collapsing to 2D grism spectrum
 
 		Parameters
@@ -717,6 +721,8 @@ class Grism:
 			2D velocity field in km/s (spatial y, spatial x)
 		D : jax.numpy.ndarray
 			2D velocity dispersion field in km/s (spatial y, spatial x)
+		use_lsf : bool, optional
+			If True, include LSF broadening (default: True)
 
 		Returns
 		-------
@@ -743,16 +749,24 @@ class Grism:
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
 		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
 
-		sigma_LSF = self.sigma_lsf
-
 		#set the effective dispersion which also accounts for the LSF
-		wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF)) 
-		# wave_sigmas_eff = wave_sigmas
+		# use_lsf parameter is overridden by the instance attribute self.use_lsf
+		apply_lsf = use_lsf and self.use_lsf
+		if apply_lsf:
+			sigma_LSF = self.sigma_lsf
+			wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF))
+		else:
+			# Apply minimum sigma floor to prevent numerical singularities in ideal mode
+			# A tiny floor (0.1 pixels worth of wavelength) prevents erf from having infinite slope
+			# Calculate wavelength spacing from wave_space array
+			delta_wave = jnp.mean(jnp.diff(self.wave_space))
+			min_sigma = 0.1 * delta_wave
+			wave_sigmas_eff = jnp.maximum(wave_sigmas, min_sigma)
 
 		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
 		sigma = wave_sigmas_eff[:,:,jnp.newaxis]
-		
+
 		#compute the edges of the wave space in order to evaluate the gaussian at those points - focusing only on the region of interest
 		wave_space_crop = self.wave_space[J_min:J_max]
 		wave_space_edges_prov= wave_space_crop[1:] - jnp.diff(wave_space_crop)/2
@@ -763,8 +777,11 @@ class Grism:
 		# Use JIT-compiled core for Gaussian computation
 		cube = _disperse_gaussian_core(F, wave_centers, wave_sigmas_eff, wave_space_edges)
 
-		# psf_cube = fftconvolve(cube, self.full_kernel, mode='same')
-		psf_cube = fftconvolve(cube, self.PSF, mode='same')
+		# Apply spatial PSF convolution (skip when self.use_psf is False)
+		if self.use_psf:
+			psf_cube = fftconvolve(cube, self.PSF, mode='same')
+		else:
+			psf_cube = cube
 
 		# Collapse along appropriate axis based on dispersion direction
 		if self.pupil == 'R':
