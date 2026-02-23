@@ -462,6 +462,11 @@ class Disk():
 		self.amplitude_mu = 200 #utils.Ie_to_flux(1, self.n_mu, self.r_eff_mu, ellip)
 		self.amplitude_std = 40 #0.1*self.amplitude_mu
 
+		# Set limits for parametric priors
+		self.Va_min = -1000
+		self.Va_max = 1000
+		self.sigma0_min = 0
+		self.sigma0_max = 600
 		self.V_max = 1000
 		self.D_max = 600
 
@@ -714,17 +719,13 @@ class Disk():
 
 		amplitude_re = utils.flux_to_Ie(amplitude, n, r_eff, ellip)
 
-		#-------------------------constant oversampling---------------------------------
 		x_grid = image.resize(x, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
 		y_grid = image.resize(y, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
 		#the center is set at 0,0 because the grid is already centered at xc_morph, yc_morph
-		model_image_highres = utils.sersic_profile(x_grid, y_grid, amplitude_re/(sersic_factor*factor)**2, r_eff, n,0.0,0.0, ellip, (90 - PA_morph)*jnp.pi/180)
+		model_image_highres = utils.sersic_profile(x_grid, y_grid, amplitude_re/(sersic_factor*factor)**2, r_eff, n, 0.0, 0.0, ellip, (90 - PA_morph)*jnp.pi/180)
 		model_image = utils.resample(model_image_highres, int(sersic_factor), int(sersic_factor))
 
-		#mask the low fluxes of the model image
-		model_image_masked = model_image
-
-		return model_image_masked
+		return model_image
 
 	def sample_fluxes_parametric(self):
 		"""
