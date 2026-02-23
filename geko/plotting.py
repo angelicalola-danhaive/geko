@@ -1176,17 +1176,21 @@ def plot_pp_cornerplot(data, kin_model, choice='real', PA=None, i=None, Va=None,
 		truths = { 'PA': PA, 'i': i, 'Va': Va,
 						  'r_t': r_t, 'sigma0': sigma0,'v_r': v_r}
 
-		CORNER_KWARGS = define_corner_args(divergences = div)		
+		CORNER_KWARGS = define_corner_args(divergences = div, var_names=['PA', 'Va', 'i', 'r_t', 'sigma0', 'v_r'])
 
-		fig = corner.corner(data, group='posterior', var_names=['PA', 'Va', 'i', 'r_t','sigma0','v_r'], truths = truths, truth_color='crimson',
+		fig = corner.corner(data, group='posterior', truths = truths, truth_color='crimson',
 									color='blue', **CORNER_KWARGS)
 			
 		if prior:
-			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False)
+			CORNER_KWARGS = define_corner_args(divergences = div, fill_contours = False, plot_contours = False, show_titles = False, var_names=['PA', 'Va', 'i', 'r_t', 'sigma0', 'v_r'])
 
-			fig = corner.corner(data , group='prior', var_names=['PA', 'Va', 'i','r_t','sigma0','v_r'], fig=fig, 
+			fig = corner.corner(data , group='prior', fig=fig, 
 										color='lightgray', **CORNER_KWARGS)
 			
+
+		plt.savefig('testing/' + save_to_folder + '/' + name + '.png', dpi=500)
+		plt.show()
+		plt.close()
 
 	if choice == 'real':
 
