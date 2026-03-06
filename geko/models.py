@@ -904,7 +904,7 @@ class Disk():
 		threshold = 0.4*fluxes_mean.max()
 		mask = jnp.zeros_like(fluxes_mean)
 		mask = mask.at[jnp.where(fluxes_mean>threshold)].set(1)
-		model_velocities_low = jax.image.resize(model_velocities, (int(model_velocities.shape[0]/factor), int(model_velocities.shape[1]/factor)), method='nearest')
+		model_velocities_low = jax.image.resize(model_velocities, (int(model_velocities.shape[0]/factor), int(model_velocities.shape[1]/factor)), method='linear')
 		model_v_rot = 0.5*(jnp.nanmax(jnp.where(mask == 1, model_velocities_low, jnp.nan)) - jnp.nanmin(jnp.where(mask == 1, model_velocities_low, jnp.nan)))/ jnp.sin( jnp.radians(i_mean)) 
 		plt.imshow(jnp.where(mask ==1, fluxes_mean, np.nan), origin = 'lower')
 		plt.title('Mask for v_rot comp')
@@ -1182,8 +1182,8 @@ class DiskModel(KinModels):
 		y = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape)
 		X, Y = jnp.meshgrid(x,y)
 
-		X_grid = image.resize(X, (int(X.shape[0]*grism_object.factor), int(X.shape[1]*grism_object.factor)), method='nearest')
-		Y_grid = image.resize(Y, (int(Y.shape[0]*grism_object.factor), int(Y.shape[1]*grism_object.factor)), method='nearest')
+		X_grid = image.resize(X, (int(X.shape[0]*grism_object.factor), int(X.shape[1]*grism_object.factor)), method='linear')
+		Y_grid = image.resize(Y, (int(Y.shape[0]*grism_object.factor), int(Y.shape[1]*grism_object.factor)), method='linear')
 
 		self.model_velocities = jnp.asarray(self.v(X_grid, Y_grid, self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
 		# self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
@@ -1198,10 +1198,10 @@ class DiskModel(KinModels):
 		self.model_map = utils.resample(self.model_map_high, grism_object.factor, self.wave_factor)
 		# print('Model vels:', self.model_velocities)
 		#compute velocity grid in flux image resolution for plotting velocity maps
-		self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='nearest')
+		self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='linear')
 		# print(self.fluxes_mean)
 		self.model_velocities_low = np.where(self.fluxes_mean == 0, np.nan, self.model_velocities_low)
-		self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='nearest')
+		self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='linear')
 		self.model_dispersions_low = jnp.where(self.fluxes_mean == 0, np.nan, self.model_dispersions_low)
 		return inference_data, self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
 
@@ -1319,8 +1319,8 @@ class DiskModel(KinModels):
 			y = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape)
 			X, Y = jnp.meshgrid(x, y)
 
-			X_grid = image.resize(X, (int(X.shape[0]*obs.grism.factor), int(X.shape[1]*obs.grism.factor)), method='nearest')
-			Y_grid = image.resize(Y, (int(Y.shape[0]*obs.grism.factor), int(Y.shape[1]*obs.grism.factor)), method='nearest')
+			X_grid = image.resize(X, (int(X.shape[0]*obs.grism.factor), int(X.shape[1]*obs.grism.factor)), method='linear')
+			Y_grid = image.resize(Y, (int(Y.shape[0]*obs.grism.factor), int(Y.shape[1]*obs.grism.factor)), method='linear')
 
 			# Compute velocity and dispersion fields
 			model_velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa_obs, self.i_mean, self.Va_mean, self.r_t_mean))
@@ -1332,8 +1332,8 @@ class DiskModel(KinModels):
 			model_map = utils.resample(model_map_high, obs.grism.factor, self.wave_factor)
 
 			# Downsample for plotting
-			model_velocities_low = image.resize(model_velocities, (int(model_velocities.shape[0]/obs.grism.factor), int(model_velocities.shape[1]/obs.grism.factor)), method='nearest')
-			model_dispersions_low = image.resize(model_dispersions, (int(model_dispersions.shape[0]/obs.grism.factor), int(model_dispersions.shape[1]/obs.grism.factor)), method='nearest')
+			model_velocities_low = image.resize(model_velocities, (int(model_velocities.shape[0]/obs.grism.factor), int(model_velocities.shape[1]/obs.grism.factor)), method='linear')
+			model_dispersions_low = image.resize(model_dispersions, (int(model_dispersions.shape[0]/obs.grism.factor), int(model_dispersions.shape[1]/obs.grism.factor)), method='linear')
 
 			# Downsample flux map for this observation
 			fluxes_mean = utils.resample(model_flux, self.disk.factor, self.disk.factor)

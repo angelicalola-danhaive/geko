@@ -688,8 +688,12 @@ class Grism:
 		else:
 			# self.oversampled_PSF = utils.oversample_PSF(PSF, self.factor)
 			self.oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method = 'bilinear')
-			#crop it down to the central 9x9 pixels
-			self.oversampled_PSF = self.oversampled_PSF[self.oversampled_PSF.shape[0]//2 - 5:self.oversampled_PSF.shape[0]//2 + 6, self.oversampled_PSF.shape[1]//2 - 5:self.oversampled_PSF.shape[1]//2 +6]
+			# Crop to central 25x25 pixels (generous enough to preserve PSF wings)
+			# For 9x9 input at factor=5, this crops 45x45 -> 25x25
+			crop_half = 12  # Creates 25x25 crop (2*12+1)
+			if self.oversampled_PSF.shape[0] > 2*crop_half + 1:
+				center = self.oversampled_PSF.shape[0]//2
+				self.oversampled_PSF = self.oversampled_PSF[center - crop_half:center + crop_half + 1, center - crop_half:center + crop_half + 1]
 			#normalize the PSF to sum = 1
 			self.oversampled_PSF = self.oversampled_PSF/jnp.sum(self.oversampled_PSF)
 		# print('oversampled PSF sum = ', jnp.sum(self.oversampled_PSF ))

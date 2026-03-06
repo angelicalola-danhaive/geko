@@ -800,6 +800,8 @@ def sersic_profile(x,y,amplitude, r_eff , n , x_0 , y_0 , ellip , theta, c=0):
     bn = bn_approx(n) #tfp.math.igammainv(jnp.array(2.0 * n), 0.5)
     cos_theta = jnp.cos(theta)
     sin_theta = jnp.sin(theta)
+    # Rotate into ellipse frame (inverse rotation compared to velocity field)
+    # For ellipse with major axis at angle theta, we rotate coordinates by -theta
     x_maj = jnp.abs((x - x_0) * cos_theta + (y - y_0) * sin_theta)
     x_min = jnp.abs(-(x - x_0) * sin_theta + (y - y_0) * cos_theta)
 

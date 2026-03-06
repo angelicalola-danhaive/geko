@@ -386,8 +386,11 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
     elif field == 'GOODS-S-FRESCO':
         psf_path = save_runs_path + 'psfs/mpsf_jw018950.gs.f444w.fits'
 
-
-    PSF = fits.getdata(psf_path)
+    # Check if PSF is provided in mock_params (for Roman or other mock tests)
+    if mock_params is not None and 'PSF' in mock_params:
+        PSF = mock_params['PSF']
+    else:
+        PSF = fits.getdata(psf_path)
 
     # PSF = utils.load_psf(grism_filter, 1, 9)
 
