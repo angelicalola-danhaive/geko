@@ -630,7 +630,7 @@ class Disk():
 			print("No config overrides applied (all parameters at default values)")
 
 
-	def sample_morphology_params(self):
+	def sample_morphology_params(self, include_amplitude=True):
 		"""
 		Sample morphological parameters for parametric disk model.
 
@@ -638,10 +638,17 @@ class Disk():
 		This allows flux maps to be generated separately for each observation
 		with adjusted PA and centroids in multi-observation fitting.
 
+		Parameters
+		----------
+		include_amplitude : bool, optional
+			If True (default), sample a shared amplitude parameter.
+			Set to False for multi-observation fitting where each observation
+			has its own amplitude sampled separately inside the obs loop.
+
 		Returns
 		-------
-		amplitude : float
-			Flux normalization
+		amplitude : float or None
+			Flux normalization (None if include_amplitude=False)
 		r_eff : float
 			Effective radius in pixels
 		n : float
@@ -658,8 +665,11 @@ class Disk():
 			Y-centroid in pixels
 		"""
 		#sample the parameters needed for a disc model
-		unscaled_amplitude = numpyro.sample('unscaled_amplitude', dist.TruncatedNormal(low = (0.0 - self.amplitude_mu)/self.amplitude_std))
-		amplitude = numpyro.deterministic('amplitude', unscaled_amplitude*self.amplitude_std + self.amplitude_mu)
+		if include_amplitude:
+			unscaled_amplitude = numpyro.sample('unscaled_amplitude', dist.TruncatedNormal(low = (0.0 - self.amplitude_mu)/self.amplitude_std))
+			amplitude = numpyro.deterministic('amplitude', unscaled_amplitude*self.amplitude_std + self.amplitude_mu)
+		else:
+			amplitude = None
 
 		unscaled_r_eff = numpyro.sample('unscaled_r_eff', dist.TruncatedNormal(low = (self.r_eff_min - self.r_eff_mu)/self.r_eff_std, high = (self.r_eff_max - self.r_eff_mu)/self.r_eff_std))
 		r_eff = numpyro.deterministic('r_eff', unscaled_r_eff*self.r_eff_std + self.r_eff_mu)
@@ -712,20 +722,17 @@ class Disk():
 			2D flux map at oversampled resolution (shape: image_shape*factor)
 		"""
 		factor = self.factor
-		sersic_factor = 25
 		image_shape = self.direct_shape[0]
-
-		x = jnp.linspace(0 - xc_morph, image_shape - xc_morph - 1, image_shape)
-		y = jnp.linspace(0 - yc_morph, image_shape - yc_morph - 1, image_shape)
-		x,y = jnp.meshgrid(x,y)
 
 		amplitude_re = utils.flux_to_Ie(amplitude, n, r_eff, ellip)
 
-		x_grid = image.resize(x, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
-		y_grid = image.resize(y, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
+		# Generate flux using direct high-res grid (Gemini's suggestion)
+		# Avoids interpolation artifacts from image.resize
+		x_grid = jnp.linspace(0 - xc_morph, image_shape - xc_morph - 1, image_shape * factor)
+		y_grid = jnp.linspace(0 - yc_morph, image_shape - yc_morph - 1, image_shape * factor)
+		x_grid, y_grid = jnp.meshgrid(x_grid, y_grid)
 		#the center is set at 0,0 because the grid is already centered at xc_morph, yc_morph
-		model_image_highres = utils.sersic_profile(x_grid, y_grid, amplitude_re/(sersic_factor*factor)**2, r_eff, n, 0.0, 0.0, ellip, (90 - PA_morph)*jnp.pi/180)
-		model_image = utils.resample(model_image_highres, int(sersic_factor), int(sersic_factor))
+		model_image = utils.sersic_profile(x_grid, y_grid, amplitude_re/factor**2, r_eff, n, 0.0, 0.0, ellip, (90 - PA_morph)*jnp.pi/180)
 
 		return model_image
 
@@ -755,9 +762,22 @@ class Disk():
 		return model_image_masked, r_eff, i, xc_morph, yc_morph
 
 
-	def sample_params_parametric(self,r_eff = 0.0):
+	def sample_params_parametric(self, r_eff=0.0, include_v0=True, xc_morph=None, yc_morph=None):
 		"""
 			Sample all of the parameters needed to model a disk velocity field
+
+		Parameters
+		----------
+		r_eff : float, optional
+			Effective radius used to set r_t prior scale (default: 0.0)
+		include_v0 : bool, optional
+			If True (default), sample a shared v0 parameter.
+			Set to False for multi-observation fitting where each observation
+			has its own v0 sampled separately inside the obs loop.
+		xc_morph : float or jax array, optional
+			If provided, fix x0_vel to this value (the sampled morphological center).
+		yc_morph : float or jax array, optional
+			If provided, fix y0_vel to this value (the sampled morphological center).
 		"""
 
 		unscaled_PA = numpyro.sample('unscaled_PA', dist.Normal())
@@ -769,24 +789,28 @@ class Disk():
 		unscaled_r_t = numpyro.sample('unscaled_r_t', dist.Uniform())
 		r_t = numpyro.deterministic('r_t', unscaled_r_t*r_eff)
 
-
 		unscaled_sigma0 = numpyro.sample('unscaled_sigma0', dist.Uniform())
 		sigma0 = numpyro.deterministic('sigma0', unscaled_sigma0*(self.sigma0_max - self.sigma0_min) + self.sigma0_min)
 
+		if xc_morph is not None:
+			x0_vel = numpyro.deterministic('x0_vel', xc_morph)
+		else:
+			unscaled_x0_vel = numpyro.sample('unscaled_x0_vel', dist.Normal())
+			x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.xc_std_vel + self.xc_morph)
 
-		unscaled_x0_vel = numpyro.sample('unscaled_x0_vel', dist.Normal())
-		x0_vel = numpyro.deterministic('x0_vel', unscaled_x0_vel*self.xc_std_vel + self.xc_morph)
+		if yc_morph is not None:
+			y0_vel = numpyro.deterministic('y0_vel', yc_morph)
+		else:
+			unscaled_y0_vel = numpyro.sample('unscaled_y0_vel', dist.Normal())
+			y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.yc_std_vel + self.yc_morph)
 
+		if include_v0:
+			unscaled_v0 = numpyro.sample('unscaled_v0', dist.Normal())
+			v0 = numpyro.deterministic('v0', unscaled_v0*200)
+		else:
+			v0 = None
 
-		unscaled_y0_vel = numpyro.sample('unscaled_y0_vel', dist.Normal())
-		y0_vel = numpyro.deterministic('y0_vel', unscaled_y0_vel*self.yc_std_vel + self.yc_morph)  
-
-		unscaled_v0 = numpyro.sample('unscaled_v0', dist.Normal())
-		v0 = numpyro.deterministic('v0', unscaled_v0*50)
-		# v0 = 0
-
-
-		return Pa, Va, r_t,sigma0, y0_vel, x0_vel, v0
+		return Pa, Va, r_t, sigma0, y0_vel, x0_vel, v0
 	
 
 	def compute_posterior_means_parametric(self, inference_data):
@@ -797,7 +821,6 @@ class Disk():
 		self.PA_mean = jnp.array(inference_data.posterior['PA'].median(dim=["chain", "draw"]))
 		self.y0_vel_mean = jnp.array(inference_data.posterior['y0_vel'].median(dim=["chain", "draw"]))
 		self.x0_vel_mean = jnp.array(inference_data.posterior['x0_vel'].median(dim=["chain", "draw"]))
-		self.v0_mean = jnp.array(inference_data.posterior['v0'].median(dim=["chain", "draw"]))
 		self.r_t_mean = jnp.array(inference_data.posterior['r_t'].median(dim=["chain", "draw"]))
 		self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'].median(dim=["chain", "draw"]))
 		self.Va_mean = jnp.array(inference_data.posterior['Va'].median(dim=["chain", "draw"]))
@@ -806,8 +829,6 @@ class Disk():
 		self.PA_16 = jnp.array(inference_data.posterior['PA'].quantile(0.16, dim=["chain", "draw"]))
 		self.PA_84 = jnp.array(inference_data.posterior['PA'].quantile(0.84, dim=["chain", "draw"]))
 
-		self.v0_16 = jnp.array(inference_data.posterior['v0'].quantile(0.16, dim=["chain", "draw"]))
-		self.v0_84 = jnp.array(inference_data.posterior['v0'].quantile(0.84, dim=["chain", "draw"]))
 		self.r_t_16 = jnp.array(inference_data.posterior['r_t'].quantile(0.16, dim=["chain", "draw"]))
 		self.r_t_84 = jnp.array(inference_data.posterior['r_t'].quantile(0.84, dim=["chain", "draw"]))
 		self.sigma0_16 = jnp.array(inference_data.posterior['sigma0'].quantile(0.16, dim=["chain", "draw"]))
@@ -820,13 +841,29 @@ class Disk():
 		self.y0_vel_16 = jnp.array(inference_data.posterior['y0_vel'].quantile(0.16, dim=["chain", "draw"]))
 		self.y0_vel_84 = jnp.array(inference_data.posterior['y0_vel'].quantile(0.84, dim=["chain", "draw"]))
 
-		return  self.PA_mean,self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
+		# v0 may be absent in multi-obs fits (per-obs v0 instead)
+		if 'v0' in inference_data.posterior:
+			self.v0_mean = jnp.array(inference_data.posterior['v0'].median(dim=["chain", "draw"]))
+			self.v0_16 = jnp.array(inference_data.posterior['v0'].quantile(0.16, dim=["chain", "draw"]))
+			self.v0_84 = jnp.array(inference_data.posterior['v0'].quantile(0.84, dim=["chain", "draw"]))
+		else:
+			self.v0_mean = None
+			self.v0_16 = None
+			self.v0_84 = None
+
+		return self.PA_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
 
 	def compute_parametrix_flux_posterior(self, inference_data):
 		#compute means for parametric flux model
-		self.amplitude_mean = jnp.array(inference_data.posterior['amplitude'].median(dim=["chain", "draw"]))
-		self.amplitude_16 = jnp.array(inference_data.posterior['amplitude'].quantile(0.16, dim=["chain", "draw"]))
-		self.amplitude_84 = jnp.array(inference_data.posterior['amplitude'].quantile(0.84, dim=["chain", "draw"]))
+		# amplitude may be absent in multi-obs fits (per-obs amplitude instead)
+		if 'amplitude' in inference_data.posterior:
+			self.amplitude_mean = jnp.array(inference_data.posterior['amplitude'].median(dim=["chain", "draw"]))
+			self.amplitude_16 = jnp.array(inference_data.posterior['amplitude'].quantile(0.16, dim=["chain", "draw"]))
+			self.amplitude_84 = jnp.array(inference_data.posterior['amplitude'].quantile(0.84, dim=["chain", "draw"]))
+		else:
+			self.amplitude_mean = None
+			self.amplitude_16 = None
+			self.amplitude_84 = None
 		self.r_eff_mean = jnp.array(inference_data.posterior['r_eff'].median(dim=["chain", "draw"]))
 		self.n_mean = jnp.array(inference_data.posterior['n'].median(dim=["chain", "draw"]))
 		self.n_16 = jnp.array(inference_data.posterior['n'].quantile(0.16, dim=["chain", "draw"]))
@@ -871,24 +908,24 @@ class Disk():
 		self.yc_morph_16 = jnp.array(inference_data.posterior['yc_morph'].quantile(0.16, dim=["chain", "draw"]))
 		self.yc_morph_84 = jnp.array(inference_data.posterior['yc_morph'].quantile(0.84, dim=["chain", "draw"]))
 
-		#compute the fluxes in the sersic way
+		#compute the fluxes in the sersic way (skipped when amplitude is None, i.e. multi-obs fit)
 		factor = self.factor
-				
-		sersic_factor = 25
 		image_shape = self.direct_shape[0]
 
-		amplitude_re_mean = utils.flux_to_Ie(self.amplitude_mean,self.n_mean, self.r_eff_mean, self.ellip_mean)
+		if self.amplitude_mean is not None:
+			amplitude_re_mean = utils.flux_to_Ie(self.amplitude_mean, self.n_mean, self.r_eff_mean, self.ellip_mean)
 
-		x = jnp.linspace(0 - self.xc_morph_mean, image_shape - self.xc_morph_mean - 1, image_shape)
-		y = jnp.linspace(0 - self.yc_morph_mean, image_shape - self.yc_morph_mean - 1, image_shape)
-		x,y = jnp.meshgrid(x,y)
-		x_grid = image.resize(x, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
-		y_grid = image.resize(y, (image_shape*factor*sersic_factor, image_shape*factor*sersic_factor), method='linear')
-		#testing the adaptive oversampling of the sersic profile
-		fluxes_mean_high = utils.sersic_profile(x_grid, y_grid, amplitude_re_mean/(sersic_factor*factor)**2, self.r_eff_mean, self.n_mean, 0.0,0.0, self.ellip_mean, (90 - self.PA_morph_mean)*jnp.pi/180)
-		self.fluxes_mean_high = utils.resample(fluxes_mean_high, sersic_factor, sersic_factor)
-		self.fluxes_mean = utils.resample(fluxes_mean_high, factor*sersic_factor, factor*sersic_factor)
-		self.fluxes_mean_masked = jnp.where(self.fluxes_mean>0.01*self.fluxes_mean.max(), self.fluxes_mean, 0.0)
+			# Generate flux at SAME resolution as velocity (no sersic_factor) to avoid resampling offset
+			x = jnp.linspace(0 - self.xc_morph_mean, image_shape - self.xc_morph_mean - 1, image_shape*factor)
+			y = jnp.linspace(0 - self.yc_morph_mean, image_shape - self.yc_morph_mean - 1, image_shape*factor)
+			x_grid, y_grid = jnp.meshgrid(x, y)
+			self.fluxes_mean_high = utils.sersic_profile(x_grid, y_grid, amplitude_re_mean/factor**2, self.r_eff_mean, self.n_mean, 0.0, 0.0, self.ellip_mean, (90 - self.PA_morph_mean)*jnp.pi/180)
+			self.fluxes_mean = utils.resample(self.fluxes_mean_high, factor, factor)
+		else:
+			self.fluxes_mean_high = None
+			self.fluxes_mean = None
+		# self.fluxes_mean_masked = jnp.where(self.fluxes_mean>0.01*self.fluxes_mean.max(), self.fluxes_mean, 0.0)
+		self.fluxes_mean_masked = self.fluxes_mean #removed masking for now
 		return inference_data, self.fluxes_mean_masked, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean
 	
 	def v_rot(self, fluxes_mean, model_velocities, i_mean,factor):
@@ -1060,15 +1097,40 @@ class DiskModel(KinModels):
 		for obs in observations:
 			print(f"  - {obs}")
 
-		# Sample galaxy parameters ONCE (in prior reference frame)
-		amplitude, r_eff, n, i, ellip, PA_morph_ref, xc_morph_ref, yc_morph_ref = self.disk.sample_morphology_params()
-		Pa_ref, Va, r_t, sigma0, y0_vel_ref, x0_vel_ref, v0 = self.disk.sample_params_parametric(r_eff=r_eff)
+		# Sample shared galaxy parameters ONCE (in prior reference frame)
+		# amplitude and v0 are NOT shared — each observation gets its own
+		_, r_eff, n, i, ellip, PA_morph_ref, xc_morph_ref, yc_morph_ref = self.disk.sample_morphology_params(include_amplitude=False)
+		Pa_ref, Va, r_t, sigma0, y0_vel_ref, x0_vel_ref, _ = self.disk.sample_params_parametric(r_eff=r_eff, include_v0=False, xc_morph=xc_morph_ref, yc_morph=yc_morph_ref)
 
 		image_shape = self.im_shape[0]
 		center = (image_shape - 1) / 2
+		n_obs = len(observations)
 
 		# Loop over observations and compute likelihood for each
 		for idx, (obs, mask) in enumerate(zip(observations, masks)):
+
+			# Use shared parameter names for single-obs (backward compat with compute_model_parametric)
+			# and per-obs names for multi-obs so each observation has independent amplitude/v0
+			if n_obs == 1:
+				amp_name = 'amplitude'
+				v0_name = 'v0'
+			else:
+				amp_name = f'amplitude_{obs.name}'
+				v0_name = f'v0_{obs.name}'
+
+			# Per-observation amplitude (different sensitivity curves and flux calibration)
+			unscaled_amplitude_obs = numpyro.sample(
+				f'unscaled_{amp_name}',
+				dist.TruncatedNormal(low=(0.0 - self.disk.amplitude_mu) / self.disk.amplitude_std)
+			)
+			amplitude_obs = numpyro.deterministic(
+				amp_name,
+				unscaled_amplitude_obs * self.disk.amplitude_std + self.disk.amplitude_mu
+			)
+
+			# Per-observation v0 (different wavelength calibration a01 between R and C)
+			unscaled_v0_obs = numpyro.sample(f'unscaled_{v0_name}', dist.Normal())
+			v0_obs = numpyro.deterministic(v0_name, unscaled_v0_obs * 200)
 
 			# Apply rotation for this observation
 			theta_rot_rad = jnp.radians(obs.theta_rot)
@@ -1092,19 +1154,16 @@ class DiskModel(KinModels):
 			)
 
 			# Generate flux map for this observation with adjusted PA and centroids
-			fluxes_high = self.disk.generate_flux_map(amplitude, r_eff, n, ellip, PA_morph_obs, xc_morph_obs, yc_morph_obs)
+			fluxes_high = self.disk.generate_flux_map(amplitude_obs, r_eff, n, ellip, PA_morph_obs, xc_morph_obs, yc_morph_obs)
 
-			# Build coordinate grids for velocity field
-			x = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape)
-			y = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape)
-			X, Y = jnp.meshgrid(x, y)
-
-			X_grid = image.resize(X, (int(X.shape[0]*obs.grism.factor), int(X.shape[1]*obs.grism.factor)), method='linear')
-			Y_grid = image.resize(Y, (int(Y.shape[0]*obs.grism.factor), int(Y.shape[1]*obs.grism.factor)), method='linear')
+			# Build velocity coordinate grids using direct high-res method (Gemini's suggestion)
+			X_grid = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape * obs.grism.factor)
+			Y_grid = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape * obs.grism.factor)
+			X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
 			# Compute velocity field with adjusted PA
 			velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa_obs, i, Va, r_t))
-			velocities_scaled = velocities + v0
+			velocities_scaled = velocities + v0_obs
 
 			# Compute dispersion field
 			dispersions = sigma0 * jnp.ones_like(velocities_scaled)
@@ -1180,14 +1239,12 @@ class DiskModel(KinModels):
 		self.model_flux = self.fluxes_mean_high
 
 		image_shape =  self.im_shape[0]
-		x= jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape)
-		y = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape)
-		X, Y = jnp.meshgrid(x,y)
+		# Create velocity coordinate grids using direct high-res method (Gemini's suggestion)
+		X_grid = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape * grism_object.factor)
+		Y_grid = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape * grism_object.factor)
+		X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
-		X_grid = image.resize(X, (int(X.shape[0]*grism_object.factor), int(X.shape[1]*grism_object.factor)), method='linear')
-		Y_grid = image.resize(Y, (int(Y.shape[0]*grism_object.factor), int(Y.shape[1]*grism_object.factor)), method='linear')
-
-		self.model_velocities = jnp.asarray(self.v(X_grid, Y_grid, self.PA_mean,self.i_mean, self.Va_mean, self.r_t_mean))
+		self.model_velocities = jnp.asarray(self.v(X_grid, Y_grid, self.PA_mean, self.i_mean, self.Va_mean, self.r_t_mean))
 		# self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
 
 		self.model_velocities = self.model_velocities  + self.v0_mean
@@ -1202,9 +1259,15 @@ class DiskModel(KinModels):
 		#compute velocity grid in flux image resolution for plotting velocity maps
 		self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='linear')
 		# print(self.fluxes_mean)
-		self.model_velocities_low = np.where(self.fluxes_mean == 0, np.nan, self.model_velocities_low)
+		# Fix: Create a dedicated mask for the kinematics and apply it using np.nan
+		vel_mask = np.where(self.fluxes_mean > 0.01 * self.fluxes_mean.max(), 1.0, np.nan)
+		# self.model_velocities_low = np.where(self.fluxes_mean == 0, np.nan, self.model_velocities_low)
+		# self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='linear')
+		# self.model_dispersions_low = jnp.where(self.fluxes_mean == 0, np.nan, self.model_dispersions_low)
+		self.model_velocities_low = np.where(np.isnan(vel_mask), np.nan, self.model_velocities_low)
+		
 		self.model_dispersions_low = image.resize(self.model_dispersions, (int(self.model_dispersions.shape[0]/grism_object.factor), int(self.model_dispersions.shape[1]/grism_object.factor)), method='linear')
-		self.model_dispersions_low = jnp.where(self.fluxes_mean == 0, np.nan, self.model_dispersions_low)
+		self.model_dispersions_low = jnp.where(np.isnan(vel_mask), np.nan, self.model_dispersions_low)
 		return inference_data, self.model_map, self.model_flux, self.fluxes_mean, self.model_velocities, self.model_dispersions
 
 	def compute_model_parametric_multi(self, inference_data, observations):
@@ -1256,14 +1319,34 @@ class DiskModel(KinModels):
 		self.y0_vel_84 = self.disk.y0_vel_84
 		self.x0_vel_16 = self.disk.x0_vel_16
 		self.x0_vel_84 = self.disk.x0_vel_84
-		self.v0_16 = self.disk.v0_16
-		self.v0_84 = self.disk.v0_84
+		self.v0_16 = self.disk.v0_16  # None for multi-obs fits
+		self.v0_84 = self.disk.v0_84  # None for multi-obs fits
+
+		# Extract per-observation v0 and amplitude posteriors
+		self.v0_per_obs = {}
+		self.amplitude_per_obs = {}
+		for obs in observations:
+			obs_name = obs.name
+			v0_key = f'v0_{obs_name}'
+			amp_key = f'amplitude_{obs_name}'
+			if v0_key in inference_data.posterior:
+				self.v0_per_obs[obs_name] = {
+					'mean': jnp.array(inference_data.posterior[v0_key].median(dim=["chain", "draw"])),
+					'16': jnp.array(inference_data.posterior[v0_key].quantile(0.16, dim=["chain", "draw"])),
+					'84': jnp.array(inference_data.posterior[v0_key].quantile(0.84, dim=["chain", "draw"])),
+				}
+			if amp_key in inference_data.posterior:
+				self.amplitude_per_obs[obs_name] = {
+					'mean': jnp.array(inference_data.posterior[amp_key].median(dim=["chain", "draw"])),
+					'16': jnp.array(inference_data.posterior[amp_key].quantile(0.16, dim=["chain", "draw"])),
+					'84': jnp.array(inference_data.posterior[amp_key].quantile(0.84, dim=["chain", "draw"])),
+				}
 
 		# Compute morphology posterior
 		inference_data, self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean = self.disk.compute_parametrix_flux_posterior(inference_data)
 
-		self.amplitude_16 = self.disk.amplitude_16
-		self.amplitude_84 = self.disk.amplitude_84
+		self.amplitude_16 = self.disk.amplitude_16  # None for multi-obs fits
+		self.amplitude_84 = self.disk.amplitude_84  # None for multi-obs fits
 		self.n_16 = self.disk.n_16
 		self.n_84 = self.disk.n_84
 		self.r_eff_16 = self.disk.r_eff_16
@@ -1289,6 +1372,10 @@ class DiskModel(KinModels):
 		for obs in observations:
 			print(f"\nGenerating model for observation: {obs.name}")
 
+			# Get per-obs amplitude and v0 means
+			obs_amplitude_mean = self.amplitude_per_obs[obs.name]['mean'] if obs.name in self.amplitude_per_obs else self.amplitude_mean
+			obs_v0_mean = self.v0_per_obs[obs.name]['mean'] if obs.name in self.v0_per_obs else self.v0_mean
+
 			# Apply rotation for this observation
 			theta_rot_rad = jnp.radians(obs.theta_rot)
 
@@ -1310,23 +1397,20 @@ class DiskModel(KinModels):
 				theta_rot_rad
 			)
 
-			# Generate flux map for this observation
+			# Generate flux map for this observation using per-obs amplitude
 			model_flux = self.disk.generate_flux_map(
-				self.amplitude_mean, self.r_eff_mean, self.n_mean,
+				obs_amplitude_mean, self.r_eff_mean, self.n_mean,
 				self.ellip_mean, PA_morph_obs, xc_morph_obs, yc_morph_obs
 			)
 
-			# Build coordinate grids
-			x = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape)
-			y = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape)
-			X, Y = jnp.meshgrid(x, y)
+			# Build velocity coordinate grids using direct high-res method (Gemini's suggestion)
+			X_grid = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape * obs.grism.factor)
+			Y_grid = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape * obs.grism.factor)
+			X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
-			X_grid = image.resize(X, (int(X.shape[0]*obs.grism.factor), int(X.shape[1]*obs.grism.factor)), method='linear')
-			Y_grid = image.resize(Y, (int(Y.shape[0]*obs.grism.factor), int(Y.shape[1]*obs.grism.factor)), method='linear')
-
-			# Compute velocity and dispersion fields
+			# Compute velocity and dispersion fields using per-obs v0
 			model_velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa_obs, self.i_mean, self.Va_mean, self.r_t_mean))
-			model_velocities = model_velocities + self.v0_mean
+			model_velocities = model_velocities + obs_v0_mean
 			model_dispersions = self.sigma0_mean_model * jnp.ones_like(model_velocities)
 
 			# Generate grism model
@@ -1339,22 +1423,31 @@ class DiskModel(KinModels):
 
 			# Downsample flux map for this observation
 			fluxes_mean = utils.resample(model_flux, self.disk.factor, self.disk.factor)
-			# Apply masking to flux map (mask out low-flux regions, similar to compute_parametrix_flux_posterior)
-			fluxes_mean_masked = jnp.where(fluxes_mean > 0.01 * fluxes_mean.max(), fluxes_mean, 0.0)
-			# Mask velocity and dispersion maps where flux is zero
-			model_velocities_low = np.where(fluxes_mean_masked == 0, np.nan, model_velocities_low)
-			model_dispersions_low = jnp.where(fluxes_mean_masked == 0, np.nan, model_dispersions_low)
+			# # Apply masking to flux map (mask out low-flux regions, similar to compute_parametrix_flux_posterior)
+			# fluxes_mean_masked = jnp.where(fluxes_mean > 0.01 * fluxes_mean.max(), fluxes_mean, 0.0)
+			# # Mask velocity and dispersion maps where flux is zero
+			# model_velocities_low = np.where(fluxes_mean_masked == 0, np.nan, model_velocities_low)
+			# model_dispersions_low = jnp.where(fluxes_mean_masked == 0, np.nan, model_dispersions_low)
+
+			# Fix: Create a mask ONLY for the kinematics
+			vel_mask = np.where(fluxes_mean > 0.01 * fluxes_mean.max(), 1.0, np.nan)
+			
+			# Mask velocity and dispersion maps
+			model_velocities_low = np.where(np.isnan(vel_mask), np.nan, model_velocities_low)
+			model_dispersions_low = jnp.where(np.isnan(vel_mask), np.nan, model_dispersions_low)
 
 			# Store results for this observation
 			results[obs.name] = {
 				'model_map': model_map,
 				'model_flux': model_flux,
-				'fluxes_mean': fluxes_mean_masked,  # Store masked flux for plotting
+				'fluxes_mean': fluxes_mean, #fluxes_mean_masked,  # Store masked flux for plotting
 				'model_velocities': model_velocities,
 				'model_dispersions': model_dispersions,
 				'model_velocities_low': model_velocities_low,
 				'model_dispersions_low': model_dispersions_low,
-				'observation': obs  # Keep reference to observation
+				'observation': obs,  # Keep reference to observation
+				'v0_mean': obs_v0_mean,
+				'amplitude_mean': obs_amplitude_mean,
 			}
 
 		# Store first observation's results as default (for backward compatibility)
