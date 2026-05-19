@@ -169,6 +169,12 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 nircam_grism_real/
+
+*.md
+
+# Testing scripts (keep only run_mock.py)
+testing/*.py
+!testing/run_mock.py
 doc/_build/
 scripts/
 demo/simple_fit_demo_files/my_galaxy/191250_output
