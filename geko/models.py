@@ -287,7 +287,7 @@ class Disk():
 		print(f'r_t --- TruncatedNormal w/ mu: {self.r_eff_mu} and bounds: [0.1, {self.r_eff_mu}]')
 		print(f'sigma0 --- Uniform w/ bounds: [{self.sigma0_min}, {self.sigma0_max}]')
 		print('y0_vel --- Truncated Normal w/ mu: ' + str(self.mu_y0_vel) + ' and sigma: ' + str(self.y0_std) + ' and bounds: ' + str(self.y_low) + ' ' + str(self.y_high))
-		print('v0 --- Normal w/ mu: 0 and sigma: 100')
+		print('v0 --- Normal w/ mu: 0 and sigma: 200')
 
 	def set_parametric_priors(self,py_table, flux_measurements, redshift, wavelength, delta_wave, theta_rot = 0.0, shape = 31):
 		"""
@@ -449,7 +449,7 @@ class Disk():
 		# self.ellip_mu = ellip
 		# self.ellip_std = ellip_std
 		self.inc_mu = priors['i']
-		self.inc_std = 0.2*priors['i']
+		self.inc_std = 5 #0.2*priors['i']
 		self.r_eff_mu = (1.676/0.4)*priors['r_t']
 		self.r_eff_std = np.maximum(3, self.r_eff_mu)
 		self.r_eff_min = 0
@@ -472,8 +472,8 @@ class Disk():
 		self.V_max = 1000
 		self.D_max = 600
 
-		self.xc_std_vel = 2*self.xc_std
-		self.yc_std_vel = 2*self.yc_std
+		self.xc_std_vel = self.xc_std
+		self.yc_std_vel = self.yc_std
 
 		print('Set mock kinematic priors: ', self.PA_morph_mu, self.inc_mu, self.r_eff_mu, self.amplitude_mu, self.n_mu, self.xc_morph, self.yc_morph)
 
@@ -620,8 +620,8 @@ class Disk():
 
 		# Update velocity coordinate uncertainties if morphology xc/yc changed
 		if any('xc_std' in p or 'yc_std' in p for p in overridden_params):
-			self.xc_std_vel = 2 * self.xc_std
-			self.yc_std_vel = 2 * self.yc_std
+			self.xc_std_vel = self.xc_std
+			self.yc_std_vel = self.yc_std
 
 		if overridden_params:
 			print(f"Applied {len(overridden_params)} config overrides: {', '.join(overridden_params[:5])}" +
