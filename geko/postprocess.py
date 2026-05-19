@@ -81,7 +81,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	res['r_t_50'] = kin_model.r_t_mean
 	res['sigma0_50'] = kin_model.sigma0_mean_model
 	res['v_re_50'] = v_re_med
-	res['amplitude_50'] = kin_model.amplitude_mean
+	res['amplitude_50'] = kin_model.amplitude_mean if kin_model.amplitude_mean is not None else np.nan
 	res['r_eff_50'] = kin_model.r_eff_mean
 	res['n_50'] = kin_model.n_mean
 	res['PA_morph_50'] = kin_model.PA_morph_mean
@@ -134,11 +134,28 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 	res['yc_morph_50'] = kin_model.yc_morph_mean
 	res['yc_morph_84'] = kin_model.yc_morph_84
 
-	res['amplitude_16'] = kin_model.amplitude_16
-	res['amplitude_84'] = kin_model.amplitude_84
+	res['amplitude_16'] = kin_model.amplitude_16 if kin_model.amplitude_16 is not None else np.nan
+	res['amplitude_84'] = kin_model.amplitude_84 if kin_model.amplitude_84 is not None else np.nan
 
 	res['n_16'] = kin_model.n_16
 	res['n_84'] = kin_model.n_84
+
+	res['v0_16'] = kin_model.v0_16 if kin_model.v0_16 is not None else np.nan
+	res['v0_50'] = kin_model.v0_mean if kin_model.v0_mean is not None else np.nan
+	res['v0_84'] = kin_model.v0_84 if kin_model.v0_84 is not None else np.nan
+
+	# Per-observation v0 and amplitude (multi-obs fits only)
+	if hasattr(kin_model, 'v0_per_obs') and kin_model.v0_per_obs:
+		for obs_name, v0_stats in kin_model.v0_per_obs.items():
+			res.add_column(Table.Column([float(v0_stats['16'])], name=f'v0_{obs_name}_16'))
+			res.add_column(Table.Column([float(v0_stats['mean'])], name=f'v0_{obs_name}_50'))
+			res.add_column(Table.Column([float(v0_stats['84'])], name=f'v0_{obs_name}_84'))
+
+	if hasattr(kin_model, 'amplitude_per_obs') and kin_model.amplitude_per_obs:
+		for obs_name, amp_stats in kin_model.amplitude_per_obs.items():
+			res.add_column(Table.Column([float(amp_stats['16'])], name=f'amplitude_{obs_name}_16'))
+			res.add_column(Table.Column([float(amp_stats['mean'])], name=f'amplitude_{obs_name}_50'))
+			res.add_column(Table.Column([float(amp_stats['84'])], name=f'amplitude_{obs_name}_84'))
 
 	res.write(save_runs_path + output + '/' + str(ID) + '_results', format='ascii', overwrite=True)
 
@@ -409,6 +426,31 @@ def process_results_multi(observations, results, output, master_cat, line, param
 		save_runs_path=save_runs_path,
 		ID=ID
 	)
+
+	# Comparison cornerplot: overlay R, C, and joint posteriors
+	try:
+		individual_inf_data = []
+		obs_labels = []
+		for obs in observations:
+			obs_output_path = save_runs_path + str(ID) + '/' + obs.name + '/' + str(ID) + '_output'
+			obs_inf = az.InferenceData.from_netcdf(obs_output_path)
+			individual_inf_data.append(obs_inf)
+			obs_labels.append(obs.name)
+
+		all_inf_data = individual_inf_data + [inf_data]
+		all_labels   = obs_labels + ['Joint']
+		colors = ['royalblue', 'crimson', 'grey'][:len(all_inf_data)]
+
+		comparison_path = save_runs_path + output + str(ID) + '_comparison_cornerplot.png'
+		plotting.plot_multi_obs_comparison_cornerplot(
+			inf_data_list=all_inf_data,
+			run_labels=all_labels,
+			colors=colors,
+			save_path=comparison_path,
+			ID=ID)
+		print(f'  Saved comparison cornerplot: {comparison_path}')
+	except Exception as e:
+		print(f'  WARNING: Could not generate comparison cornerplot: {e}')
 
 	return v_re_16, v_re_med, v_re_84, kin_model, inf_data
 
