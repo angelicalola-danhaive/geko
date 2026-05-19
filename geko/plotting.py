@@ -585,19 +585,24 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# Define ellipse parameters
 	center_x = (x0_morph-x0)  # Assuming the ellipse is centered at the median x position
 	center_y = (y0_morph-y0) # If the galaxy is centered at y=0 in arcsec
-	width = 2*obs_radius  # Major axis (r_obs is the semi-major axis)
-	height = 2 * (1 - ellip)*obs_radius  # Minor axis, where ellip is the ellipticity (ellip = 1 - b/a)
 	angle = -np.degrees(theta_Ha)  # Rotation angle in degrees
 
-	# Create and add the ellipse
-	ellipse_robs = Ellipse((center_x, center_y),width,height, angle=angle,
-					edgecolor='orange', facecolor='none', linewidth=2, alpha = 0.5)
-	ellipse_robs2 = Ellipse((center_x, center_y),width,height, angle=angle,
-			 					edgecolor='orange', facecolor='none', linewidth=2, alpha = 0.5)	
-	ellipse_robs3 = Ellipse((center_x, center_y),width,height, angle=angle,
-			 					edgecolor='orange', facecolor='none', linewidth=2, alpha = 0.5)
+	# Skip r_obs ellipse for ideal mode tests (detected by "_ideal" in save_to_folder)
+	is_ideal = save_to_folder is not None and '_ideal' in str(save_to_folder)
 
-	vel_map_ax.add_patch(ellipse_robs)
+	if not is_ideal:
+		width = 2*obs_radius  # Major axis (r_obs is the semi-major axis)
+		height = 2 * (1 - ellip)*obs_radius  # Minor axis, where ellip is the ellipticity (ellip = 1 - b/a)
+
+		# Create and add the r_obs ellipse
+		ellipse_robs = Ellipse((center_x, center_y),width,height, angle=angle,
+						edgecolor='orange', facecolor='none', linewidth=2, alpha = 0.5)
+		ellipse_robs2 = Ellipse((center_x, center_y),width,height, angle=angle,
+				 					edgecolor='orange', facecolor='none', linewidth=2, alpha = 0.5)
+		ellipse_robs3 = Ellipse((center_x, center_y),width,height, angle=angle,
+				 					edgecolor='orange', facecolor='none', linewidth=2, alpha = 0.5)
+
+		vel_map_ax.add_patch(ellipse_robs)
 
 	# Define ellipse parameters
 
@@ -665,7 +670,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	cbar.ax.tick_params(labelsize = 10)
 
 	veldisp_map_ax.add_patch(ellipse_re2)
-	veldisp_map_ax.add_patch(ellipse_robs2)
+	if not is_ideal:
+		veldisp_map_ax.add_patch(ellipse_robs2)
 
 	flux_map_ax = fig.add_subplot(gs0[1,2])
 
@@ -686,7 +692,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	flux_map_ax.text(0.2, 0.5, '0.5"', color = 'black', fontsize = 10, ha='center', va='center', rotation = 90, transform=flux_map_ax.transAxes)
 
 	flux_map_ax.add_patch(ellipse_re3)
-	flux_map_ax.add_patch(ellipse_robs3)
+	if not is_ideal:
+		flux_map_ax.add_patch(ellipse_robs3)
 
 
 	# fig.suptitle('Object JADES ID: ' + str(save_to_folder), fontsize=15, fontweight='bold')
@@ -921,6 +928,10 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 
 	# Ellipse parameters for intrinsic plots
 	from matplotlib.patches import Ellipse
+
+	# Skip r_obs ellipse for ideal mode tests (detected by "_ideal" in save_to_folder)
+	is_ideal = save_to_folder is not None and '_ideal' in str(save_to_folder)
+
 	center_x = (x0_morph - x0)
 	center_y = (y0_morph - y0)
 	width_obs = 2 * obs_radius if obs_radius is not None else 0
@@ -935,8 +946,8 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	                           shading='nearest', cmap='RdBu_r')
 	vel_map_ax.axis('off')
 
-	# Add ellipses
-	if obs_radius is not None and obs_radius > 0:
+	# Add ellipses (skip r_obs for ideal mode)
+	if not is_ideal and obs_radius is not None and obs_radius > 0:
 		ellipse_robs = Ellipse((center_x, center_y), width_obs, height_obs, angle=angle,
 		                       edgecolor='orange', facecolor='none', linewidth=2, alpha=0.5)
 		vel_map_ax.add_patch(ellipse_robs)
@@ -978,7 +989,7 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	cbar = plt.colorbar(cp, cax=cax, orientation='horizontal')
 	cbar.ax.tick_params(labelsize=10)
 
-	if obs_radius is not None and obs_radius > 0:
+	if not is_ideal and obs_radius is not None and obs_radius > 0:
 		ellipse_robs2 = Ellipse((center_x, center_y), width_obs, height_obs, angle=angle,
 		                        edgecolor='orange', facecolor='none', linewidth=2, alpha=0.5)
 		veldisp_map_ax.add_patch(ellipse_robs2)
@@ -1001,7 +1012,7 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	flux_map_ax.text(0.2, 0.5, '0.5"', color='black', fontsize=10, ha='center',
 	                va='center', rotation=90, transform=flux_map_ax.transAxes)
 
-	if obs_radius is not None and obs_radius > 0:
+	if not is_ideal and obs_radius is not None and obs_radius > 0:
 		ellipse_robs3 = Ellipse((center_x, center_y), width_obs, height_obs, angle=angle,
 		                        edgecolor='orange', facecolor='none', linewidth=2, alpha=0.5)
 		flux_map_ax.add_patch(ellipse_robs3)
