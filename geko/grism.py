@@ -441,9 +441,11 @@ class Grism:
 			y_offset = (self.detector_space_1d_y - self.ycenter_detector)[:, jnp.newaxis]
 			dispersion_indices += y_offset
 
-		# Use linear interpolation instead of nearest-neighbor argmin
-		# This prevents discrete jumps in wavelength solution that cause checkerboard artifacts
-		self.wave_array = np.interp(dispersion_indices.flatten(), self.dxs, self.wavs).reshape(dispersion_indices.shape)
+		# Use nearest-neighbor lookup (Nov 2024 method)
+		# For each dispersion offset, find the closest in the uniformly distributed dxs
+		wave_indices = np.argmin(np.abs(self.dxs[np.newaxis,np.newaxis,:] - dispersion_indices[:,:,np.newaxis]), axis = 2)
+		# Translate this to a wavelength in the rest frame of the central pixel
+		self.wave_array = self.wavs[wave_indices]
 
 	def load_poly_factors(self,a01, a02, a03, a04, a05, a06, b01, b02, b03, b04, b05, b06, c01, c02, c03, d01):
 		"""
