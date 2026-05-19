@@ -82,9 +82,16 @@ def read_config_table(config_path, test):
 
 	return PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 
-def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape):
+def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape, xc_morph=None, yc_morph=None):
 	'''
 		Make mock image from inputs
+
+		Parameters
+		----------
+		xc_morph, yc_morph : float, optional
+			Morphological center coordinates. If None, uses image_shape//2 (image center)
+		psf : array
+			PSF array to convolve with (already idealized for ideal mode if needed)
 	'''
 	# from inclination infer the ellipticity
 	# Use inclination from config (removed hardcoded i=60)
@@ -94,6 +101,13 @@ def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape):
 	#infer r_eff from the turnaround radius
 	r_eff = (1.676/0.4)*r_t
 	print('Reff: ', r_eff)
+
+	# Use provided centers or default to image center
+	if xc_morph is None:
+		xc_morph = image_shape // 2
+	if yc_morph is None:
+		yc_morph = image_shape // 2
+
 	time_start = time.time()
 	# galaxy_model = Sersic2D(amplitude=1/27**2, r_eff = r_eff*27, n =1, x_0 = image_shape//2*27 + 13 , y_0 = image_shape//2*27 +13, ellip = ellip, theta=(90 - PA_image)*np.pi/180) #function takes theta in rads
 	ny = nx = image_shape
@@ -103,24 +117,15 @@ def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape):
 
 	# galaxy_model = utils.sersic_profile(x,y,1, r_eff*81, 1, image_shape//2*81 + 40, image_shape//2*81 + 40, ellip, (90 - PA_image)*np.pi/180)/81**2
 	# image = utils.resample(galaxy_model, 81, 81)
-	x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
-	y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
-	x,y = jnp.meshgrid(x,y)
-	# x_grid = image.resize(x, (image_shape*5*25, image_shape*5*25), method='linear')
-	# y_grid = image.resize(y, (image_shape*5*25, image_shape*5*25), method='linear')
-	
-	# mock_image_superhigh = utils.sersic_profile(x_grid,y_grid,1/(25*5)**2, r_eff, 1, 0, 0, ellip, (90 - PA_image)*np.pi/180)
-	# mock_image_highres = utils.resample(mock_image_superhigh, 25, 25)
-	# mock_image = utils.resample(mock_image_superhigh, 5*25, 5*25)
-
-	sersic_factor = 25
-	x_grid = image.resize(x, (image_shape*5*sersic_factor, image_shape*5*sersic_factor), method='linear')
-	y_grid = image.resize(y, (image_shape*5*sersic_factor, image_shape*5*sersic_factor), method='linear')
+	# Generate flux using direct high-res grid (Gemini's suggestion)
+	# Avoids interpolation artifacts from image.resize
+	x_grid = jnp.linspace(0 - xc_morph, image_shape - xc_morph - 1, image_shape*5)
+	y_grid = jnp.linspace(0 - yc_morph, image_shape - yc_morph - 1, image_shape*5)
+	x_grid, y_grid = jnp.meshgrid(x_grid, y_grid)
 
 	Ie = utils.flux_to_Ie(200, n, r_eff, ellip)
 	# Convert PA for Sersic profile (restoring 90-PA conversion)
-	mock_image_superhighres = utils.sersic_profile(x_grid, y_grid, Ie/(5*sersic_factor)**2, r_eff, n, 0, 0, ellip, (90 - PA_image)*np.pi/180)
-	mock_image_highres = utils.resample(mock_image_superhighres, sersic_factor, sersic_factor)
+	mock_image_highres = utils.sersic_profile(x_grid, y_grid, Ie/5**2, r_eff, n, 0, 0, ellip, (90 - PA_image)*np.pi/180)
 	mock_image = utils.resample(mock_image_highres, 5, 5)
 
 	# image = image.at[15,15].set(4)
@@ -128,7 +133,8 @@ def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape):
 	print('SN image: ' + str(SN_image) + ', max image: ' + str(max_image) + ', max_image/sn: ' + str(max_image/SN_image))
 	# noise = max_image/SN_image*np.random.normal(0,1, (image_shape, image_shape))
 	noise = make_noise_image((mock_image.shape[0], mock_image.shape[1]), distribution='gaussian', mean=0, stddev=max_image/SN_image)
-	
+
+	# Use the PSF passed from RunGekoTests (already idealized for ideal mode)
 	noise_image = mock_image + noise
 	convolved_image = convolve(mock_image, psf, mode='same')
 	convolved_noise_image = convolve(mock_image, psf, mode='same') + noise
@@ -173,14 +179,14 @@ def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape):
 
 
 
-	return mock_image, mock_image_highres, mock_image_superhighres, convolved_image, noise_image, convolved_noise_image
+	return mock_image, mock_image_highres, convolved_image, noise_image, convolved_noise_image
 
 def initialize_grism(mock_image, psf, image_shape, factor=5):
 	#create wave space
 	wave_factor = 9
 	delta_wave = 0.001
 	wavelength = 4.5
-	delta_wave_cutoff = 0.04
+	delta_wave_cutoff = 0.02
 	wave_first = 4.0
 	wave_space = jnp.linspace(wave_first, 5.0, int(1/delta_wave)+1)
 	# wave_space= jnp.arange(3.0, 4.0, delta_wave)
@@ -217,22 +223,30 @@ def initialize_grism(mock_image, psf, image_shape, factor=5):
 
 	return grism_object, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min 
 
-def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, factor =5):
+def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, x0_vel=None, y0_vel=None, factor =5):
 	'''
 		Make velocity and velocity dispersion fields from inputs
+
+		Parameters
+		----------
+		x0_vel, y0_vel : float, optional
+			Velocity field center coordinates. If None, uses image_shape//2 (image center)
 	'''
-	x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
-	y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
-	x,y = jnp.meshgrid(x,y)
-	x_grid = image.resize(x, (image_shape*factor, image_shape*factor), method='linear')
-	y_grid = image.resize(y, (image_shape*factor, image_shape*factor), method='linear')
-	
-	# x,y= utils.oversample(x, factor, factor)*factor**2, utils.oversample(y, factor, factor)*factor**2
-	# print(image_shape//2)
+	# Use provided centers or default to image center
+	if x0_vel is None:
+		x0_vel = image_shape // 2
+	if y0_vel is None:
+		y0_vel = image_shape // 2
+
+	# Create velocity coordinate grids using direct high-res method (Gemini's suggestion)
+	# This avoids interpolation artifacts from image.resize
+	x_grid = jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape*factor)
+	y_grid = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape*factor)
+	x_grid, y_grid = jnp.meshgrid(x_grid, y_grid)
+
 	kin_model = models.KinModels()
-	# kin_model.compute_factors(jnp.radians(PA_grism), jnp.radians(i), x,y)
 	# Config PA is already in math/kinematic convention (0°=East, 90°=North), use directly
-	V = kin_model.v( x_grid, y_grid, PA_grism, i, Va, r_t)
+	V = kin_model.v(x_grid, y_grid, PA_grism, i, Va, r_t)
 	D = sigma0*jnp.ones_like(V)
 
 	# x_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor*10)
@@ -254,30 +268,76 @@ def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, factor =5):
 
 	return V, D
 
-def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf, image_shape = 31, factor = 5, ideal = False):
+def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf, image_shape = 31, factor = 5, ideal = False, x0_vel=None, y0_vel=None, xc_morph=None, yc_morph=None, psf_mode='2d'):
 	'''
 		Make mock images and grism spectra from inputs
+
+		Parameters
+		----------
+		x0_vel, y0_vel : float, optional
+			Velocity field center coordinates
+		xc_morph, yc_morph : float, optional
+			Morphological center coordinates
+		psf_mode : str, optional
+			'2d' for standard 2D PSF, '1d' for 1D PSF (only spatial y-axis)
 	'''
 	#make direct image
-	image, image_highres, image_superhighres, convolved_image, noise_image, convolved_noise_image = make_image(PA_image, i, r_t, SN_image, n, psf, image_shape)
+	image, image_highres, convolved_image, noise_image, convolved_noise_image = make_image(PA_image, i, r_t, SN_image, n, psf, image_shape, xc_morph=xc_morph, yc_morph=yc_morph)
 	max_image = jnp.max(image)
 	image_error = (max_image/SN_image)*jnp.ones((image_shape, image_shape))
 	#make grism object
 	grism_object, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min = initialize_grism(convolved_image, psf, image_shape, factor=factor)
+
+	# Configure PSF and LSF settings for ideal vs realistic mode
 	if ideal:
-		# Keep PSF/LSF enabled but use much better quality (sharper LSF, high-quality PSF)
-		# Reduce LSF sigma by factor of 3 for "ideal" instrument
-		grism_object.sigma_lsf = grism_object.sigma_lsf / 3.0
-		print(f'Ideal mode: Using improved PSF/LSF (LSF sigma reduced to {grism_object.sigma_lsf:.6f})')
+		# Ideal mode: PSF already set from RunGekoTests (sigma=0.5 pix, 11x11 grid)
+		# Only need to set idealized LSF: better than real instrument but not too sharp
+		# Real instrument LSF sigma ~ 0.003 microns, use 0.001 microns (3x better)
+		grism_object.sigma_lsf = 0.0002
+		grism_object.use_psf = True
+		grism_object.use_lsf = True
+		print(f'Ideal mode: Using idealized PSF from RunGekoTests and LSF (sigma={grism_object.sigma_lsf} um)')
+	else:
+		# Realistic mode: use instrument PSF and LSF
+		grism_object.use_psf = True
+		grism_object.use_lsf = True
+		print(f'Realistic mode: Using instrument PSF and LSF')
+
+	# Modify PSF for 1D mode (mock data only - inference keeps 2D)
+	if psf_mode == '1d':
+		# Create 1D PSF: Gaussian in y (spatial perpendicular to dispersion), delta in x
+		# For row dispersion (pupil='R'): dispersion is along x, spatial is y
+		psf_2d = grism_object.PSF[:, :, 0]  # Get 2D PSF from first wavelength slice
+		psf_size_y, psf_size_x = psf_2d.shape
+
+		# Create 1D PSF: integrate 2D PSF along x to get y-profile, then make x=delta function
+		psf_1d_profile = jnp.sum(psf_2d, axis=1)  # Sum along x to get y profile
+		psf_1d_profile = psf_1d_profile / jnp.sum(psf_1d_profile)  # Normalize
+
+		# Create 2D array with this 1D profile in y, delta function in x
+		psf_1d = jnp.zeros((psf_size_y, psf_size_x))
+		center_x = psf_size_x // 2
+		psf_1d = psf_1d.at[:, center_x].set(psf_1d_profile)  # Delta in x, profile in y
+
+		# Store original 2D PSF for later restoration (inference needs 2D)
+		grism_object.PSF_2d_original = grism_object.PSF.copy()
+		grism_object.PSF = psf_1d[:, :, jnp.newaxis]  # Add wavelength dimension
+		print(f'Mock PSF mode: 1D (convolution only in y-axis, spatial perpendicular to dispersion)')
+		print(f'  Original 2D PSF shape: {psf_2d.shape}, 1D PSF shape: {psf_1d.shape}')
+	else:
+		print(f'Mock PSF mode: 2D (standard convolution in both x and y)')
 	#make velocity and velocity dispersion fields
 	# Use inclination from config (removed hardcoded i=60)
 	print('Params for vel fields: PA = ' + str(PA_grism) + ', i = ' + str(i) + ', Va = ' + str(Va) + ', r_t = ' + str(r_t) + ', sigma0 = ' + str(sigma0))
 
-	# Generate velocity fields exactly as in inference model (models.py lines 1096-1104)
-	# This ensures mock and forward model are identical
-	V, D = make_vel_fields(PA_grism, i, Va, r_t, sigma0, image_shape, factor=factor)
+	# Generate velocity fields exactly as in inference model (models.py lines 1092-1101)
+	# This ensures mock and forward model use identical coordinate grids
+	V, D = make_vel_fields(PA_grism, i, Va, r_t, sigma0, image_shape, x0_vel=x0_vel, y0_vel=y0_vel, factor=factor)
 
 	grism_spectrum = grism_object.disperse(image_highres, V, D)
+	print(f'DEBUG: PSF shape before disperse: {grism_object.PSF.shape}')
+	print(f'DEBUG: PSF sum: {jnp.sum(grism_object.PSF):.6f}')
+	print(f'DEBUG: PSF non-zero elements: {jnp.sum(grism_object.PSF > 1e-10)}')
 	grism_spectrum = utils.resample(grism_spectrum, factor, wave_factor)
 	# plt.imshow(grism_spectrum, origin='lower', cmap = 'inferno', vmin = 0.0, vmax = grism_spectrum.max())
 	# plt.colorbar()
@@ -343,7 +403,7 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 	center_y = ny // 2
 	box_height = 5
 	y_min = max(0, center_y - box_height // 2)
-	y_max = min(ny, center_y + box_height // 2)
+	y_max = min(ny, center_y + box_height // 2 + 1) 
 		
 	# Perform boxcar extraction
 	extracted_1d = np.sum(grism_spectrum_noise[y_min:y_max, :], axis=0)
@@ -416,6 +476,11 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 	plt.show()
 	
 
+	# Restore 2D PSF for inference if we used 1D for mock generation
+	if psf_mode == '1d' and hasattr(grism_object, 'PSF_2d_original'):
+		grism_object.PSF = grism_object.PSF_2d_original
+		print(f'Inference PSF: Restored 2D PSF for inference model (shape: {grism_object.PSF.shape})')
+
 	# In ideal mode return the unconvolved image; otherwise return PSF-convolved image
 	observed_image = image if ideal else convolved_image
 	return observed_image, image_error, image, grism_spectrum_noise, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
@@ -431,13 +496,23 @@ def run_fit(mock_params, priors,parametric = False):
 	redshift, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = pre.run_full_preprocessing(None, None, line, mock_params, priors)
 
 	# Set default fitting parameters
-	num_samples = 500
-	num_warmup = 500
-	step_size = 0.01
-	target_accept_prob = 0.9
+	num_samples = 1000
+	num_warmup = 1000
+	step_size = 1.0  # Let NUTS adapt from reasonable starting point (was 0.01 - too small!)
+	target_accept_prob = 0.7  # Standard NUTS setting (was 0.9 - too conservative!)
 	factor = 5
-	
-	mask = (jnp.where(obs_map/obs_error < 5.0, 0, 1)).astype(bool) 
+
+	# # Soft SNR cut - only mask pixels with SNR < 1 (pure noise)
+	# mask = jnp.where(obs_map/obs_error < 0.01, 0, 1).astype(bool)
+	# num_masked = jnp.sum(~mask)
+	# print(f'SNR < 1 masking: {jnp.sum(mask)}/{mask.size} pixels included ({num_masked} masked)')
+	# No masking - use all pixels (set all to 1)
+	mask = jnp.ones_like(obs_map, dtype=bool)
+	print('Using no mask (all pixels included)')
+	# # Use flux-based masking instead of SNR-based to preserve rotation signal
+	# # Only mask true background (0.1% of max flux) to avoid excluding low-SNR but real signal
+	# flux_threshold = 0.001 * jnp.max(obs_map)
+	# mask = (jnp.where(obs_map < flux_threshold, 0, 1)).astype(bool) 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
 	kin_model.disk.set_parametric_priors_test(priors)
 	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric = parametric)
@@ -455,7 +530,7 @@ def run_fit(mock_params, priors,parametric = False):
 
 	
 	run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
-							  median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2, init_vals = None)
+							  median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2, init_vals = None, mask = mask)
 
 	#get highest likelihood sample and compute liklihood
 
@@ -495,13 +570,13 @@ def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, n
 	config_table_test = config_table[config_table['test'] == test]
 
 	#create a new table for results
-	params_single = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re']
+	params_single = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re', 'r_eff', 'n']
 	all_params_single = [[i + "_q16", i + "_q50", i + "_q84"] for i in params_single]
 	cat_col = np.append(["v_re"], np.concatenate(all_params_single))
 	t_empty = np.zeros((len(cat_col), 1))
 	res = Table(t_empty.T, names=cat_col)
 	#obtain quantiles for each parameter from the posterior distribution
-	params = [ 'PA', 'i', 'Va', 'r_t' ,'sigma0', 'v_re']
+	params = [ 'PA', 'i', 'Va', 'r_t' ,'sigma0', 'v_re', 'r_eff', 'n']
 	quantiles = [0.16, 0.50, 0.84]
 		#compute the azimuthally average velocity at the effective radius
 	# r_eff = kin_model.r_eff_mean
@@ -541,20 +616,39 @@ def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, n
 	return v_re_med, v_re_truth, kin_model
 
 
-def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf, params_single, res, save_folder):
+def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf, params_single, res, save_folder, psf_mode='2d'):
 	'''
 		Wrapper function to run the test for the mock data
+
+		Parameters
+		----------
+		psf_mode : str, optional
+			'2d' for standard 2D PSF (default), '1d' for 1D PSF in mock (y-axis only)
 	'''
 	os.makedirs('testing/' + save_folder, exist_ok=True)
 
 	# Infer ideal mode from save_folder name
 	ideal = '_ideal' in save_folder
 
+	# Use the same centers as the prior centers (15.0 for 31x31 image)
+	# This ensures mock and inference use identical coordinate grids
+	# Both morphological and velocity field centers are set to image center for mock tests
+	image_shape = 31
+	xc_morph_true = 15.0  # Morphological center X
+	yc_morph_true = 15.0  # Morphological center Y
+	x0_vel_true = 15.0    # Velocity field center X
+	y0_vel_true = 15.0    # Velocity field center Y
+
 	convolved_noise_image, image_error, intrinsic_image, grism_spectrum_noise, grism_error, wave_space, \
 	wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object \
-	= make_mock_data(PA_image[j], PA_grism[j], i[j], Va[j], r_t[j], sigma0[j],SN_image[j], SN_grism[j], n[j], psf, image_shape= 31, ideal=ideal)
+	= make_mock_data(PA_image[j], PA_grism[j], i[j], Va[j], r_t[j], sigma0[j],SN_image[j], SN_grism[j], n[j], psf,
+					 image_shape=image_shape, ideal=ideal,
+					 x0_vel=x0_vel_true, y0_vel=y0_vel_true,
+					 xc_morph=xc_morph_true, yc_morph=yc_morph_true, psf_mode=psf_mode)
 	#summarize ouputs in one mock_params dictionary
 	print('Convolved mock image max pixel: ' + str(jnp.max(convolved_noise_image)))
+	print(f'Mock morphology centers: xc_morph={xc_morph_true}, yc_morph={yc_morph_true}')
+	print(f'Mock velocity field centers: x0_vel={x0_vel_true}, y0_vel={y0_vel_true}')
 	mock_params = {'test': test, 'j': j ,'convolved_noise_image': convolved_noise_image, 'image_error': image_error, 'grism_spectrum_noise': grism_spectrum_noise, 'grism_error': grism_error, 'wave_space': wave_space, 'wavelength': wavelength, 'delta_wave_cutoff': delta_wave_cutoff, 'y_factor': y_factor, 'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min, 'grism_object': grism_object, 'PSF': psf}
 	priors = {'PA': PA_image[j], 'i': i[j], 'Va': Va[j], 'r_t': r_t[j], 'sigma0': sigma0[j], 'n': n[j]}
 	#run fitting
@@ -657,7 +751,7 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, Va, r_t, s
 
 	#save all of the results in one table
 		#obtain quantiles for each parameter from the posterior distribution
-	params = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re']
+	params = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re', 'r_eff', 'n']
 	quantiles = [0.16, 0.50, 0.84]
 	#compute the azimuthally average velocity at the effective radius
 	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
