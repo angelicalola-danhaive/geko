@@ -89,7 +89,7 @@ class Fit_Numpyro():
         self.config = config
 
 
-    def run_inference(self, num_samples=None, num_warmup=None, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=None, max_tree_depth=None, num_chains=None, init_vals = None):
+    def run_inference(self, num_samples=None, num_warmup=None, high_res=False, median=True, step_size=1, adapt_step_size=True, target_accept_prob=None, max_tree_depth=None, num_chains=None, init_vals = None, mask=None):
         """
         Run MCMC inference using the NUTS sampler.
 
@@ -118,11 +118,13 @@ class Fit_Numpyro():
             Number of MCMC chains (default: from config or 4)
         init_vals : dict, optional
             Initial parameter values (default: None)
+        mask : jax.numpy.ndarray, optional
+            Custom mask to use (default: None, will create mask using photutils segmentation)
 
         Notes
         -----
         Results are stored in self.mcmc and printed to console.
-        Creates a source mask automatically using photutils segmentation.
+        If mask is not provided, creates a source mask automatically using photutils segmentation.
         """
 
         # Always use config for defaults - create default config if none provided
@@ -164,7 +166,13 @@ class Fit_Numpyro():
                          num_warmup=num_warmup, num_chains=num_chains)
         self.rng_key = random.PRNGKey(100)
 
-        new_mask = self.create_mask()
+        # Use provided mask if given, otherwise create one using photutils segmentation
+        if mask is None:
+            new_mask = self.create_mask()
+            print('Using photutils segmentation mask')
+        else:
+            new_mask = mask
+            print('Using provided custom mask')
 
         self.mcmc.run(self.rng_key, grism_object = self.grism_object, obs_map = self.obs_map, obs_error = self.obs_error, mask =new_mask) #, extra_fields=("potential_energy", "accept_prob"))
 
