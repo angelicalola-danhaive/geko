@@ -95,7 +95,8 @@ def _v_core(x, y, PA, i, Va, r_t):
 	r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
 	
 	# Calculate observed velocity using the standalone vel1d function
-	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(x_rot, Va, r_t))
+	# For edge-on (cos(i)=0), use y_rot (major axis) as the visible rotation radius
+	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(y_rot, Va, r_t))
 	
 	# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
 	vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
@@ -130,7 +131,8 @@ def _v_int_core(x, y, PA, i, Va, r_t):
 	r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)  # Use a small epsilon for r when both x_rot and y_rot are zero
 	
 	# Calculate observed velocity using the standalone vel1d function
-	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(x_rot, Va, r_t))
+	# For edge-on (cos(i)=0), use y_rot (major axis) as the visible rotation radius
+	vel_obs = jnp.where(cosi != 0, _vel1d_core(r_safe, Va, r_t) * sini, _vel1d_core(y_rot, Va, r_t))
 	
 	# Final velocity computation, handling r = 0 or x_rot = y_rot = 0 case
 	vel_obs_final = jnp.where(r_safe != 0.0, vel_obs * (y_rot / r_safe), 0.0)
