@@ -187,10 +187,14 @@ def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, fi
 
     module = 'A'
     if module_A == 0:
-        print('Flipping map! (Mod B)')
-        obs_error = jnp.flip(obs_error, axis = 1)
-        obs_map = jnp.flip(obs_map, axis = 1)
         module = 'B'
+        if pupil == 'R':
+            # Module B R grism: wavelength direction (x) is reversed (b01_BR < 0).
+            # Flip the wavelength axis so it matches the forward wave_space ordering.
+            # The Grism class also negates b01 for module B R to stay consistent.
+            print('Flipping wavelength axis! (Mod B, R grism)')
+            obs_error = jnp.flip(obs_error, axis = 1)
+            obs_map = jnp.flip(obs_map, axis = 1)
 
 
     return module, pupil, jnp.array(obs_map), jnp.array(obs_error),  wave_space, d_wave, index_min, index_max, wavelength
