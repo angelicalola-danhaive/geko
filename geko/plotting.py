@@ -708,6 +708,49 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 			fig.savefig('testing/' + save_to_folder + '/' + name + '_summary.png', dpi=500)
 	plt.close()
 
+	# Generate and save the big corner plot (prior + posterior overlay)
+	if save_to_folder is not None and name == 'summary':
+		v_sigma_16 = float(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]).values)
+		v_sigma_84 = float(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]).values)
+		v_sigma_50 = float(inf_data.posterior['v_sigma'].quantile(0.5,  dim=["chain", "draw"]).values)
+		sigma0_16  = float(inf_data.posterior['sigma0'].quantile(0.16,  dim=["chain", "draw"]).values)
+		sigma0_84  = float(inf_data.posterior['sigma0'].quantile(0.84,  dim=["chain", "draw"]).values)
+		sigma0_50  = float(inf_data.posterior['sigma0'].quantile(0.5,   dim=["chain", "draw"]).values)
+		v_re_16    = float(inf_data.posterior['v_re'].quantile(0.16,    dim=["chain", "draw"]).values)
+		v_re_84    = float(inf_data.posterior['v_re'].quantile(0.84,    dim=["chain", "draw"]).values)
+		v_re_50    = float(inf_data.posterior['v_re'].quantile(0.5,     dim=["chain", "draw"]).values)
+
+		_var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph', 'amplitude', 'n', 'r_eff',
+		              'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel', 'v0']
+		CORNER_KWARGS_PRIOR = dict(
+			smooth=2, smooth1d=5,
+			label_kwargs=dict(fontsize=20), title_kwargs=dict(fontsize=20),
+			plot_density=False, plot_datapoints=True, fill_contours=True, plot_contours=True,
+			show_titles=False, levels=[0.05, 0.16, 0.5, 0.68, 0.95], alpha=0.1, max_n_ticks=3)
+		figure = corner.corner(inf_data, group='prior', var_names=_var_names,
+		                       color='palevioletred', hist_bin_factor=4,
+		                       weights=np.ones_like(inf_data.prior['sigma0'].values[0]) * 2,
+		                       **CORNER_KWARGS_PRIOR)
+		CORNER_KWARGS_POST = dict(
+			smooth=2, smooth1d=5,
+			label_kwargs=dict(fontsize=20), title_kwargs=dict(fontsize=20),
+			quantiles=[0.16, 0.5, 0.84],
+			plot_density=False, plot_datapoints=False, fill_contours=True, plot_contours=True,
+			show_titles=True,
+			labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]',
+			        r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]',
+			        r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]', r'$v_0$ [km/s]'],
+			titles=[r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$',
+			        r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$',
+			        r'$x_{0, v}$', r'$y_{0,v}$', r'$v_0$'],
+			max_n_ticks=3, divergences=False, linewidth=2, title_fmt='.1f')
+		figure = corner.corner(inf_data, group='posterior', var_names=_var_names,
+		                       truths=None, truth_color='blue', color='royalblue',
+		                       fig=figure, hist_bin_factor=4, **CORNER_KWARGS_POST)
+		_corner_filename = str(ID) + '_cornerplot.png' if ID is not None else save_to_folder + '_cornerplot.png'
+		plt.savefig(save_runs_path + save_to_folder + '/' + _corner_filename, dpi=300)
+		plt.close()
+
 	return None, None
 
 def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, y0=31, factor=2,
@@ -797,7 +840,15 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	)
 
 	# Extract shared parameters for intrinsic plots
-	v0 = inf_data.posterior['v0'].quantile(0.5, dim=["chain", "draw"]).values
+	# v0 may be per-obs in multi-obs fits; fall back to first obs or 0
+	first_obs_name_v0 = observations[0].name
+	v0_key = f'v0_{first_obs_name_v0}'
+	if v0_key in inf_data.posterior:
+		v0 = inf_data.posterior[v0_key].quantile(0.5, dim=["chain", "draw"]).values
+	elif 'v0' in inf_data.posterior:
+		v0 = inf_data.posterior['v0'].quantile(0.5, dim=["chain", "draw"]).values
+	else:
+		v0 = 0.0
 	x0_morph = inf_data.posterior['xc_morph'].quantile(0.5, dim=["chain", "draw"]).values
 	y0_morph = inf_data.posterior['yc_morph'].quantile(0.5, dim=["chain", "draw"]).values
 	x0_vel = inf_data.posterior['x0_vel'].quantile(0.5, dim=["chain", "draw"]).values
@@ -1073,7 +1124,36 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 		alpha = 0.1,
 		max_n_ticks=3)
 	bin_factor = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-	figure = corner.corner(inf_data, group='prior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0',  'PA_morph','amplitude', 'n', 'r_eff', 'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel'],
+	# Build var_names dynamically: shared params always present; add amplitude/v0 if they exist
+	_corner_base = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph', 'n', 'r_eff',
+	                'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel']
+	_corner_labels_base = [r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]',
+	                       r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$n$', r'$r_{\text{e}}$ [px]',
+	                       r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]']
+	_corner_titles_base = [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$',
+	                       r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$', r'$x_{0, v}$', r'$y_{0,v}$']
+	if 'amplitude' in inf_data.posterior:
+		_corner_base.append('amplitude')
+		_corner_labels_base.append(r'$\text{amplitude}$')
+		_corner_titles_base.append(r'$\text{amplitude}$')
+	else:
+		for _k in inf_data.posterior:
+			if str(_k).startswith('amplitude_'):
+				_corner_base.append(str(_k))
+				_corner_labels_base.append(r'amp$_{\rm ' + str(_k)[len('amplitude_'):] + r'}$')
+				_corner_titles_base.append(r'amp$_{\rm ' + str(_k)[len('amplitude_'):] + r'}$')
+	if 'v0' in inf_data.posterior:
+		_corner_base.append('v0')
+		_corner_labels_base.append(r'$v_0$ [km/s]')
+		_corner_titles_base.append(r'$v_0$')
+	else:
+		for _k in inf_data.posterior:
+			if str(_k).startswith('v0_'):
+				_corner_base.append(str(_k))
+				_corner_labels_base.append(r'$v_{0,' + str(_k)[len('v0_'):] + r'}$ [km/s]')
+				_corner_titles_base.append(r'$v_{0,' + str(_k)[len('v0_'):] + r'}$')
+
+	figure = corner.corner(inf_data, group='prior', var_names=_corner_base,
 						color='palevioletred', hist_bin_factor = 4, weights = np.ones_like(inf_data.prior['sigma0'].values[0])*2, **CORNER_KWARGS)
 	CORNER_KWARGS = dict(
 		smooth=2,
@@ -1086,8 +1166,8 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=True,
-		labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]', r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]'],
-		titles= [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$', r'$x_{0, v}$', r'$y_{0,v}$'],
+		labels=_corner_labels_base,
+		titles=_corner_titles_base,
 		max_n_ticks=3,
 		divergences=False,
 		linewidth=2,
@@ -1095,8 +1175,8 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	# truths = { 'PA': PA, 'i': i, 'Va': Va,
 	# 					  'r_t': r_t, 'sigma0': sigma0}
 	# corner_range = [0.999, 0.999,[-600,0], [0,10], [60,170], 0.999, 0.999, 0.999,[1,6], 0.999, [14,15.5]]
-	figure = corner.corner(inf_data, group='posterior', var_names=['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph','amplitude', 'n', 'r_eff', 'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel'],truths = None, truth_color='blue',
-						color='royalblue', fig = figure, hist_bin_factor = 4, **CORNER_KWARGS) #range = corner_range, 
+	figure = corner.corner(inf_data, group='posterior', var_names=_corner_base, truths=None, truth_color='blue',
+						color='royalblue', fig = figure, hist_bin_factor = 4, **CORNER_KWARGS) #range = corner_range,
 
 	
 	#overplot a posteriors colored in green for the last six paramters
@@ -1148,6 +1228,120 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	plt.close()
 
 	return None,None
+
+
+def plot_multi_obs_comparison_cornerplot(inf_data_list, run_labels, colors, save_path, ID=None):
+	"""
+	Overlay posteriors from multiple runs (e.g. R, C, joint) on a single corner plot.
+
+	Parameters
+	----------
+	inf_data_list : list of arviz.InferenceData
+		One entry per run, in the order they should be plotted.
+	run_labels : list of str
+		Display name for each run (e.g. ['R', 'C', 'Joint']).
+	colors : list of str
+		Matplotlib color for each run.
+	save_path : str
+		Full path (including filename) where the PNG is saved.
+	ID : int or None
+		Source ID used in the figure title.
+	"""
+	# Shared physical params present in all runs (individual and joint)
+	shared_var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph', 'n', 'r_eff',
+	                    'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel']
+	shared_labels = [r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]',
+	                 r'PA$_{\rm morph}$ [deg]', r'$n$', r'$r_{\rm e}$ [px]',
+	                 r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]']
+
+	# Add amplitude/v0 only if they exist in all runs (single-obs fits still use shared params)
+	if all('amplitude' in idf.posterior for idf in inf_data_list):
+		shared_var_names.append('amplitude')
+		shared_labels.append(r'amplitude')
+	if all('v0' in idf.posterior for idf in inf_data_list):
+		shared_var_names.append('v0')
+		shared_labels.append(r'$v_0$ [km/s]')
+
+	CORNER_KWARGS = dict(
+		smooth=2, smooth1d=5,
+		label_kwargs=dict(fontsize=14), title_kwargs=dict(fontsize=14),
+		quantiles=[0.16, 0.5, 0.84],
+		plot_density=False, plot_datapoints=False,
+		fill_contours=True, plot_contours=True,
+		show_titles=False, levels=[0.16, 0.5, 0.68, 0.95],
+		max_n_ticks=3, divergences=False, linewidth=1.5, title_fmt='.1f')
+
+	figure = None
+	for inf_data, color in zip(inf_data_list, colors):
+		figure = corner.corner(
+			inf_data, group='posterior', var_names=shared_var_names,
+			labels=shared_labels if figure is None else None,
+			color=color, fig=figure, hist_bin_factor=4, **CORNER_KWARGS)
+
+	# Add legend
+	legend_handles = [plt.Line2D([0], [0], color=c, linewidth=2, label=l)
+	                  for c, l in zip(colors, run_labels)]
+	figure.legend(handles=legend_handles, fontsize=14, loc='upper right',
+	              bbox_to_anchor=(0.98, 0.98), frameon=True)
+
+	title = f'Object ID: {ID}' if ID is not None else 'Comparison cornerplot'
+	figure.suptitle(title, fontsize=14, fontweight='bold')
+
+	plt.savefig(save_path, dpi=200, bbox_inches='tight')
+	plt.close()
+
+	# Separate figure: per-obs v0 and amplitude comparison
+	# Collect per-obs keys from joint fit (last in list) and individual fits
+	joint_inf = inf_data_list[-1]
+	per_obs_v0_keys = [k for k in joint_inf.posterior if k.startswith('v0_')]
+	per_obs_amp_keys = [k for k in joint_inf.posterior if k.startswith('amplitude_')]
+
+	if per_obs_v0_keys or per_obs_amp_keys:
+		n_cols = len(per_obs_v0_keys) + len(per_obs_amp_keys)
+		fig_perobs, axes_perobs = plt.subplots(1, n_cols, figsize=(4 * n_cols, 4))
+		if n_cols == 1:
+			axes_perobs = [axes_perobs]
+
+		ax_idx = 0
+		for v0_key in sorted(per_obs_v0_keys):
+			obs_name = v0_key[len('v0_'):]
+			ax = axes_perobs[ax_idx]
+			# Joint fit per-obs v0
+			samples_joint = joint_inf.posterior[v0_key].values.flatten()
+			ax.hist(samples_joint, bins=40, color=colors[-1], alpha=0.5, density=True,
+			        label=f'Joint {obs_name}')
+			# Individual fit v0 if available (match obs_name to run label)
+			for ind_inf, ind_label, ind_color in zip(inf_data_list[:-1], run_labels[:-1], colors[:-1]):
+				if ind_label == obs_name and 'v0' in ind_inf.posterior:
+					samples_ind = ind_inf.posterior['v0'].values.flatten()
+					ax.hist(samples_ind, bins=40, color=ind_color, alpha=0.5, density=True,
+					        label=ind_label)
+			ax.set_xlabel(r'$v_0$ [km/s]', fontsize=12)
+			ax.set_title(obs_name, fontsize=12)
+			ax.legend(fontsize=10)
+			ax_idx += 1
+
+		for amp_key in sorted(per_obs_amp_keys):
+			obs_name = amp_key[len('amplitude_'):]
+			ax = axes_perobs[ax_idx]
+			samples_joint = joint_inf.posterior[amp_key].values.flatten()
+			ax.hist(samples_joint, bins=40, color=colors[-1], alpha=0.5, density=True,
+			        label=f'Joint {obs_name}')
+			for ind_inf, ind_label, ind_color in zip(inf_data_list[:-1], run_labels[:-1], colors[:-1]):
+				if ind_label == obs_name and 'amplitude' in ind_inf.posterior:
+					samples_ind = ind_inf.posterior['amplitude'].values.flatten()
+					ax.hist(samples_ind, bins=40, color=ind_color, alpha=0.5, density=True,
+					        label=ind_label)
+			ax.set_xlabel(r'amplitude', fontsize=12)
+			ax.set_title(obs_name, fontsize=12)
+			ax.legend(fontsize=10)
+			ax_idx += 1
+
+		fig_perobs.suptitle(f'Per-obs v0 and amplitude — ID {ID}', fontsize=13)
+		perobs_path = save_path.replace('.png', '_perobs.png')
+		fig_perobs.savefig(perobs_path, dpi=200, bbox_inches='tight')
+		plt.close(fig_perobs)
+		print(f'  Saved per-obs comparison plot: {perobs_path}')
 
 
 def define_corner_args(divergences = False, fill_contours = True, plot_contours = True, show_titles = True, quantiles = [0.16,0.5,0.84], var_names = ['PA', 'Va', 'i','r_t','sigma0'], labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'$V_r$'], show_labels = True):
