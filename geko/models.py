@@ -479,7 +479,31 @@ class GalaxyModel:
 	def sample_rot_params(self, morph_params):
 		"""Sample rotation curve parameters."""
 		return self.rot_model.sample(morph_params)
-	
+
+	def velocity_field(self, X, Y, PA, i, all_params):
+		"""Line-of-sight velocity field for any CompositeRotationCurve.
+		Deprojection is identical to _v_core; only the 1D velocity profile is replaced
+		by rot_model.rotation_curve(), so any rotation component works without changes here.
+		"""
+		i_rad  = i  / 180.0 * jnp.pi
+		PA_rad = PA / 180.0 * jnp.pi
+		sini = jnp.sin(i_rad)
+		cosi = jnp.cos(i_rad)
+
+		x_rot = X * jnp.cos(PA_rad) - Y * jnp.sin(PA_rad)
+		y_rot = X * jnp.sin(PA_rad) + Y * jnp.cos(PA_rad)
+
+		cosi_safe = jnp.where(cosi != 0, cosi, 1e-6)
+		r_squared = x_rot**2 / cosi_safe**2 + y_rot**2
+		r = jnp.sqrt(jnp.where(r_squared != 0, r_squared, 1e-12))
+		r_safe = jnp.where((x_rot != 0) | (y_rot != 0), r, 1e-6)
+
+		v_circ = jnp.where(
+			cosi != 0,
+			self.rot_model.rotation_curve(r_safe, all_params) * sini,
+			self.rot_model.rotation_curve(jnp.abs(y_rot), all_params),
+		)
+		return jnp.where(r_safe != 0, v_circ * (y_rot / r_safe), 0.0)
 
 	def compute_posterior_means_parametric(self, inference_data):
 		"""
@@ -489,21 +513,12 @@ class GalaxyModel:
 		self.PA_mean = jnp.array(inference_data.posterior['PA'].median(dim=["chain", "draw"]))
 		self.y0_vel_mean = jnp.array(inference_data.posterior['y0_vel'].median(dim=["chain", "draw"]))
 		self.x0_vel_mean = jnp.array(inference_data.posterior['x0_vel'].median(dim=["chain", "draw"]))
-		self.r_t_mean = jnp.array(inference_data.posterior['r_t'].median(dim=["chain", "draw"]))
 		self.sigma0_mean_model = jnp.array(inference_data.posterior['sigma0'].median(dim=["chain", "draw"]))
-		self.Va_mean = jnp.array(inference_data.posterior['Va'].median(dim=["chain", "draw"]))
 
-		#save the percentiles as well
 		self.PA_16 = jnp.array(inference_data.posterior['PA'].quantile(0.16, dim=["chain", "draw"]))
 		self.PA_84 = jnp.array(inference_data.posterior['PA'].quantile(0.84, dim=["chain", "draw"]))
-
-		self.r_t_16 = jnp.array(inference_data.posterior['r_t'].quantile(0.16, dim=["chain", "draw"]))
-		self.r_t_84 = jnp.array(inference_data.posterior['r_t'].quantile(0.84, dim=["chain", "draw"]))
 		self.sigma0_16 = jnp.array(inference_data.posterior['sigma0'].quantile(0.16, dim=["chain", "draw"]))
 		self.sigma0_84 = jnp.array(inference_data.posterior['sigma0'].quantile(0.84, dim=["chain", "draw"]))
-		self.Va_16 = jnp.array(inference_data.posterior['Va'].quantile(0.16, dim=["chain", "draw"]))
-		self.Va_84 = jnp.array(inference_data.posterior['Va'].quantile(0.84, dim=["chain", "draw"]))
-
 		self.x0_vel_16 = jnp.array(inference_data.posterior['x0_vel'].quantile(0.16, dim=["chain", "draw"]))
 		self.x0_vel_84 = jnp.array(inference_data.posterior['x0_vel'].quantile(0.84, dim=["chain", "draw"]))
 		self.y0_vel_16 = jnp.array(inference_data.posterior['y0_vel'].quantile(0.16, dim=["chain", "draw"]))
@@ -519,7 +534,22 @@ class GalaxyModel:
 			self.v0_16 = None
 			self.v0_84 = None
 
-		return self.PA_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean
+		# Dynamic rotation parameter extraction — works for any CompositeRotationCurve
+		self.rot_means = {}
+		self.rot_quantiles = {}
+		for spec in self.rot_model.parameters:
+			if spec.fixed:
+				continue
+			name = spec.name
+			if name in inference_data.posterior:
+				med = jnp.array(inference_data.posterior[name].median(dim=["chain", "draw"]))
+				q16 = jnp.array(inference_data.posterior[name].quantile(0.16, dim=["chain", "draw"]))
+				q84 = jnp.array(inference_data.posterior[name].quantile(0.84, dim=["chain", "draw"]))
+				self.rot_means[name] = med
+				self.rot_quantiles[name] = {'16': q16, '84': q84}
+				setattr(self, f'{name}_mean', med)
+				setattr(self, f'{name}_16', q16)
+				setattr(self, f'{name}_84', q84)
 
 	def compute_parametrix_flux_posterior(self, inference_data):
 		#compute means for parametric flux model
@@ -605,14 +635,9 @@ class GrismFitter(KinModels):
 	"""
 
 	def __init__(self):
-		print('Disk model created')
-
-		#declare var and label names for plotting
-
-		self.var_names = [ 'i', 'Va', 'sigma0'] #, 'fluxes_scaling']
-		self.labels = [ r'$i$', r'$V_a$', r'$\sigma_0$'] #, r'$f_{scale}$']
-		# self.var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0_max', 'sigma0_scale', 'sigma0_const']
-		# self.labels = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_{max}$', r'$\sigma_{scale}$', r'$\sigma_{const}$']
+		print('GrismFitter created')
+		self.var_names = []
+		self.labels = []
 
 	def set_bounds(self, im_shape, factor, wave_factor, x0, x0_vel, y0, y0_vel):
 		"""
@@ -643,9 +668,16 @@ class GrismFitter(KinModels):
 		self.im_shape = im_shape
 		self.galaxy_model = GalaxyModel(self.im_shape, self.factor)
 
+		from .param_spec import all_param_specs
+		_specs = [s for s in all_param_specs(
+		              self.galaxy_model.morph_model,
+		              self.galaxy_model.shared_kin_specs,
+		              self.galaxy_model.rot_model)
+		          if not s.fixed]
+		self.var_names = [s.name for s in _specs]
+		self.labels    = [s.label for s in _specs]
 
 
-	
 	def inference_model_parametric(self, grism_object, obs_map, obs_error, mask = None):
 		"""
 		Single-observation inference (backward compatible).
@@ -741,8 +773,6 @@ class GrismFitter(KinModels):
 		Pa_ref = shared_params['PA']
 		x0_vel_ref = shared_params['x0_vel']
 		y0_vel_ref = shared_params['y0_vel']
-		Va = rot_params['Va']
-		r_t = rot_params['r_t']
 		sigma0 = shared_params['sigma0']
 		ellip = 1.0 - utils.compute_axis_ratio(inc=i, q0=0.2)
 
@@ -809,8 +839,9 @@ class GrismFitter(KinModels):
 			Y_grid = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape * obs.grism.factor)
 			X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
-			# Compute velocity field with adjusted PA
-			velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa_obs, i, Va, r_t))
+			# Compute velocity field with adjusted PA using the composable rotation model
+			all_params = {**morph_params_obs, **rot_params}
+			velocities = jnp.asarray(self.galaxy_model.velocity_field(X_grid, Y_grid, Pa_obs, i, all_params))
 			velocities_scaled = velocities + v0_obs
 
 			# Compute dispersion field
@@ -839,21 +870,29 @@ class GrismFitter(KinModels):
 
 		"""
 
-		self.PA_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean = self.galaxy_model.compute_posterior_means_parametric(inference_data)
-		self.PA_16 = self.galaxy_model.PA_16
-		self.PA_84 = self.galaxy_model.PA_84
-		self.Va_16 = self.galaxy_model.Va_16
-		self.Va_84 = self.galaxy_model.Va_84
-		self.r_t_16 = self.galaxy_model.r_t_16
-		self.r_t_84 = self.galaxy_model.r_t_84
-		self.sigma0_16 = self.galaxy_model.sigma0_16
-		self.sigma0_84 = self.galaxy_model.sigma0_84
-		self.y0_vel_16 = self.galaxy_model.y0_vel_16
-		self.y0_vel_84 = self.galaxy_model.y0_vel_84
-		self.x0_vel_16 = self.galaxy_model.x0_vel_16
-		self.x0_vel_84 = self.galaxy_model.x0_vel_84
-		self.v0_16 = self.galaxy_model.v0_16
-		self.v0_84 = self.galaxy_model.v0_84
+		self.galaxy_model.compute_posterior_means_parametric(inference_data)
+		gm = self.galaxy_model
+		self.PA_mean           = gm.PA_mean
+		self.sigma0_mean_model = gm.sigma0_mean_model
+		self.y0_vel_mean       = gm.y0_vel_mean
+		self.x0_vel_mean       = gm.x0_vel_mean
+		self.v0_mean           = gm.v0_mean
+		self.PA_16             = gm.PA_16
+		self.PA_84             = gm.PA_84
+		self.sigma0_16         = gm.sigma0_16
+		self.sigma0_84         = gm.sigma0_84
+		self.x0_vel_16         = gm.x0_vel_16
+		self.x0_vel_84         = gm.x0_vel_84
+		self.y0_vel_16         = gm.y0_vel_16
+		self.y0_vel_84         = gm.y0_vel_84
+		self.v0_16             = gm.v0_16
+		self.v0_84             = gm.v0_84
+		self.rot_means         = gm.rot_means
+		self.rot_quantiles     = gm.rot_quantiles
+		for _name in gm.rot_means:
+			setattr(self, f'{_name}_mean', gm.rot_means[_name])
+			setattr(self, f'{_name}_16',   gm.rot_quantiles[_name]['16'])
+			setattr(self, f'{_name}_84',   gm.rot_quantiles[_name]['84'])
 
 		inference_data, self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean = self.galaxy_model.compute_parametrix_flux_posterior(inference_data)
 
@@ -882,7 +921,8 @@ class GrismFitter(KinModels):
 		Y_grid = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape * grism_object.factor)
 		X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
-		self.model_velocities = jnp.asarray(self.v(X_grid, Y_grid, self.PA_mean, self.i_mean, self.Va_mean, self.r_t_mean))
+		_all_params_mean = {**self.rot_means, 'r_eff': self.r_eff_mean, 'n': self.n_mean}
+		self.model_velocities = jnp.asarray(self.galaxy_model.velocity_field(X_grid, Y_grid, self.PA_mean, self.i_mean, _all_params_mean))
 		# self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
 
 		self.model_velocities = self.model_velocities  + self.v0_mean
@@ -942,23 +982,29 @@ class GrismFitter(KinModels):
 			observations = [observations]
 
 		# Compute posterior statistics (shared across all observations)
-		self.PA_mean, self.Va_mean, self.r_t_mean, self.sigma0_mean_model, self.y0_vel_mean, self.x0_vel_mean, self.v0_mean = self.galaxy_model.compute_posterior_means_parametric(inference_data)
-
-		# Save percentiles
-		self.PA_16 = self.galaxy_model.PA_16
-		self.PA_84 = self.galaxy_model.PA_84
-		self.Va_16 = self.galaxy_model.Va_16
-		self.Va_84 = self.galaxy_model.Va_84
-		self.r_t_16 = self.galaxy_model.r_t_16
-		self.r_t_84 = self.galaxy_model.r_t_84
-		self.sigma0_16 = self.galaxy_model.sigma0_16
-		self.sigma0_84 = self.galaxy_model.sigma0_84
-		self.y0_vel_16 = self.galaxy_model.y0_vel_16
-		self.y0_vel_84 = self.galaxy_model.y0_vel_84
-		self.x0_vel_16 = self.galaxy_model.x0_vel_16
-		self.x0_vel_84 = self.galaxy_model.x0_vel_84
-		self.v0_16 = self.galaxy_model.v0_16  # None for multi-obs fits
-		self.v0_84 = self.galaxy_model.v0_84  # None for multi-obs fits
+		self.galaxy_model.compute_posterior_means_parametric(inference_data)
+		gm = self.galaxy_model
+		self.PA_mean           = gm.PA_mean
+		self.sigma0_mean_model = gm.sigma0_mean_model
+		self.y0_vel_mean       = gm.y0_vel_mean
+		self.x0_vel_mean       = gm.x0_vel_mean
+		self.v0_mean           = gm.v0_mean
+		self.PA_16             = gm.PA_16
+		self.PA_84             = gm.PA_84
+		self.sigma0_16         = gm.sigma0_16
+		self.sigma0_84         = gm.sigma0_84
+		self.x0_vel_16         = gm.x0_vel_16
+		self.x0_vel_84         = gm.x0_vel_84
+		self.y0_vel_16         = gm.y0_vel_16
+		self.y0_vel_84         = gm.y0_vel_84
+		self.v0_16             = gm.v0_16
+		self.v0_84             = gm.v0_84
+		self.rot_means         = gm.rot_means
+		self.rot_quantiles     = gm.rot_quantiles
+		for _name in gm.rot_means:
+			setattr(self, f'{_name}_mean', gm.rot_means[_name])
+			setattr(self, f'{_name}_16',   gm.rot_quantiles[_name]['16'])
+			setattr(self, f'{_name}_84',   gm.rot_quantiles[_name]['84'])
 
 		# Extract per-observation v0 and amplitude posteriors
 		self.v0_per_obs = {}
@@ -1053,7 +1099,8 @@ class GrismFitter(KinModels):
 			X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
 			# Compute velocity and dispersion fields using per-obs v0
-			model_velocities = jnp.asarray(self.v(X_grid, Y_grid, Pa_obs, self.i_mean, self.Va_mean, self.r_t_mean))
+			_all_params_mean = {**self.rot_means, 'r_eff': self.r_eff_mean, 'n': self.n_mean}
+			model_velocities = jnp.asarray(self.galaxy_model.velocity_field(X_grid, Y_grid, Pa_obs, self.i_mean, _all_params_mean))
 			model_velocities = model_velocities + obs_v0_mean
 			model_dispersions = self.sigma0_mean_model * jnp.ones_like(model_velocities)
 
