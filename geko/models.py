@@ -1021,16 +1021,15 @@ class GrismFitter(KinModels):
 			# Apply rotation for this observation
 			theta_rot_rad = jnp.radians(obs.theta_rot)
 
-			# Adjust PA and centroids for this observation
-			PA_morph_obs = self.PA_morph_mean - obs.theta_rot
+			# Adjust PA for this observation
 			Pa_obs = self.PA_mean - obs.theta_rot
 
-			# Rotate morphological centroids
-			xc_morph_obs, yc_morph_obs = utils.rotate_coords(
-				self.xc_morph_mean, self.yc_morph_mean,
-				center, center,
-				theta_rot_rad
+			# Rotate morphological params (PA_morph, centroids) into this obs frame
+			morph_params_obs = self.galaxy_model.morph_model.adjust_for_observation(
+				{k: v for k, v in self.morph_means.items() if v is not None},
+				obs.theta_rot, center,
 			)
+			morph_params_obs['amplitude'] = obs_amplitude_mean
 
 			# Rotate velocity centroids
 			x0_vel_obs, y0_vel_obs = utils.rotate_coords(
@@ -1038,16 +1037,6 @@ class GrismFitter(KinModels):
 				center, center,
 				theta_rot_rad
 			)
-
-			# Generate flux map for this observation using per-obs amplitude
-			morph_params_obs = {
-				'amplitude': obs_amplitude_mean,
-				'r_eff': self.r_eff_mean,
-				'n': self.n_mean,
-				'PA_morph': PA_morph_obs,
-				'xc_morph': xc_morph_obs,
-				'yc_morph': yc_morph_obs,
-			}
 			shared_params_mean = {'i': self.i_mean}
 			model_flux = self.galaxy_model.generate_flux_map(morph_params_obs, shared_params_mean)
 
