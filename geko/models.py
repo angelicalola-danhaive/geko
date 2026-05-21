@@ -599,7 +599,7 @@ class GalaxyModel:
 
 
 
-class DiskModel(KinModels):
+class GrismFitter(KinModels):
 	"""
 		Class for the one component exponential disk model
 	"""
@@ -1116,7 +1116,7 @@ class DiskModel(KinModels):
 		if parametric:
 			return self.compute_model_parametric(inference_data, grism_object)
 		else:
-			raise NotImplementedError('Non-parametric flux model not implemented yet for DiskModel')
+			raise NotImplementedError('Non-parametric flux model not implemented yet for GrismFitter')
 
 	def log_likelihood(self, grism_object, obs_map, obs_error, values = {}):
 		Pa = values['PA']

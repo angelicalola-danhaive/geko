@@ -45,7 +45,7 @@ PSF = fits.getdata(psf_path)
 PSF = utils.downsample_psf_centered(PSF, size=15)
 
 # Create kinematic model
-kin_model = models.DiskModel()
+kin_model = models.GrismFitter()
 
 def create_mock_observation(dispersion, theta_rot_deg, name):
     """

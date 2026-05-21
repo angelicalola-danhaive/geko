@@ -154,7 +154,7 @@ def make_grism_observation(morphology_params, PA_image, PA_grism, i, Va, r_t, si
     )
 
     # Make velocity field
-    kin_model = models.DiskModel()
+    kin_model = models.GrismFitter()
     V = kin_model.v(x_grid, y_grid, PA_grism, i, Va, r_t)
     D = sigma0*jnp.ones_like(V)
 
@@ -301,8 +301,8 @@ def run_multi_obs_fit(observations, parametric=False, num_samples=1000, num_warm
     kin_model : KinModels
         Kinematic model
     """
-    # Initialize kinematic model (DiskModel has multi-obs inference methods)
-    kin_model = models.DiskModel()
+    # Initialize kinematic model (GrismFitter has multi-obs inference methods)
+    kin_model = models.GrismFitter()
 
     # Use first observation to initialize Fit_Numpyro
     obs_first = observations[0]
