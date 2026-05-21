@@ -52,10 +52,14 @@ def _r_eff_to_pc(r_eff_px, z_spec, pixel_scale):
 
 @dataclass
 class DerivedQuantity:
-	name:    str
-	label:   str       # axis label for corner plots
-	compute: Callable  # compute(posterior_dataset, context) -> DataArray
+	name:             str
+	label:            str       # axis label for corner plots
+	compute:          Callable  # compute(posterior_dataset, context) -> DataArray
+	include_in_corner: bool = True   # False for intermediate quantities
 
+
+# Sampled parameters to include alongside derived quantities in the corner plot.
+_CORNER_SAMPLED_PARAMS = ['sigma0']
 
 # Ordered by dependency: each entry may use results from earlier entries.
 DERIVED_QUANTITIES = [
@@ -64,6 +68,7 @@ DERIVED_QUANTITIES = [
 		label=r'$r_e$ [pc]',
 		compute=lambda post, ctx: _r_eff_to_pc(
 			post['r_eff'], ctx['z_spec'], ctx['pixel_scale']),
+		include_in_corner=False,   # intermediate used by M_dyn
 	),
 	# v_sigma: divide only by samples where sigma0 > floor so the ratio
 	# doesn't diverge. Unresolved samples (sigma0 <= floor) become NaN and
@@ -192,10 +197,11 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 	res.write(save_runs_path + output + '/' + str(ID) + '_results',
 	          format='ascii', overwrite=True)
 
-	# Derived-quantity corner plot
-	derived_labels = {dq.name: dq.label for dq in DERIVED_QUANTITIES}
-	corner_vars   = ['v_sigma', 'sigma0', 'M_dyn', 'v_circ']
-	corner_labels = [derived_labels.get(n, n) for n in corner_vars]
+	# Corner plot: sampled params + all derived quantities flagged include_in_corner
+	all_labels    = {dq.name: dq.label for dq in DERIVED_QUANTITIES}
+	corner_vars   = _CORNER_SAMPLED_PARAMS + [
+	                    dq.name for dq in DERIVED_QUANTITIES if dq.include_in_corner]
+	corner_labels = [all_labels.get(n, n) for n in corner_vars]
 
 	fig = plt.figure(figsize=(10, 10))
 	CORNER_KWARGS = dict(
@@ -214,7 +220,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 		divergences=False,
 	)
 	corner.corner(inf_data, group='posterior', var_names=corner_vars,
-	              color='royalblue', range=[0.55, 1.0, 1.0, 1.0],
+	              color='royalblue', range=[0.99] * len(corner_vars),
 	              **CORNER_KWARGS)
 	plt.tight_layout()
 	plt.savefig(save_runs_path + output + '/' + str(ID) + '_v_sigma_corner.png',
