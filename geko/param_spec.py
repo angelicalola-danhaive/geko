@@ -91,6 +91,20 @@ def sample_specs(specs: list, context: dict = None) -> dict:
         lo = spec.prior_min
         hi = spec.prior_max if spec.prior_max is not None else context.get('r_eff')
 
+        if spec.prior_type in ('Normal', 'TruncatedNormal'):
+            if spec.prior_mu is None:
+                raise ValueError(
+                    f"Parameter '{spec.name}' has prior_type='{spec.prior_type}' but prior_mu is None. "
+                    f"Set it via morph_prior_overrides={{'{spec.name}_mu': <value>}} in FitConfiguration, "
+                    f"or provide a PySersic catalog file."
+                )
+            if spec.prior_std is None:
+                raise ValueError(
+                    f"Parameter '{spec.name}' has prior_type='{spec.prior_type}' but prior_std is None. "
+                    f"Set it via morph_prior_overrides={{'{spec.name}_std': <value>}} in FitConfiguration, "
+                    f"or provide a PySersic catalog file."
+                )
+
         if spec.prior_type == 'Uniform':
             u = numpyro.sample(f'unscaled_{spec.name}', dist.Uniform())
             params[spec.name] = numpyro.deterministic(
