@@ -30,6 +30,26 @@ class MorphologyModel(BaseModel):
                           image_shape: int, factor: int) -> jnp.ndarray:
         ...
 
+    @abstractmethod
+    def adjust_for_observation(self, morph_params: dict, theta_rot_deg: float,
+                               center: float) -> dict:
+        """Return a copy of morph_params adjusted for a specific observation orientation.
+
+        Called once per observation in the multi-obs inference loop so that
+        spatially-dependent parameters (position angle, centroids) are rotated
+        into the frame of each grism observation.
+
+        Parameters
+        ----------
+        morph_params : dict
+            Parameters as sampled in the reference frame.
+        theta_rot_deg : float
+            Rotation angle of this observation relative to the reference frame (degrees).
+        center : float
+            Image centre coordinate (pixels), used as rotation pivot.
+        """
+        ...
+
     def set_priors_from_pysersic(self, catalog_row: dict):
         """Apply morphological priors from a pysersic-style catalog dict.
 
@@ -58,6 +78,21 @@ class SersicMorphology(MorphologyModel):
         ParameterSpec('yc_morph', r'$y_0$ [px]',              r'$y_0$',
                       'Normal'),
     ]
+
+    def adjust_for_observation(self, morph_params: dict, theta_rot_deg: float,
+                               center: float) -> dict:
+        """Rotate PA_morph and centroids into this observation's frame."""
+        import jax.numpy as jnp
+        theta_rad = jnp.radians(theta_rot_deg)
+        obs_params = dict(morph_params)
+        obs_params['PA_morph'] = morph_params['PA_morph'] - theta_rot_deg
+        xc_obs, yc_obs = utils.rotate_coords(
+            morph_params['xc_morph'], morph_params['yc_morph'],
+            center, center, theta_rad,
+        )
+        obs_params['xc_morph'] = xc_obs
+        obs_params['yc_morph'] = yc_obs
+        return obs_params
 
     def sample(self) -> dict:
         return self._sample()

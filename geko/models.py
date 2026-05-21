@@ -752,17 +752,11 @@ class GrismFitter(KinModels):
 		shared_params = self.galaxy_model._sample_shared_kinematics(morph_params, include_v0=False)
 		rot_params = self.galaxy_model.sample_rot_params(morph_params)
 
-		r_eff = morph_params['r_eff']
-		n = morph_params['n']
-		i = shared_params['i']
-		PA_morph_ref = morph_params['PA_morph']
-		xc_morph_ref = morph_params['xc_morph']
-		yc_morph_ref = morph_params['yc_morph']
-		Pa_ref = shared_params['PA']
+		i          = shared_params['i']
+		Pa_ref     = shared_params['PA']
 		x0_vel_ref = shared_params['x0_vel']
 		y0_vel_ref = shared_params['y0_vel']
-		sigma0 = shared_params['sigma0']
-		ellip = 1.0 - utils.compute_axis_ratio(inc=i, q0=0.2)
+		sigma0     = shared_params['sigma0']
 
 		image_shape = self.im_shape[0]
 		center = (image_shape - 1) / 2
@@ -793,19 +787,15 @@ class GrismFitter(KinModels):
 			unscaled_v0_obs = numpyro.sample(f'unscaled_{v0_name}', dist.Normal())
 			v0_obs = numpyro.deterministic(v0_name, unscaled_v0_obs * 200)
 
-			# Apply rotation for this observation
+			# Rotate all observation-dependent parameters into this observation's frame
 			theta_rot_rad = jnp.radians(obs.theta_rot)
-
-			# Adjust PA for this observation (rotate by -theta_rot)
-			PA_morph_obs = PA_morph_ref - obs.theta_rot
 			Pa_obs = Pa_ref - obs.theta_rot
 
-			# Rotate morphological centroids for this observation
-			xc_morph_obs, yc_morph_obs = utils.rotate_coords(
-				xc_morph_ref, yc_morph_ref,
-				center, center,
-				theta_rot_rad
+			# Morphology model handles its own spatial rotation (PA, centroids, etc.)
+			morph_params_obs = self.galaxy_model.morph_model.adjust_for_observation(
+				morph_params, obs.theta_rot, center
 			)
+			morph_params_obs['amplitude'] = amplitude_obs
 
 			# Rotate velocity centroids for this observation
 			x0_vel_obs, y0_vel_obs = utils.rotate_coords(
@@ -814,12 +804,6 @@ class GrismFitter(KinModels):
 				theta_rot_rad
 			)
 
-			# Generate flux map for this observation with adjusted PA and centroids
-			morph_params_obs = dict(morph_params)
-			morph_params_obs['amplitude'] = amplitude_obs
-			morph_params_obs['PA_morph'] = PA_morph_obs
-			morph_params_obs['xc_morph'] = xc_morph_obs
-			morph_params_obs['yc_morph'] = yc_morph_obs
 			fluxes_high = self.galaxy_model.generate_flux_map(morph_params_obs, shared_params)
 
 			# Build velocity coordinate grids using direct high-res method (Gemini's suggestion)
