@@ -552,23 +552,31 @@ class GalaxyModel:
 				setattr(self, f'{name}_84', q84)
 
 	def compute_parametrix_flux_posterior(self, inference_data):
-		#compute means for parametric flux model
-		# amplitude may be absent in multi-obs fits (per-obs amplitude instead)
-		if 'amplitude' in inference_data.posterior:
-			self.amplitude_mean = jnp.array(inference_data.posterior['amplitude'].median(dim=["chain", "draw"]))
-			self.amplitude_16 = jnp.array(inference_data.posterior['amplitude'].quantile(0.16, dim=["chain", "draw"]))
-			self.amplitude_84 = jnp.array(inference_data.posterior['amplitude'].quantile(0.84, dim=["chain", "draw"]))
-		else:
-			self.amplitude_mean = None
-			self.amplitude_16 = None
-			self.amplitude_84 = None
-		self.r_eff_mean = jnp.array(inference_data.posterior['r_eff'].median(dim=["chain", "draw"]))
-		self.n_mean = jnp.array(inference_data.posterior['n'].median(dim=["chain", "draw"]))
-		self.n_16 = jnp.array(inference_data.posterior['n'].quantile(0.16, dim=["chain", "draw"]))
-		self.n_84 = jnp.array(inference_data.posterior['n'].quantile(0.84, dim=["chain", "draw"]))
-		# self.ellip_mean = jnp.array(inference_data.posterior['ellip'].median(dim=["chain", "draw"]))
-		self.PA_morph_mean = jnp.array(inference_data.posterior['PA_morph'].median(dim=["chain", "draw"])) #- 45
-		#compute the inclination prior posterior and median from the ellipticity
+		# Dynamic morphology posterior — works for any MorphologyModel.
+		# amplitude absent in multi-obs fits (per-obs amplitude sampled instead).
+		self.morph_means = {}
+		self.morph_quantiles = {}
+		for spec in self.morph_model.parameters:
+			if spec.fixed:
+				continue
+			name = spec.name
+			if name not in inference_data.posterior:
+				self.morph_means[name] = None
+				self.morph_quantiles[name] = {'16': None, '84': None}
+				setattr(self, f'{name}_mean', None)
+				setattr(self, f'{name}_16', None)
+				setattr(self, f'{name}_84', None)
+				continue
+			med = jnp.array(inference_data.posterior[name].median(dim=["chain", "draw"]))
+			q16 = jnp.array(inference_data.posterior[name].quantile(0.16, dim=["chain", "draw"]))
+			q84 = jnp.array(inference_data.posterior[name].quantile(0.84, dim=["chain", "draw"]))
+			self.morph_means[name] = med
+			self.morph_quantiles[name] = {'16': q16, '84': q84}
+			setattr(self, f'{name}_mean', med)
+			setattr(self, f'{name}_16', q16)
+			setattr(self, f'{name}_84', q84)
+
+		# i and ellip are special: ellip is derived from i and added to the trace here.
 		num_samples = inference_data.posterior['i'].shape[1]
 		num_chains = inference_data.posterior['i'].shape[0]
 		num_samples_prior = inference_data.prior['i'].shape[1]
@@ -579,41 +587,22 @@ class GalaxyModel:
 			for sample in range(num_samples-1):
 				inference_data.posterior['ellip'][i,int(sample)] = 1 - utils.compute_axis_ratio(inc = float(inference_data.posterior['i'][i,int(sample)].values), q0 = 0.2)
 
-		# Process prior samples separately
 		for sample in range(num_samples_prior-1):
 			inference_data.prior['ellip'][0,int(sample)] = 1 - utils.compute_axis_ratio(inc = float(inference_data.prior['i'][0,int(sample)].values), q0 = 0.2)
-		
+
 		self.i_mean = jnp.array(inference_data.posterior['i'].median(dim=["chain", "draw"]))
 		self.i_16 = jnp.array(inference_data.posterior['i'].quantile(0.16, dim=["chain", "draw"]))
 		self.i_84 = jnp.array(inference_data.posterior['i'].quantile(0.84, dim=["chain", "draw"]))
-		# self.ellip_mean = 1 - jnp.cos(jnp.radians(self.i_mean))
 		self.ellip_mean = jnp.array(inference_data.posterior['ellip'].median(dim=["chain", "draw"]))
 		self.ellip_16 = jnp.array(inference_data.posterior['ellip'].quantile(0.16, dim=["chain", "draw"]))
 		self.ellip_84 = jnp.array(inference_data.posterior['ellip'].quantile(0.84, dim=["chain", "draw"]))
-		#compute the fluxes for the parametric model
-		# y, x = np.mgrid[0:self.direct_shape[0]*27, 0:self.direct_shape[1]*27]
-		# fluxes_mean_high = utils.sersic_profile(x,y,amplitude=self.amplitude_mean, r_eff = self.r_eff_mean*27, n = self.n_mean, x_0 = self.direct_shape[0]//2*27 + 13 , y_0 = self.direct_shape[0]//2*27 +13, ellip = self.ellip_mean, theta=(90 - self.PA_morph_mean)*np.pi/180)/27**2 #function takes theta in rads
-		# self.fluxes_mean = utils.resample(fluxes_mean_high, 27,27)
 
-		self.r_eff_16 = jnp.array(inference_data.posterior['r_eff'].quantile(0.16, dim=["chain", "draw"]))
-		self.r_eff_84 = jnp.array(inference_data.posterior['r_eff'].quantile(0.84, dim=["chain", "draw"]))
-
-		self.xc_morph_mean = jnp.array(inference_data.posterior['xc_morph'].median(dim=["chain", "draw"]))
-		self.xc_morph_16 = jnp.array(inference_data.posterior['xc_morph'].quantile(0.16, dim=["chain", "draw"]))
-		self.xc_morph_84 = jnp.array(inference_data.posterior['xc_morph'].quantile(0.84, dim=["chain", "draw"]))
-
-		self.yc_morph_mean = jnp.array(inference_data.posterior['yc_morph'].median(dim=["chain", "draw"]))
-		self.yc_morph_16 = jnp.array(inference_data.posterior['yc_morph'].quantile(0.16, dim=["chain", "draw"]))
-		self.yc_morph_84 = jnp.array(inference_data.posterior['yc_morph'].quantile(0.84, dim=["chain", "draw"]))
-
-		#compute the fluxes in the sersic way (skipped when amplitude is None, i.e. multi-obs fit)
+		# Flux rendering — Sersic-specific; skipped when amplitude is None (multi-obs fit)
 		factor = self.factor
 		image_shape = self.direct_shape[0]
 
-		if self.amplitude_mean is not None:
+		if self.morph_means.get('amplitude') is not None:
 			amplitude_re_mean = utils.flux_to_Ie(self.amplitude_mean, self.n_mean, self.r_eff_mean, self.ellip_mean)
-
-			# Generate flux at SAME resolution as velocity (no sersic_factor) to avoid resampling offset
 			x = jnp.linspace(0 - self.xc_morph_mean, image_shape - self.xc_morph_mean - 1, image_shape*factor)
 			y = jnp.linspace(0 - self.yc_morph_mean, image_shape - self.yc_morph_mean - 1, image_shape*factor)
 			x_grid, y_grid = jnp.meshgrid(x, y)
@@ -622,9 +611,8 @@ class GalaxyModel:
 		else:
 			self.fluxes_mean_high = None
 			self.fluxes_mean = None
-		# self.fluxes_mean_masked = jnp.where(self.fluxes_mean>0.01*self.fluxes_mean.max(), self.fluxes_mean, 0.0)
-		self.fluxes_mean_masked = self.fluxes_mean #removed masking for now
-		return inference_data, self.fluxes_mean_masked, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean
+		self.fluxes_mean_masked = self.fluxes_mean
+		return inference_data
 	
 
 
@@ -894,25 +882,18 @@ class GrismFitter(KinModels):
 			setattr(self, f'{_name}_16',   gm.rot_quantiles[_name]['16'])
 			setattr(self, f'{_name}_84',   gm.rot_quantiles[_name]['84'])
 
-		inference_data, self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean = self.galaxy_model.compute_parametrix_flux_posterior(inference_data)
-
-		self.amplitude_16 = self.galaxy_model.amplitude_16
-		self.amplitude_84 = self.galaxy_model.amplitude_84
-		self.n_16 = self.galaxy_model.n_16
-		self.n_84 = self.galaxy_model.n_84
-		self.r_eff_16 = self.galaxy_model.r_eff_16
-		self.r_eff_84 = self.galaxy_model.r_eff_84
-		self.xc_morph_mean = self.galaxy_model.xc_morph_mean
-		self.xc_morph_16 = self.galaxy_model.xc_morph_16
-		self.xc_morph_84 = self.galaxy_model.xc_morph_84
-		self.yc_morph_mean = self.galaxy_model.yc_morph_mean
-		self.yc_morph_16 = self.galaxy_model.yc_morph_16
-		self.yc_morph_84 = self.galaxy_model.yc_morph_84
-		self.ellip_mean = self.galaxy_model.ellip_mean
-		self.ellip_16 = self.galaxy_model.ellip_16
-		self.ellip_84 = self.galaxy_model.ellip_84
-		self.i_16 = self.galaxy_model.i_16
-		self.i_84 = self.galaxy_model.i_84
+		inference_data = self.galaxy_model.compute_parametrix_flux_posterior(inference_data)
+		gm = self.galaxy_model
+		self.fluxes_mean      = gm.fluxes_mean
+		self.fluxes_mean_high = gm.fluxes_mean_high
+		self.morph_means      = gm.morph_means
+		self.morph_quantiles  = gm.morph_quantiles
+		for _name, _val in gm.morph_means.items():
+			setattr(self, f'{_name}_mean', _val)
+			setattr(self, f'{_name}_16', gm.morph_quantiles[_name]['16'])
+			setattr(self, f'{_name}_84', gm.morph_quantiles[_name]['84'])
+		self.i_mean    = gm.i_mean;    self.i_16    = gm.i_16;    self.i_84    = gm.i_84
+		self.ellip_mean = gm.ellip_mean; self.ellip_16 = gm.ellip_16; self.ellip_84 = gm.ellip_84
 		self.model_flux = self.fluxes_mean_high
 
 		image_shape =  self.im_shape[0]
@@ -921,7 +902,7 @@ class GrismFitter(KinModels):
 		Y_grid = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape * grism_object.factor)
 		X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
-		_all_params_mean = {**self.rot_means, 'r_eff': self.r_eff_mean, 'n': self.n_mean}
+		_all_params_mean = {**{k: v for k, v in self.morph_means.items() if v is not None}, **self.rot_means}
 		self.model_velocities = jnp.asarray(self.galaxy_model.velocity_field(X_grid, Y_grid, self.PA_mean, self.i_mean, _all_params_mean))
 		# self.model_velocities = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/10), int(self.model_velocities.shape[1]/10)), method='bicubic')
 
@@ -1027,25 +1008,18 @@ class GrismFitter(KinModels):
 				}
 
 		# Compute morphology posterior
-		inference_data, self.fluxes_mean, self.fluxes_mean_high, self.amplitude_mean, self.r_eff_mean, self.n_mean, self.ellip_mean, self.PA_morph_mean, self.i_mean, self.xc_morph_mean, self.yc_morph_mean = self.galaxy_model.compute_parametrix_flux_posterior(inference_data)
-
-		self.amplitude_16 = self.galaxy_model.amplitude_16
-		self.amplitude_84 = self.galaxy_model.amplitude_84
-		self.n_16 = self.galaxy_model.n_16
-		self.n_84 = self.galaxy_model.n_84
-		self.r_eff_16 = self.galaxy_model.r_eff_16
-		self.r_eff_84 = self.galaxy_model.r_eff_84
-		self.xc_morph_mean = self.galaxy_model.xc_morph_mean
-		self.xc_morph_16 = self.galaxy_model.xc_morph_16
-		self.xc_morph_84 = self.galaxy_model.xc_morph_84
-		self.yc_morph_mean = self.galaxy_model.yc_morph_mean
-		self.yc_morph_16 = self.galaxy_model.yc_morph_16
-		self.yc_morph_84 = self.galaxy_model.yc_morph_84
-		self.ellip_mean = self.galaxy_model.ellip_mean
-		self.ellip_16 = self.galaxy_model.ellip_16
-		self.ellip_84 = self.galaxy_model.ellip_84
-		self.i_16 = self.galaxy_model.i_16
-		self.i_84 = self.galaxy_model.i_84
+		inference_data = self.galaxy_model.compute_parametrix_flux_posterior(inference_data)
+		gm = self.galaxy_model
+		self.fluxes_mean      = gm.fluxes_mean
+		self.fluxes_mean_high = gm.fluxes_mean_high
+		self.morph_means      = gm.morph_means
+		self.morph_quantiles  = gm.morph_quantiles
+		for _name, _val in gm.morph_means.items():
+			setattr(self, f'{_name}_mean', _val)
+			setattr(self, f'{_name}_16', gm.morph_quantiles[_name]['16'])
+			setattr(self, f'{_name}_84', gm.morph_quantiles[_name]['84'])
+		self.i_mean    = gm.i_mean;    self.i_16    = gm.i_16;    self.i_84    = gm.i_84
+		self.ellip_mean = gm.ellip_mean; self.ellip_16 = gm.ellip_16; self.ellip_84 = gm.ellip_84
 
 		image_shape = self.im_shape[0]
 		center = (image_shape - 1) / 2
@@ -1099,7 +1073,7 @@ class GrismFitter(KinModels):
 			X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
 			# Compute velocity and dispersion fields using per-obs v0
-			_all_params_mean = {**self.rot_means, 'r_eff': self.r_eff_mean, 'n': self.n_mean}
+			_all_params_mean = {**{k: v for k, v in self.morph_means.items() if v is not None}, **self.rot_means}
 			model_velocities = jnp.asarray(self.galaxy_model.velocity_field(X_grid, Y_grid, Pa_obs, self.i_mean, _all_params_mean))
 			model_velocities = model_velocities + obs_v0_mean
 			model_dispersions = self.sigma0_mean_model * jnp.ones_like(model_velocities)
