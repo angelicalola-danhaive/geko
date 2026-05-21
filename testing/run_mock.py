@@ -514,7 +514,7 @@ def run_fit(mock_params, priors,parametric = False):
 	# flux_threshold = 0.001 * jnp.max(obs_map)
 	# mask = (jnp.where(obs_map < flux_threshold, 0, 1)).astype(bool) 
 	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
-	kin_model.disk.set_parametric_priors_test(priors)
+	kin_model.galaxy_model.set_parametric_priors_test(priors)
 	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric = parametric)
 
 	rng_key = random.PRNGKey(4)

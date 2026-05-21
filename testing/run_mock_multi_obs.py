@@ -318,38 +318,26 @@ def run_multi_obs_fit(observations, parametric=False, num_samples=1000, num_warm
 
     kin_model.set_bounds(im_shape, factor, wave_factor, x0, x0_vel, y0, y0_vel)
 
-    # Set parametric priors using FitConfiguration (same approach as run_geko_fit_multi)
+    # Set parametric priors using new FitConfiguration
     test_config = geko_config.FitConfiguration(
-        morphology=geko_config.MorphologyPriors(
-            PA_mean=PA_prior_mean,
-            PA_std=5.0,
-            inc_mean=60.0,
-            inc_std=12.0,
-            r_eff_mean=2.0,
-            r_eff_std=2.0,
-            r_eff_min=0.0,
-            r_eff_max=15.0,
-            n_mean=1.0,
-            n_std=1.0,
-            n_min=0.5,
-            n_max=8.0,
-            amplitude_mean=200.0,
-            amplitude_std=40.0,
-            amplitude_min=10.0,
-            amplitude_max=1000.0,
-            xc_mean=15.0,
-            xc_std=1.0,
-            yc_mean=15.0,
-            yc_std=1.0
-        ),
-        kinematics=geko_config.KinematicPriors(
-            Va_min=-1000,
-            Va_max=1000,
-            sigma0_min=0,
-            sigma0_max=600
-        )
+        morph_prior_overrides={
+            'PA_morph_mu': PA_prior_mean, 'PA_morph_std': 5.0,
+            'r_eff_mu': 2.0, 'r_eff_std': 2.0, 'r_eff_min': 0.0, 'r_eff_max': 15.0,
+            'n_mu': 1.0, 'n_std': 1.0, 'n_min': 0.5, 'n_max': 8.0,
+            'amplitude_mu': 200.0, 'amplitude_std': 40.0, 'amplitude_min': 10.0, 'amplitude_max': 1000.0,
+            'xc_morph_mu': 15.0, 'xc_morph_std': 1.0,
+            'yc_morph_mu': 15.0, 'yc_morph_std': 1.0,
+        },
+        geom_prior_overrides={
+            'PA_mu': PA_prior_mean, 'PA_std': 10.0,
+            'i_mu': 60.0, 'i_std': 12.0,
+            'sigma0_min': 0.0, 'sigma0_max': 600.0,
+        },
+        rot_prior_overrides={
+            'Va_min': -1000.0, 'Va_max': 1000.0,
+        },
     )
-    kin_model.disk.set_priors_from_config(test_config)
+    kin_model.galaxy_model.apply_config_overrides(test_config)
 
     # Create fitting object
     fit = Fit_Numpyro(
