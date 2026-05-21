@@ -1,16 +1,18 @@
 """
-Put all of the necessary post-processing functions here
+Post-processing functions for geko grism fits.
 
 	Written by A L Danhaive: ald66@cam.ac.uk
 """
 
-__all__ = ['process_results']
+__all__ = ['process_results', 'process_results_multi',
+           'compute_derived_posterior', 'DERIVED_QUANTITIES']
 
-# imports
-from . import  preprocess as pre
-from . import  fitting as fit
+from dataclasses import dataclass
+from typing import Callable
 
-from . import  utils
+from . import preprocess as pre
+from . import fitting as fit
+from . import utils
 
 from matplotlib import pyplot as plt
 
@@ -34,132 +36,167 @@ from astropy.table import Table
 
 import corner
 
-# import smplotlib
+# ============================================================================
+# Derived-quantity registry
+# ============================================================================
 
-def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84, save_runs_path):
-	''' 
-		Save all of the best-fit parameters in a table
-	'''
-	#compute v/sigma posterior and quantiles
-	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0']
-	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
-	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
-	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
+_G_PC_MSUN_KMS2 = 4.3009172706e-3   # pc M_sun^-1 (km/s)^2
+_METERS_TO_PC   = 3.086e16
+_PIXEL_SCALE    = 0.063              # NIRCam pixel scale in arcsec
 
-	#compute Mdyn posterior and quantiles
-	pressure_cor = 3.35 #= 2*re/rd
-	inf_data.posterior['v_circ2'] = inf_data.posterior['v_re']**2 + inf_data.posterior['sigma0']**2*pressure_cor
-	inf_data.posterior['v_circ'] = np.sqrt(inf_data.posterior['v_circ2'])
-	ktot = 1.8 #for q0 = 0.2
-	G = 4.3009172706e-3 #gravitational constant in pc*M_sun^-1*(km/s)^2
+
+def _r_eff_to_pc(r_eff_px, z_spec, pixel_scale):
 	DA = cosmo.angular_diameter_distance(z_spec).to('m')
-	meters_to_pc = 3.086e16
-	# Convert arcseconds to radians and calculate the physical size
-	inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*DA.value/meters_to_pc
-	inf_data.posterior['M_dyn'] = np.log10(ktot*inf_data.posterior['v_circ2']*inf_data.posterior['r_eff_pc']/G)
+	return np.deg2rad(r_eff_px * pixel_scale / 3600) * DA.value / _METERS_TO_PC
 
-	M_dyn_16 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.16, dim=["chain", "draw"]))
-	M_dyn_med = jnp.array(inf_data.posterior['M_dyn'].median(dim=["chain", "draw"]))
-	M_dyn_84 = jnp.array(inf_data.posterior['M_dyn'].quantile(0.84, dim=["chain", "draw"]))
 
-	v_circ_16 = jnp.array(inf_data.posterior['v_circ'].quantile(0.16, dim=["chain", "draw"]))
-	v_circ_med = jnp.array(inf_data.posterior['v_circ'].median(dim=["chain", "draw"]))
-	v_circ_84 = jnp.array(inf_data.posterior['v_circ'].quantile(0.84, dim=["chain", "draw"]))
+@dataclass
+class DerivedQuantity:
+	name:    str
+	label:   str       # axis label for corner plots
+	compute: Callable  # compute(posterior_dataset, context) -> DataArray
 
-	#save results to a file
-	params= ['ID', 'PA_50', 'i_50', 'Va_50', 'r_t_50', 'sigma0_50', 'v_re_50', 'amplitude_50', 'r_eff_50', 'n_50','PA_morph_50', 'PA_16', 'i_16', 'Va_16', 'r_t_16', 'sigma0_16', \
-	  'v_re_16', 'PA_84', 'i_84', 'Va_84', 'r_t_84', 'sigma0_84', 'v_re_84', 'v_sigma_16', 'v_sigma_50', 'v_sigma_84', 'M_dyn_16', 'M_dyn_50', 'M_dyn_84', \
-		'vcirc_16', 'vcirc_50', 'vcirc_84', 'r_eff_16', 'r_eff_84', 'ellip_50', 'ellip_16', 'ellip_84', 'x0_vel_16', 'x0_vel_50', 'x0_vel_84', 'y0_vel_16', 'y0_vel_50', 'y0_vel_84', \
-			'xc_morph_16', 'xc_morph_50', 'xc_morph_84', 'yc_morph_16', 'yc_morph_50', 'yc_morph_84', 'amplitude_16', 'amplitude_84', 'n_16', 'n_84', \
-			'v0_16', 'v0_50', 'v0_84']
-	t_empty = np.zeros((len(params), 1))
-	res = Table(t_empty.T, names=params)
-	res['ID'] = ID
-	res['PA_50'] = kin_model.PA_mean
-	res['i_50'] = kin_model.i_mean
-	res['Va_50'] = kin_model.Va_mean
-	res['r_t_50'] = kin_model.r_t_mean
-	res['sigma0_50'] = kin_model.sigma0_mean_model
-	res['v_re_50'] = v_re_med
-	res['amplitude_50'] = kin_model.amplitude_mean if kin_model.amplitude_mean is not None else np.nan
-	res['r_eff_50'] = kin_model.r_eff_mean
-	res['n_50'] = kin_model.n_mean
-	res['PA_morph_50'] = kin_model.PA_morph_mean
-	res['v_sigma_50'] = v_sigma_med
 
-	res['PA_16'] = kin_model.PA_16
-	res['i_16'] = kin_model.i_16
-	res['Va_16'] = kin_model.Va_16
-	res['r_t_16'] = kin_model.r_t_16
-	res['sigma0_16'] = kin_model.sigma0_16
-	res['v_re_16'] = v_re_16
-	res['v_sigma_16'] = v_sigma_16
+# Ordered by dependency: each entry may use results from earlier entries.
+DERIVED_QUANTITIES = [
+	DerivedQuantity(
+		name='r_eff_pc',
+		label=r'$r_e$ [pc]',
+		compute=lambda post, ctx: _r_eff_to_pc(
+			post['r_eff'], ctx['z_spec'], ctx['pixel_scale']),
+	),
+	# v_sigma: divide only by samples where sigma0 > floor so the ratio
+	# doesn't diverge. Unresolved samples (sigma0 <= floor) become NaN and
+	# are skipped in quantile computation. No pile-up at the floor.
+	DerivedQuantity(
+		name='v_sigma',
+		label=r'$v_{re}/\sigma_0$',
+		compute=lambda post, ctx: (
+			post['v_re'] / post['sigma0'].where(post['sigma0'] > ctx['sigma0_floor'])
+		),
+	),
+	DerivedQuantity(
+		name='v_circ',
+		label=r'$v_{circ}$ [km/s]',
+		compute=lambda post, ctx: np.sqrt(
+			post['v_re']**2 + 3.35 * post['sigma0']**2),
+	),
+	DerivedQuantity(
+		name='M_dyn',
+		label=r'$\log M_{dyn}$ [$M_\odot$]',
+		compute=lambda post, ctx: np.log10(
+			1.8 * post['v_circ']**2 * post['r_eff_pc'] / _G_PC_MSUN_KMS2),
+	),
+]
 
-	res['PA_84'] = kin_model.PA_84
-	res['i_84'] = kin_model.i_84
-	res['Va_84'] = kin_model.Va_84
-	res['r_t_84'] = kin_model.r_t_84
-	res['sigma0_84'] = kin_model.sigma0_84
-	res['v_re_84'] = v_re_84
-	res['v_sigma_84'] = v_sigma_84
+# ============================================================================
+# Pipeline helpers
+# ============================================================================
 
-	res['M_dyn_16'] = M_dyn_16
-	res['M_dyn_50'] = M_dyn_med
-	res['M_dyn_84'] = M_dyn_84
+def compute_derived_posterior(inf_data, kin_model, z_spec,
+                              sigma0_floor=20.0, pixel_scale=_PIXEL_SCALE):
+	"""Add all derived quantities to inf_data.posterior.
 
-	res['vcirc_16'] = v_circ_16
-	res['vcirc_50'] = v_circ_med
-	res['vcirc_84'] = v_circ_84
+	Parameters
+	----------
+	sigma0_floor : float
+		Samples with sigma0 <= this value (km/s) are excluded from the
+		v_sigma computation to avoid ratio divergence. Does not affect
+		the sigma0 posterior itself.
+	pixel_scale : float
+		Detector pixel scale in arcsec (default NIRCam 0.063 arcsec/px).
+	"""
+	utils.add_v_re(inf_data, kin_model, grism_object=None,
+	               num_samples=inf_data.posterior['sigma0'].shape[1])
 
-	res['r_eff_16'] = kin_model.r_eff_16
-	res['r_eff_84'] = kin_model.r_eff_84
+	context = {'z_spec': z_spec, 'pixel_scale': pixel_scale,
+	           'sigma0_floor': sigma0_floor}
+	for dq in DERIVED_QUANTITIES:
+		inf_data.posterior[dq.name] = dq.compute(inf_data.posterior, context)
 
-	res['ellip_50'] = kin_model.ellip_mean
-	res['ellip_16'] = kin_model.ellip_16
-	res['ellip_84'] = kin_model.ellip_84
+	return inf_data
 
-	res['x0_vel_16'] = kin_model.x0_vel_16
-	res['x0_vel_50'] = kin_model.x0_vel_mean
-	res['x0_vel_84'] = kin_model.x0_vel_84
 
-	res['y0_vel_16'] = kin_model.y0_vel_16
-	res['y0_vel_50'] = kin_model.y0_vel_mean
-	res['y0_vel_84'] = kin_model.y0_vel_84
+def summarize_posterior(inf_data, names):
+	"""Return {name: {'16': val, '50': val, '84': val}} for each name in posterior."""
+	summary = {}
+	for name in names:
+		if name not in inf_data.posterior:
+			continue
+		post = inf_data.posterior[name]
+		summary[name] = {
+			'16': float(post.quantile(0.16, skipna=True)),
+			'50': float(post.median(skipna=True)),
+			'84': float(post.quantile(0.84, skipna=True)),
+		}
+	return summary
 
-	res['xc_morph_16'] = kin_model.xc_morph_16
-	res['xc_morph_50'] = kin_model.xc_morph_mean
-	res['xc_morph_84'] = kin_model.xc_morph_84
 
-	res['yc_morph_16'] = kin_model.yc_morph_16
-	res['yc_morph_50'] = kin_model.yc_morph_mean
-	res['yc_morph_84'] = kin_model.yc_morph_84
+def build_results_table(ID, kin_model, summary):
+	"""Build an astropy Table from a posterior summary dict.
 
-	res['amplitude_16'] = kin_model.amplitude_16 if kin_model.amplitude_16 is not None else np.nan
-	res['amplitude_84'] = kin_model.amplitude_84 if kin_model.amplitude_84 is not None else np.nan
+	Columns are driven by the model's actual parameter specs plus the
+	derived-quantity registry — no hardcoded parameter names.
+	"""
+	from .param_spec import all_param_specs
 
-	res['n_16'] = kin_model.n_16
-	res['n_84'] = kin_model.n_84
+	gm = kin_model.galaxy_model
+	specs = all_param_specs(gm.morph_model, gm.shared_kin_specs, gm.rot_model)
+	sampled_names = [s.name for s in specs if not s.fixed]
+	derived_names = [dq.name for dq in DERIVED_QUANTITIES]
+	# ellip is not in param_specs (it's derived from i inside compute_model)
+	all_names = sampled_names + ['ellip'] + derived_names
 
-	res['v0_16'] = kin_model.v0_16 if kin_model.v0_16 is not None else np.nan
-	res['v0_50'] = kin_model.v0_mean if kin_model.v0_mean is not None else np.nan
-	res['v0_84'] = kin_model.v0_84 if kin_model.v0_84 is not None else np.nan
+	row = {'ID': ID}
+	for name in all_names:
+		if name in summary:
+			row[f'{name}_16'] = summary[name]['16']
+			row[f'{name}_50'] = summary[name]['50']
+			row[f'{name}_84'] = summary[name]['84']
 
 	# Per-observation v0 and amplitude (multi-obs fits only)
 	if hasattr(kin_model, 'v0_per_obs') and kin_model.v0_per_obs:
-		for obs_name, v0_stats in kin_model.v0_per_obs.items():
-			res.add_column(Table.Column([float(v0_stats['16'])], name=f'v0_{obs_name}_16'))
-			res.add_column(Table.Column([float(v0_stats['mean'])], name=f'v0_{obs_name}_50'))
-			res.add_column(Table.Column([float(v0_stats['84'])], name=f'v0_{obs_name}_84'))
+		for obs_name, stats in kin_model.v0_per_obs.items():
+			row[f'v0_{obs_name}_16'] = float(stats['16'])
+			row[f'v0_{obs_name}_50'] = float(stats['mean'])
+			row[f'v0_{obs_name}_84'] = float(stats['84'])
 
 	if hasattr(kin_model, 'amplitude_per_obs') and kin_model.amplitude_per_obs:
-		for obs_name, amp_stats in kin_model.amplitude_per_obs.items():
-			res.add_column(Table.Column([float(amp_stats['16'])], name=f'amplitude_{obs_name}_16'))
-			res.add_column(Table.Column([float(amp_stats['mean'])], name=f'amplitude_{obs_name}_50'))
-			res.add_column(Table.Column([float(amp_stats['84'])], name=f'amplitude_{obs_name}_84'))
+		for obs_name, stats in kin_model.amplitude_per_obs.items():
+			row[f'amplitude_{obs_name}_16'] = float(stats['16'])
+			row[f'amplitude_{obs_name}_50'] = float(stats['mean'])
+			row[f'amplitude_{obs_name}_84'] = float(stats['84'])
 
-	res.write(save_runs_path + output + '/' + str(ID) + '_results', format='ascii', overwrite=True)
+	return Table([row])
 
-	#save a cornerplot of the v_sigma and sigma posteriors
+
+# ============================================================================
+# Saving results
+# ============================================================================
+
+def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
+                     sigma0_floor=20.0):
+	"""Compute derived posteriors, write results table, and save corner plot."""
+	inf_data = compute_derived_posterior(inf_data, kin_model, z_spec,
+	                                     sigma0_floor=sigma0_floor)
+
+	gm = kin_model.galaxy_model
+	from .param_spec import all_param_specs
+	specs = all_param_specs(gm.morph_model, gm.shared_kin_specs, gm.rot_model)
+	sampled_names = [s.name for s in specs if not s.fixed]
+	derived_names = [dq.name for dq in DERIVED_QUANTITIES]
+	all_names = sampled_names + ['ellip'] + derived_names
+
+	summary = summarize_posterior(inf_data, all_names)
+	res = build_results_table(ID, kin_model, summary)
+	res.write(save_runs_path + output + '/' + str(ID) + '_results',
+	          format='ascii', overwrite=True)
+
+	# Derived-quantity corner plot
+	derived_labels = {dq.name: dq.label for dq in DERIVED_QUANTITIES}
+	corner_vars   = ['v_sigma', 'sigma0', 'M_dyn', 'v_circ']
+	corner_labels = [derived_labels.get(n, n) for n in corner_vars]
+
 	fig = plt.figure(figsize=(10, 10))
 	CORNER_KWARGS = dict(
 		smooth=4,
@@ -171,242 +208,108 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16,
 		fill_contours=True,
 		plot_contours=True,
 		show_titles=True,
-		labels=[r'$v_{re}/\sigma$', r'$\sigma_0$ [km/s]',  r'$\log ( M_{dyn} [M_{\odot}])$', r'$v_{circ}$ [km/s]'],
-		titles= [r'$v_{re}/\sigma$ ', r'$\sigma_0$', r'$\log M_{dyn}$',r'$v_{circ}$'],
+		labels=corner_labels,
+		titles=corner_labels,
 		max_n_ticks=3,
-		divergences=False)
-
-	figure = corner.corner(inf_data, group='posterior', var_names=['v_sigma','sigma0', 'M_dyn', 'v_circ'],
-						color='royalblue', range=[0.55, 1.0, 1.0, 1.0], **CORNER_KWARGS)
+		divergences=False,
+	)
+	corner.corner(inf_data, group='posterior', var_names=corner_vars,
+	              color='royalblue', range=[0.55, 1.0, 1.0, 1.0],
+	              **CORNER_KWARGS)
 	plt.tight_layout()
-	plt.savefig(save_runs_path + output + '/' + str(ID)+'_v_sigma_corner.png', dpi=300)
+	plt.savefig(save_runs_path + output + '/' + str(ID) + '_v_sigma_corner.png',
+	            dpi=300)
 	plt.close()
 
 
-def process_results(output, master_cat, line,  mock_params = None, test = None, j = None, parametric = False, ID = None, save_runs_path = None,
-                     field=None, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5, wave_factor=10, model_name='Disk',
-                     manual_psf_name=None, manual_grism_file=None):
-	"""
-		Main function that automatically post-processes the inference data and saves all of the relevant plots
-		Returns the main data products so that data can be analyzed separately
+# ============================================================================
+# Main postprocessing entry points
+# ============================================================================
 
-		Parameters
-		----------
-		manual_psf_name : str, optional
-			PSF filename (required if field='manual')
-		manual_grism_file : str, optional
-			Grism spectrum filename (required if field='manual')
-	"""
+def process_results(output, master_cat, line, mock_params=None, test=None,
+                    j=None, parametric=False, ID=None, save_runs_path=None,
+                    field=None, grism_filter='F444W', delta_wave_cutoff=0.02,
+                    factor=5, wave_factor=10, model_name='Disk',
+                    manual_psf_name=None, manual_grism_file=None,
+                    sigma0_floor=20.0):
+	"""Post-process single-observation inference data and save all outputs."""
+	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = \
+		pre.run_full_preprocessing(
+			output, master_cat, line, mock_params=mock_params,
+			save_runs_path=save_runs_path, source_id=ID, field=field,
+			grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
+			factor=factor, wave_factor=wave_factor, model_name=model_name,
+			manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file)
 
-	#pre-process the galaxy data
-	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = pre.run_full_preprocessing(
-		output, master_cat, line, mock_params=mock_params, save_runs_path=save_runs_path,
-		source_id=ID, field=field, grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
-		factor=factor, wave_factor=wave_factor, model_name=model_name,
-		manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file)
-
-	#load inference data
 	if mock_params is None:
-		# inf_data = az.InferenceData.from_netcdf('FrescoHa/Runs-Final/' + output + '/'+ 'output')
-		inf_data = az.InferenceData.from_netcdf(save_runs_path + output + '/' + str(ID) + '_output')
-		j=0
+		inf_data = az.InferenceData.from_netcdf(
+			save_runs_path + output + '/' + str(ID) + '_output')
+		j = 0
 	else:
-		inf_data = az.InferenceData.from_netcdf('testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_'+ 'output')
-		
-	num_samples = inf_data.posterior['sigma0'].shape[1]
-	data = fit.Fit_Numpyro(obs_map = obs_map, obs_error = obs_error, grism_object = grism_object, kin_model = kin_model, inference_data = inf_data , parametric = parametric)
-	inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object,parametric)
-	#define the wave_space
+		inf_data = az.InferenceData.from_netcdf(
+			'testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_output')
+
+	data = fit.Fit_Numpyro(obs_map=obs_map, obs_error=obs_error,
+	                        grism_object=grism_object, kin_model=kin_model,
+	                        inference_data=inf_data, parametric=parametric)
+	inf_data, model_map, model_flux, fluxes_mean, model_velocities, model_dispersions = \
+		kin_model.compute_model(inf_data, grism_object, parametric)
+
 	index_min = grism_object.index_min
 	index_max = grism_object.index_max
-	len_wave = int((wave_space[len(wave_space)-1] - wave_space[0])/(delta_wave))
-	wave_space = jnp.linspace(wave_space[0], wave_space[len(wave_space)-1], len_wave+1)
+	len_wave = int((wave_space[-1] - wave_space[0]) / delta_wave)
+	wave_space = jnp.linspace(wave_space[0], wave_space[-1], len_wave + 1)
 	wave_space = wave_space[index_min:index_max]
 
-	#save the posterior of the velocity at the effective radius
-	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
+	save_fit_results(output, inf_data, kin_model, z_spec, ID,
+	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor)
+
+	v_re_summary = summarize_posterior(inf_data, ['v_re'])['v_re']
+	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space,
+	                       save_to_folder=output, name='summary',
+	                       v_re=v_re_summary['50'],
+	                       save_runs_path=save_runs_path, ID=ID)
+
+	return v_re_summary['16'], v_re_summary['50'], v_re_summary['84'], kin_model, inf_data
 
 
-
-	# compute v/sigma posterior and quantiles
-
-	# Get number of chains from the inference data
-	num_chains = inf_data.posterior['sigma0'].shape[0]
-	num_samples_prior = inf_data.prior['sigma0'].shape[1]
-
-	inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims = ('chain', 'draw'))
-	inf_data.prior['sigma0_trunc'] = xr.DataArray(np.zeros((1, num_samples_prior)), dims = ('chain', 'draw'))
-	for i in range(num_chains):
-		for sample in range(num_samples):
-			if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
-				inf_data.posterior['sigma0_trunc'][i,sample] = np.random.uniform(inf_data.posterior['sigma0'].quantile(0.84), 0.5*inf_data.posterior['sigma0'].quantile(0.16))
-			else:
-				inf_data.posterior['sigma0_trunc'][i,sample] = inf_data.posterior['sigma0'][i,sample]
-
-	# Process prior samples separately
-	for sample in range(num_samples_prior):
-		if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
-			inf_data.prior['sigma0_trunc'][0,sample] = np.random.uniform(inf_data.prior['sigma0'].quantile(0.84), 0.5*inf_data.prior['sigma0'].quantile(0.16))
-		else:
-			inf_data.prior['sigma0_trunc'][0,sample] = inf_data.prior['sigma0'][0,sample]
-				
-	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0_trunc']
-	inf_data['prior']['v_sigma'] = inf_data.prior['v_re'] / inf_data.prior['sigma0_trunc']
-	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
-	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
-	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
-	
-	#save the best fit parameters in a table
-
-	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84, save_runs_path = save_runs_path)
-	
-	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space, save_to_folder = output, name = 'summary', v_re = v_re_med, save_runs_path = save_runs_path, ID = ID)
-
-	return  v_re_16, v_re_med, v_re_84, kin_model, inf_data
-
-
-def process_results_multi(observations, results, output, master_cat, line, parametric, ID, save_runs_path,
-                          field, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5, wave_factor=10,
-                          model_name='Disk', manual_psf_name=None, manual_grism_file=None):
-	"""
-	Post-process multi-observation inference data and generate summary plots.
-
-	Similar to process_results but handles multiple observations. Computes v_re, v/sigma,
-	saves fit results, and generates multi-observation summary plot.
-
-	Parameters
-	----------
-	observations : list of GrismObservation
-		List of GrismObservation objects that were fit
-	results : dict
-		Dictionary mapping observation names to their results
-	output : str
-		Output subfolder name
-	master_cat : str
-		Path to master catalog file
-	line : str
-		Emission line name (e.g., 'H_alpha')
-	parametric : bool
-		Whether parametric morphology was used
-	ID : int
-		Source ID number
-	save_runs_path : str
-		Base directory for saving
-	field : str
-		Field name
-	grism_filter : str, optional
-		Grism filter name (default: 'F444W')
-	delta_wave_cutoff : float, optional
-		Wavelength bin size cutoff (default: 0.02)
-	factor : int, optional
-		Spatial oversampling factor (default: 5)
-	wave_factor : int, optional
-		Wavelength oversampling factor (default: 10)
-	model_name : str, optional
-		Kinematic model type (default: 'Disk')
-
-	Returns
-	-------
-	v_re_16 : float
-		16th percentile of v_re
-	v_re_med : float
-		Median v_re
-	v_re_84 : float
-		84th percentile of v_re
-	kin_model : KinModels
-		Kinematic model object with computed results
-	inf_data : arviz.InferenceData
-		Updated inference data with additional posteriors
-	"""
+def process_results_multi(observations, results, output, master_cat, line,
+                          parametric, ID, save_runs_path, field,
+                          grism_filter='F444W', delta_wave_cutoff=0.02,
+                          factor=5, wave_factor=10, model_name='Disk',
+                          manual_psf_name=None, manual_grism_file=None,
+                          sigma0_floor=20.0):
+	"""Post-process multi-observation inference data and save all outputs."""
 	from . import plotting
 
-	# Load inference data
-	inf_data = az.InferenceData.from_netcdf(save_runs_path + output + '/' + str(ID) + '_output_multi')
+	inf_data = az.InferenceData.from_netcdf(
+		save_runs_path + output + '/' + str(ID) + '_output_multi')
 
-	num_samples = inf_data.posterior['sigma0'].shape[1]
-	num_chains = inf_data.posterior['sigma0'].shape[0]
-	num_samples_prior = inf_data.prior['sigma0'].shape[1]
+	z_spec, wavelength, wave_space_ref, obs_map_ref, obs_error_ref, kin_model, \
+		grism_object_ref, delta_wave = pre.run_full_preprocessing(
+			output=output, master_cat=master_cat, line=line,
+			save_runs_path=save_runs_path, source_id=ID, field=field,
+			grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
+			factor=factor, wave_factor=wave_factor, model_name=model_name,
+			manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file)
 
-	# Use first observation's grism object for v_re calculation
-	# (v_re is an intrinsic property, not observation-dependent)
-	first_obs = observations[0]
-	grism_object = first_obs.grism
-
-	# Get kin_model from results (it was already computed in run_geko_fit_multi)
-	# We need to reload preprocessing to get the kin_model structure
-	# Actually, we can extract the kin_model from the fit that was run
-	# But we need to recreate it here for the plot
-	z_spec, wavelength, wave_space_ref, obs_map_ref, obs_error_ref, kin_model, grism_object_ref, delta_wave = \
-		pre.run_full_preprocessing(
-			output=output,
-			master_cat=master_cat,
-			line=line,
-			save_runs_path=save_runs_path,
-			source_id=ID,
-			field=field,
-			grism_filter=grism_filter,
-			delta_wave_cutoff=delta_wave_cutoff,
-			factor=factor,
-			wave_factor=wave_factor,
-			model_name=model_name,
-			manual_psf_name=manual_psf_name,
-			manual_grism_file=manual_grism_file
-		)
-
-	# Compute model posteriors to populate kin_model attributes
-	# This sets all the _mean and percentile attributes on kin_model
 	inf_data, _ = kin_model.compute_model_parametric_multi(inf_data, observations)
 
-	# Define wave_space
-	index_min = grism_object.index_min
-	index_max = grism_object.index_max
-	len_wave = int((wave_space_ref[len(wave_space_ref)-1] - wave_space_ref[0])/(delta_wave))
-	wave_space = jnp.linspace(wave_space_ref[0], wave_space_ref[len(wave_space_ref)-1], len_wave+1)
+	index_min = grism_object_ref.index_min
+	index_max = grism_object_ref.index_max
+	len_wave = int((wave_space_ref[-1] - wave_space_ref[0]) / delta_wave)
+	wave_space = jnp.linspace(wave_space_ref[0], wave_space_ref[-1], len_wave + 1)
 	wave_space = wave_space[index_min:index_max]
 
-	# Add v_re to posterior
-	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
+	save_fit_results(output, inf_data, kin_model, z_spec, ID,
+	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor)
 
-	# Compute v/sigma posterior and quantiles
-	inf_data.posterior['sigma0_trunc'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims=('chain', 'draw'))
-	inf_data.prior['sigma0_trunc'] = xr.DataArray(np.zeros((1, num_samples_prior)), dims=('chain', 'draw'))
+	v_re_summary = summarize_posterior(inf_data, ['v_re'])['v_re']
 
-	for i in range(num_chains):
-		for sample in range(num_samples):
-			if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
-				inf_data.posterior['sigma0_trunc'][i,sample] = np.random.uniform(
-					inf_data.posterior['sigma0'].quantile(0.84),
-					0.5*inf_data.posterior['sigma0'].quantile(0.16)
-				)
-			else:
-				inf_data.posterior['sigma0_trunc'][i,sample] = inf_data.posterior['sigma0'][i,sample]
-
-	# Process prior samples separately
-	for sample in range(num_samples_prior):
-		if inf_data.posterior['sigma0'].quantile(0.16) <= 30:
-			inf_data.prior['sigma0_trunc'][0,sample] = np.random.uniform(
-				inf_data.prior['sigma0'].quantile(0.84),
-				0.5*inf_data.prior['sigma0'].quantile(0.16)
-			)
-		else:
-			inf_data.prior['sigma0_trunc'][0,sample] = inf_data.prior['sigma0'][0,sample]
-
-	inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0_trunc']
-	inf_data['prior']['v_sigma'] = inf_data.prior['v_re'] / inf_data.prior['sigma0_trunc']
-
-	v_sigma_16 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]))
-	v_sigma_med = jnp.array(inf_data.posterior['v_sigma'].median(dim=["chain", "draw"]))
-	v_sigma_84 = jnp.array(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]))
-
-	# Save fit results
-	save_fit_results(output, inf_data, kin_model, z_spec, ID, v_re_med, v_re_16, v_re_84,
-	                save_runs_path=save_runs_path)
-
-	# Generate multi-observation summary plot
 	obs_radius = kin_model.r_eff_mean
-	ellip = kin_model.ellip_mean
-	theta_Ha = kin_model.PA_morph_mean/(180/jnp.pi) + jnp.pi/2  # Convert to radians
-	n = kin_model.n_mean
+	ellip      = kin_model.ellip_mean
+	theta_Ha   = kin_model.PA_morph_mean / (180 / jnp.pi) + jnp.pi / 2
+	n          = kin_model.n_mean
 
 	plotting.plot_disk_summary_multi(
 		observations=observations,
@@ -425,17 +328,15 @@ def process_results_multi(observations, results, output, master_cat, line, param
 		n=n,
 		save_runs_path=save_runs_path,
 		ID=ID,
-		galaxy_model=kin_model.galaxy_model
+		galaxy_model=kin_model.galaxy_model,
 	)
 
-	# Comparison cornerplot: overlay R, C, and joint posteriors
 	try:
 		individual_inf_data = []
 		obs_labels = []
 		for obs in observations:
-			obs_output_path = save_runs_path + str(ID) + '/' + obs.name + '/' + str(ID) + '_output'
-			obs_inf = az.InferenceData.from_netcdf(obs_output_path)
-			individual_inf_data.append(obs_inf)
+			obs_path = save_runs_path + str(ID) + '/' + obs.name + '/' + str(ID) + '_output'
+			individual_inf_data.append(az.InferenceData.from_netcdf(obs_path))
 			obs_labels.append(obs.name)
 
 		all_inf_data = individual_inf_data + [inf_data]
@@ -453,24 +354,22 @@ def process_results_multi(observations, results, output, master_cat, line, param
 	except Exception as e:
 		print(f'  WARNING: Could not generate comparison cornerplot: {e}')
 
-	return v_re_16, v_re_med, v_re_84, kin_model, inf_data
+	return v_re_summary['16'], v_re_summary['50'], v_re_summary['84'], kin_model, inf_data
 
+
+# ============================================================================
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=str, default='',
-					help='folder of the galaxy you want to postprocess')
+                    help='folder of the galaxy you want to postprocess')
 parser.add_argument('--line', type=str, default='H_alpha',
-					help='line to fit')        
-parser.add_argument('--master_cat', type=str, default='CONGRESS_FRESCO/master_catalog.cat',
-					help = 'master catalog file to use for the post-processing')                                                                                  	
+                    help='line to fit')
+parser.add_argument('--master_cat', type=str,
+                    default='CONGRESS_FRESCO/master_catalog.cat',
+                    help='master catalog file to use for the post-processing')
 
 if __name__ == "__main__":
-
-	#run the post-processing hands-off 
 	args = parser.parse_args()
-	output = args.output
-	line = args.line
-	master_cat = args.master_cat
-
-	inf_data = az.InferenceData.from_netcdf('fitting_results/' + output + '/'+ 'output')
-	process_results(output,master_cat,line)
+	inf_data = az.InferenceData.from_netcdf(
+		'fitting_results/' + args.output + '/output')
+	process_results(args.output, args.master_cat, args.line)

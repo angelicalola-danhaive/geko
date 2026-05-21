@@ -641,25 +641,34 @@ def fit_grism_parameters(obs_map, r_eff, inclination, obs_error, sigma_rms = 2.0
     return PA_grism, inc_grism, r_full_grism, x0_vel, y0_vel, half_light_radius
 
 
-def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual=None):
+def add_v_re(inf_data, kin_model, grism_object=None, num_samples=None, re_manual=None):
+    """Add v_re posterior to inf_data by evaluating rot_model.rotation_curve per sample.
+
+    grism_object is accepted but unused (kept for backward compatibility).
+    num_samples defaults to the draw dimension of the posterior if not supplied.
+    """
     rot_model = kin_model.galaxy_model.rot_model
     morph_model = kin_model.galaxy_model.morph_model
 
-    # Parameter names needed by the rotation model (plus morph params for mass-based components)
     param_names = (
         [s.name for s in rot_model.parameters] +
         [s.name for s in morph_model.parameters]
     )
 
     num_chains = inf_data.posterior['PA'].shape[0]
+    if num_samples is None:
+        num_samples = inf_data.posterior['PA'].shape[1]
     num_samples_prior = inf_data.prior['PA'].shape[1]
 
-    inf_data.posterior['v_re'] = xr.DataArray(np.zeros((num_chains, num_samples)), dims=('chain', 'draw'))
-    inf_data.prior['v_re'] = xr.DataArray(np.zeros((1, num_samples_prior)), dims=('chain', 'draw'))
+    inf_data.posterior['v_re'] = xr.DataArray(
+        np.zeros((num_chains, num_samples)), dims=('chain', 'draw'))
+    inf_data.prior['v_re'] = xr.DataArray(
+        np.zeros((1, num_samples_prior)), dims=('chain', 'draw'))
 
     for i in range(num_chains):
         for sample in range(num_samples):
-            re = re_manual if re_manual is not None else float(inf_data.posterior['r_eff'][i, int(sample)].values)
+            re = re_manual if re_manual is not None else float(
+                inf_data.posterior['r_eff'][i, int(sample)].values)
             all_params = {
                 name: float(inf_data.posterior[name][i, int(sample)].values)
                 for name in param_names if name in inf_data.posterior
@@ -669,7 +678,8 @@ def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual=None):
             ))
 
     for sample in range(num_samples_prior):
-        re = re_manual if re_manual is not None else float(inf_data.posterior['r_eff'].median(dim=["chain", "draw"]).values)
+        re = re_manual if re_manual is not None else float(
+            inf_data.posterior['r_eff'].median(dim=["chain", "draw"]).values)
         all_params = {
             name: float(inf_data.prior[name][0, int(sample)].values)
             for name in param_names if name in inf_data.prior
@@ -677,11 +687,6 @@ def add_v_re(inf_data, kin_model, grism_object, num_samples, re_manual=None):
         inf_data.prior['v_re'][0, int(sample)] = float(jnp.abs(
             rot_model.rotation_curve(jnp.array(re), all_params)
         ))
-
-    v_re_16 = inf_data.posterior['v_re'].quantile(0.16).values
-    v_re_med = inf_data.posterior['v_re'].quantile(0.50).values
-    v_re_84 = inf_data.posterior['v_re'].quantile(0.84).values
-    return inf_data, v_re_16, v_re_med, v_re_84
 
 
 def compute_MAP(inf_data, grism_object, image):
