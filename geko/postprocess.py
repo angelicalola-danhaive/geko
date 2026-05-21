@@ -270,13 +270,13 @@ def process_results(output, master_cat, line, mock_params=None, test=None,
 	save_fit_results(output, inf_data, kin_model, z_spec, ID,
 	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor)
 
-	v_re_summary = summarize_posterior(inf_data, ['v_re'])['v_re']
+	summary = summarize_posterior(inf_data, [dq.name for dq in DERIVED_QUANTITIES])
 	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space,
 	                       save_to_folder=output, name='summary',
-	                       v_re=v_re_summary['50'],
+	                       v_re=summary.get('v_re', {}).get('50'),
 	                       save_runs_path=save_runs_path, ID=ID)
 
-	return v_re_summary['16'], v_re_summary['50'], v_re_summary['84'], kin_model, inf_data
+	return summary, kin_model, inf_data
 
 
 def process_results_multi(observations, results, output, master_cat, line,
@@ -310,7 +310,7 @@ def process_results_multi(observations, results, output, master_cat, line,
 	save_fit_results(output, inf_data, kin_model, z_spec, ID,
 	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor)
 
-	v_re_summary = summarize_posterior(inf_data, ['v_re'])['v_re']
+	summary = summarize_posterior(inf_data, [dq.name for dq in DERIVED_QUANTITIES])
 
 	obs_radius = kin_model.r_eff_mean
 	ellip      = kin_model.ellip_mean
@@ -360,7 +360,7 @@ def process_results_multi(observations, results, output, master_cat, line,
 	except Exception as e:
 		print(f'  WARNING: Could not generate comparison cornerplot: {e}')
 
-	return v_re_summary['16'], v_re_summary['50'], v_re_summary['84'], kin_model, inf_data
+	return summary, kin_model, inf_data
 
 
 # ============================================================================

@@ -631,7 +631,7 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
     inf_data.to_netcdf(save_runs_path + output + '/' + str(source_id) + '_output')
 
     # Process results
-    v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results(
+    summary, kin_model, inf_data = post.process_results(
         output, master_cat, line, parametric=parametric, ID=source_id, save_runs_path=save_runs_path,
         field=field, grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
         factor=factor, wave_factor=wave_factor, model_name=model_name,
@@ -931,13 +931,14 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
 
     # Process results: compute v_re, v/sigma, save fits, and generate plots
     print("\nPost-processing results...")
-    v_re_16, v_re_med, v_re_84, kin_model, inf_data = post.process_results_multi(
+    summary, kin_model, inf_data = post.process_results_multi(
         observations, results, output, master_cat, line, parametric, source_id, save_runs_path,
         field, grism_filter, delta_wave_cutoff, factor, wave_factor, model_name,
         manual_psf_name=manual_psf_name, manual_grism_file=observations_config[0]['grism_file'])
 
     print("\nMulti-observation fitting complete!")
-    print(f"  v_re: {v_re_med:.2f} (+{v_re_84-v_re_med:.2f}/-{v_re_med-v_re_16:.2f}) km/s")
+    for name, stats in summary.items():
+        print(f"  {name}: {stats['50']:.3f} (+{stats['84']-stats['50']:.3f}/-{stats['50']-stats['16']:.3f})")
     print(f"  Results available for: {list(results.keys())}")
 
     return inf_data, results
