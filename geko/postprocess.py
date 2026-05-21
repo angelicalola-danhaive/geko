@@ -424,7 +424,8 @@ def process_results_multi(observations, results, output, master_cat, line, param
 		theta_Ha=theta_Ha,
 		n=n,
 		save_runs_path=save_runs_path,
-		ID=ID
+		ID=ID,
+		galaxy_model=kin_model.galaxy_model
 	)
 
 	# Comparison cornerplot: overlay R, C, and joint posteriors

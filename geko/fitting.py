@@ -573,22 +573,39 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
         else:
             raise ValueError("Field not recognized. Please check the field name.")
 
-        # Set priors based on what's available
-        if pysersic_available:
-            # Load PySersic priors first
-            kin_model.disk.set_parametric_priors(pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength, delta_wave, theta_rot = theta_rot, shape = obs_map.shape[0])
+        # Assemble model components from config
+        from .morph_models import MORPH_REGISTRY
+        from .rotation_models import COMPONENT_REGISTRY, CompositeRotationCurve
+        from .config import FitConfiguration
 
-            # Then apply config overrides if provided (selective override)
-            if config is not None:
-                print("\nApplying selective config overrides to PySersic priors...")
-                kin_model.disk.apply_config_overrides(config)
+        cfg = config if config is not None else FitConfiguration()
+
+        # Set morphology model
+        kin_model.galaxy_model.morph_model = MORPH_REGISTRY[cfg.morphology_model]()
+
+        # Build rotation components (compute kpc_per_px for mass-based components)
+        pixel_scale_arcsec = 0.0629
+        kpc_per_px = (pixel_scale_arcsec
+                      * cosmo.angular_diameter_distance(z_spec).to('kpc').value
+                      * np.pi / (180.0 * 3600.0))
+        components = []
+        for comp_name in cfg.rotation_components:
+            cls = COMPONENT_REGISTRY[comp_name]
+            comp = cls()
+            if cls.NEEDS_PHYSICAL_SCALE:
+                comp.kpc_per_px = kpc_per_px
+            components.append(comp)
+        kin_model.galaxy_model.rot_model = CompositeRotationCurve(components)
+
+        # Set priors: PySersic first (if available), then config overrides always applied on top
+        if pysersic_available:
+            kin_model.galaxy_model.set_parametric_priors(
+                pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
+                delta_wave, theta_rot=theta_rot, shape=obs_map.shape[0]
+            )
         else:
-            # No PySersic, must use complete config
             print("\nUsing config priors (no PySersic file available)...")
-            kin_model.disk.set_priors_from_config(config)
-            # Still need to set flux and rotation from other sources
-            # Note: set_priors_from_config doesn't handle flux/rotation, so we'd need to add that
-            # For now, just document this limitation
+        kin_model.galaxy_model.apply_config_overrides(cfg)
     else:
         #raise non-parametric fitting not implemented error
         raise ValueError("Non-parametric fitting is not implemented yet. Please set --parametric to True to use the parametric fitting.")
@@ -778,18 +795,39 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
         # and rotation angles are applied per-observation
         theta_rot_ref = jnp.radians(observations_config[0]['theta_rot'])
 
-        # Set priors based on what's available
+        # Assemble model components from config
+        from .morph_models import MORPH_REGISTRY
+        from .rotation_models import COMPONENT_REGISTRY, CompositeRotationCurve
+        from .config import FitConfiguration
+
+        cfg = config if config is not None else FitConfiguration()
+
+        # Set morphology model
+        kin_model.galaxy_model.morph_model = MORPH_REGISTRY[cfg.morphology_model]()
+
+        # Build rotation components (compute kpc_per_px for mass-based components)
+        pixel_scale_arcsec = 0.0629
+        kpc_per_px = (pixel_scale_arcsec
+                      * cosmo.angular_diameter_distance(z_spec).to('kpc').value
+                      * np.pi / (180.0 * 3600.0))
+        components = []
+        for comp_name in cfg.rotation_components:
+            cls = COMPONENT_REGISTRY[comp_name]
+            comp = cls()
+            if cls.NEEDS_PHYSICAL_SCALE:
+                comp.kpc_per_px = kpc_per_px
+            components.append(comp)
+        kin_model.galaxy_model.rot_model = CompositeRotationCurve(components)
+
+        # Set priors: PySersic first (if available), then config overrides always applied on top
         if pysersic_available:
-            kin_model.disk.set_parametric_priors(
+            kin_model.galaxy_model.set_parametric_priors(
                 pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
                 delta_wave, theta_rot=theta_rot_ref, shape=obs_map_ref.shape[0]
             )
-            if config is not None:
-                print("\nApplying selective config overrides to PySersic priors...")
-                kin_model.disk.apply_config_overrides(config)
         else:
             print("\nUsing config priors (no PySersic file available)...")
-            kin_model.disk.set_priors_from_config(config)
+        kin_model.galaxy_model.apply_config_overrides(cfg)
     else:
         raise ValueError("Non-parametric fitting is not implemented yet. Please set parametric=True.")
 

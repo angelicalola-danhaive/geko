@@ -351,7 +351,7 @@ def compute_r90(n, r_eff):
 	return result.root if result.converged else None
 
 
-def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None, ID = None):
+def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None, ID = None, galaxy_model = None):
 	"""
 	Create comprehensive summary plot for disk model fitting results.
 
@@ -720,8 +720,26 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 		v_re_84    = float(inf_data.posterior['v_re'].quantile(0.84,    dim=["chain", "draw"]).values)
 		v_re_50    = float(inf_data.posterior['v_re'].quantile(0.5,     dim=["chain", "draw"]).values)
 
-		_var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph', 'amplitude', 'n', 'r_eff',
-		              'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel', 'v0']
+		if galaxy_model is not None:
+			from .param_spec import all_param_specs
+			_specs = [s for s in all_param_specs(
+			              galaxy_model.morph_model,
+			              galaxy_model.shared_kin_specs,
+			              galaxy_model.rot_model)
+			          if not s.fixed]
+			_spec_map = {s.name: s for s in _specs}
+			_var_names = [s.name for s in _specs if s.name in inf_data.posterior]
+			_labels = [_spec_map[n].label for n in _var_names]
+			_titles = [_spec_map[n].title for n in _var_names]
+		else:
+			_var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph', 'amplitude', 'n', 'r_eff',
+			              'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel', 'v0']
+			_labels = [r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]',
+			           r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]',
+			           r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]', r'$v_0$ [km/s]']
+			_titles = [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$',
+			           r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$',
+			           r'$x_{0, v}$', r'$y_{0,v}$', r'$v_0$']
 		CORNER_KWARGS_PRIOR = dict(
 			smooth=2, smooth1d=5,
 			label_kwargs=dict(fontsize=20), title_kwargs=dict(fontsize=20),
@@ -737,12 +755,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 			quantiles=[0.16, 0.5, 0.84],
 			plot_density=False, plot_datapoints=False, fill_contours=True, plot_contours=True,
 			show_titles=True,
-			labels=[r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]', r'$\sigma_0$ [km/s]',
-			        r'PA$_{\rm morph}$ [deg]', r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$ [px]',
-			        r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]', r'$v_0$ [km/s]'],
-			titles=[r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$',
-			        r'$\text{amplitude}$', r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$',
-			        r'$x_{0, v}$', r'$y_{0,v}$', r'$v_0$'],
+			labels=_labels,
+			titles=_titles,
 			max_n_ticks=3, divergences=False, linewidth=2, title_fmt='.1f')
 		figure = corner.corner(inf_data, group='posterior', var_names=_var_names,
 		                       truths=None, truth_color='blue', color='royalblue',
@@ -756,7 +770,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, y0=31, factor=2,
                             direct_image_size=62, save_to_folder=None, name=None, PA=None, i=None,
                             Va=None, r_t=None, sigma0=None, obs_radius=None, ellip=None,
-                            theta_obs=None, theta_Ha=None, n=None, save_runs_path=None, ID=None):
+                            theta_obs=None, theta_Ha=None, n=None, save_runs_path=None, ID=None,
+                            galaxy_model=None):
 	"""
 	Create comprehensive summary plot for multi-observation disk model fitting results.
 
@@ -1124,14 +1139,26 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 		alpha = 0.1,
 		max_n_ticks=3)
 	bin_factor = [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]
-	# Build var_names dynamically: shared params always present; add amplitude/v0 if they exist
-	_corner_base = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph', 'n', 'r_eff',
-	                'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel']
-	_corner_labels_base = [r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]',
-	                       r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$n$', r'$r_{\text{e}}$ [px]',
-	                       r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]']
-	_corner_titles_base = [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$',
-	                       r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$', r'$x_{0, v}$', r'$y_{0,v}$']
+	# Build var_names: use galaxy_model specs when available, else fall back to hardcoded defaults
+	if galaxy_model is not None:
+		from .param_spec import all_param_specs
+		_base_specs = [s for s in all_param_specs(
+		                   galaxy_model.morph_model,
+		                   galaxy_model.shared_kin_specs,
+		                   galaxy_model.rot_model)
+		               if not s.fixed and s.name not in ('amplitude', 'v0')]
+		_spec_map = {s.name: s for s in _base_specs}
+		_corner_base = [s.name for s in _base_specs if s.name in inf_data.posterior]
+		_corner_labels_base = [_spec_map[n].label for n in _corner_base]
+		_corner_titles_base = [_spec_map[n].title for n in _corner_base]
+	else:
+		_corner_base = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'PA_morph', 'n', 'r_eff',
+		                'xc_morph', 'yc_morph', 'x0_vel', 'y0_vel']
+		_corner_labels_base = [r'PA [deg]', r'$i$ [deg]', r'$V_a$ [km/s]', r'$r_t$ [px]',
+		                       r'$\sigma_0$ [km/s]', r'PA$_{\rm morph}$ [deg]', r'$n$', r'$r_{\text{e}}$ [px]',
+		                       r'$x_{0}$ [px]', r'$y_{0}$ [px]', r'$x_{0,v}$ [px]', r'$y_{0,v}$ [px]']
+		_corner_titles_base = [r'PA', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$', r'PA$_{\rm morph}$',
+		                       r'$n$', r'$r_{\text{e}}$', r'$x_{0}$', r'$y_{0}$', r'$x_{0, v}$', r'$y_{0,v}$']
 	if 'amplitude' in inf_data.posterior:
 		_corner_base.append('amplitude')
 		_corner_labels_base.append(r'$\text{amplitude}$')
