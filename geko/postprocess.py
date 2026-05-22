@@ -222,6 +222,19 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 		corner_labels.append(all_labels.get(var, var))
 		corner_ranges.append((lo, hi))
 
+	data_matrix = np.column_stack(
+	    [inf_data.posterior[v].values.ravel() for v in corner_vars])
+
+	# v_sigma is NaN wherever sigma0 < floor; drop those rows so corner's
+	# percentile-based titles are finite.  Other variables have no NaN.
+	if 'v_sigma' in corner_vars:
+		finite_mask = np.isfinite(data_matrix[:, corner_vars.index('v_sigma')])
+		n_dropped = int((~finite_mask).sum())
+		if n_dropped:
+			print(f'  Corner plot: dropped {n_dropped} v_sigma NaN samples '
+			      f'(sigma0 below floor)')
+		data_matrix = data_matrix[finite_mask]
+
 	fig = plt.figure(figsize=(10, 10))
 	CORNER_KWARGS = dict(
 		smooth=4,
@@ -236,10 +249,8 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 		labels=corner_labels,
 		titles=corner_labels,
 		max_n_ticks=3,
-		divergences=False,
 	)
-	corner.corner(inf_data, group='posterior', var_names=corner_vars,
-	              color='royalblue', range=corner_ranges,
+	corner.corner(data_matrix, color='royalblue', range=corner_ranges,
 	              **CORNER_KWARGS)
 	plt.tight_layout()
 	plt.savefig(save_runs_path + output + '/' + str(ID) + '_v_sigma_corner.png',
