@@ -76,6 +76,11 @@ def read_config_table(config_path, test):
 	config = Table.read(config_path, format='ascii')
 	config_test = config[config['test'] == test]
 	params_dict = {col: np.array(config_test[col]) for col in config_test.colnames}
+
+	# Derive r_eff from r_t if not explicitly in the table (Arctan: r_eff = (1.676/0.4)*r_t)
+	if 'r_eff' not in params_dict and 'r_t' in params_dict:
+		params_dict['r_eff'] = (1.676 / 0.4) * params_dict['r_t']
+
 	PA_image = params_dict['PA_image']
 	PA_grism = params_dict['PA_grism']
 	i        = params_dict['i']
