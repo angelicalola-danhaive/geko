@@ -253,7 +253,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 	corner.corner(data_matrix, color='royalblue', range=corner_ranges,
 	              **CORNER_KWARGS)
 	plt.tight_layout()
-	plt.savefig(save_runs_path + output + '/' + str(ID) + '_v_sigma_corner.png',
+	plt.savefig(save_runs_path + output + '/' + str(ID) + '_derived_corner.png',
 	            dpi=300)
 	plt.close()
 

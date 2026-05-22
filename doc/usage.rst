@@ -241,7 +241,7 @@ Geko saves several files in ``<save_runs_path>/<output_name>/``. **All output fi
    - 1D velocity and dispersion profiles
    - Rotation curve
 
-4. **<source_id>_v_sigma_corner.png** - Corner plot for v/σ ratio posteriors
+4. **<source_id>_derived_corner.png** - Corner plot for derived quantities (v/σ, v_circ, M_dyn)
 
 5. **<source_id>_summary_corner.png** - Full corner plot for all parameters
 
