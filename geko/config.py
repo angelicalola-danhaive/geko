@@ -69,6 +69,48 @@ class FitConfiguration:
     geom_prior_overrides: dict = field(default_factory=dict)
     fixed_params: dict = field(default_factory=dict)
 
+    def build_rot_model(self, z_spec=None):
+        """Build a CompositeRotationCurve from rotation_components.
+
+        Raises NotImplementedError for any component name not in COMPONENT_REGISTRY,
+        so adding a new component is a matter of registering it — nothing else changes.
+
+        Parameters
+        ----------
+        z_spec : float, optional
+            Spectroscopic redshift. Required for mass-based components that need
+            a physical scale (kpc/px). Not needed for pure kinematic components
+            like Arctan.
+        """
+        from .rotation_models import COMPONENT_REGISTRY, CompositeRotationCurve
+
+        kpc_per_px = None
+        if z_spec is not None:
+            from astropy.cosmology import Planck18 as cosmo
+            import numpy as np
+            kpc_per_px = (0.0629
+                          * cosmo.angular_diameter_distance(z_spec).to('kpc').value
+                          * np.pi / (180.0 * 3600.0))
+
+        components = []
+        for comp_name in self.rotation_components:
+            if comp_name not in COMPONENT_REGISTRY:
+                raise NotImplementedError(
+                    f"Rotation component '{comp_name}' is not yet implemented. "
+                    f"Currently supported: {list(COMPONENT_REGISTRY.keys())}"
+                )
+            cls = COMPONENT_REGISTRY[comp_name]
+            comp = cls()
+            if cls.NEEDS_PHYSICAL_SCALE:
+                if kpc_per_px is None:
+                    raise ValueError(
+                        f"Component '{comp_name}' requires a physical scale. "
+                        f"Pass z_spec to build_rot_model()."
+                    )
+                comp.kpc_per_px = kpc_per_px
+            components.append(comp)
+        return CompositeRotationCurve(components)
+
     def print_summary(self):
         """Print a summary of the configuration."""
         print("Geko Configuration Summary")

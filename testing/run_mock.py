@@ -7,6 +7,10 @@ from geko import plotting
 from geko import models
 
 from geko.fitting import Fit_Numpyro
+from geko.config import FitConfiguration, MCMCSettings
+from geko.postprocess import compute_derived_posterior, summarize_posterior, DERIVED_QUANTITIES
+from geko.param_spec import _apply_overrides_to_specs, all_param_specs
+from geko.models import GalaxyModel
 from numpyro.infer import Predictive
 from jax import random
 
@@ -66,21 +70,21 @@ from jax import config
 def read_config_table(config_path, test):
 	'''
 		Read config table and load values of the parameters for every iteration of the
-		test into arrays
+		test into arrays. Returns standard geom arrays plus a flat params_dict of ALL
+		columns — rotation-model params are accessed via params_dict by spec name.
 	'''
 	config = Table.read(config_path, format='ascii')
 	config_test = config[config['test'] == test]
-	PA_image = np.array(config_test['PA_image'])
-	PA_grism = np.array(config_test['PA_grism'])
-	i = np.array(config_test['i'])
-	Va = np.array(config_test['Va'])
-	r_t = np.array(config_test['r_t'])
-	sigma0 = np.array(config_test['sigma0'])
-	SN_image = np.array(config_test['SN_image'])
-	SN_grism = np.array(config_test['SN_grism'])
-	n = np.array(config_test['n'])
+	params_dict = {col: np.array(config_test[col]) for col in config_test.colnames}
+	PA_image = params_dict['PA_image']
+	PA_grism = params_dict['PA_grism']
+	i        = params_dict['i']
+	sigma0   = params_dict['sigma0']
+	SN_image = params_dict['SN_image']
+	SN_grism = params_dict['SN_grism']
+	n        = params_dict['n']
 
-	return PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
+	return PA_image, PA_grism, i, sigma0, SN_image, SN_grism, n, params_dict
 
 def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape, xc_morph=None, yc_morph=None):
 	'''
@@ -223,12 +227,16 @@ def initialize_grism(mock_image, psf, image_shape, factor=5):
 
 	return grism_object, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min 
 
-def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, x0_vel=None, y0_vel=None, factor =5):
+def make_vel_fields(PA_grism, i, truth_rot_params, sigma0, image_shape, x0_vel=None, y0_vel=None, factor=5):
 	'''
-		Make velocity and velocity dispersion fields from inputs
+		Make velocity and velocity dispersion fields from inputs.
+		Model-agnostic: truth_rot_params dict is passed directly to GalaxyModel.velocity_field,
+		which calls rot_model.rotation_curve internally — works for any rotation component.
 
 		Parameters
 		----------
+		truth_rot_params : dict
+			Rotation model parameters, e.g. {'Va': 200.0, 'r_t': 1.0} for Arctan.
 		x0_vel, y0_vel : float, optional
 			Velocity field center coordinates. If None, uses image_shape//2 (image center)
 	'''
@@ -238,15 +246,12 @@ def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, x0_vel=None, y0_v
 	if y0_vel is None:
 		y0_vel = image_shape // 2
 
-	# Create velocity coordinate grids using direct high-res method (Gemini's suggestion)
-	# This avoids interpolation artifacts from image.resize
 	x_grid = jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape*factor)
 	y_grid = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape*factor)
 	x_grid, y_grid = jnp.meshgrid(x_grid, y_grid)
 
-	kin_model = models.KinModels()
-	# Config PA is already in math/kinematic convention (0°=East, 90°=North), use directly
-	V = kin_model.v(x_grid, y_grid, PA_grism, i, Va, r_t)
+	gm = GalaxyModel((image_shape, image_shape), factor)
+	V = gm.velocity_field(x_grid, y_grid, PA_grism, i, truth_rot_params)
 	D = sigma0*jnp.ones_like(V)
 
 	# x_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*factor*10)
@@ -268,7 +273,7 @@ def make_vel_fields(PA_grism, i ,Va, r_t, sigma0, image_shape, x0_vel=None, y0_v
 
 	return V, D
 
-def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf, image_shape = 31, factor = 5, ideal = False, x0_vel=None, y0_vel=None, xc_morph=None, yc_morph=None, psf_mode='2d'):
+def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN_grism, n, psf, image_shape = 31, factor = 5, ideal = False, x0_vel=None, y0_vel=None, xc_morph=None, yc_morph=None, psf_mode='2d'):
 	'''
 		Make mock images and grism spectra from inputs
 
@@ -328,11 +333,9 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 		print(f'Mock PSF mode: 2D (standard convolution in both x and y)')
 	#make velocity and velocity dispersion fields
 	# Use inclination from config (removed hardcoded i=60)
-	print('Params for vel fields: PA = ' + str(PA_grism) + ', i = ' + str(i) + ', Va = ' + str(Va) + ', r_t = ' + str(r_t) + ', sigma0 = ' + str(sigma0))
+	print('Params for vel fields: PA = ' + str(PA_grism) + ', i = ' + str(i) + ', rot_params = ' + str(truth_rot_params) + ', sigma0 = ' + str(sigma0))
 
-	# Generate velocity fields exactly as in inference model (models.py lines 1092-1101)
-	# This ensures mock and forward model use identical coordinate grids
-	V, D = make_vel_fields(PA_grism, i, Va, r_t, sigma0, image_shape, x0_vel=x0_vel, y0_vel=y0_vel, factor=factor)
+	V, D = make_vel_fields(PA_grism, i, truth_rot_params, sigma0, image_shape, x0_vel=x0_vel, y0_vel=y0_vel, factor=factor)
 
 	grism_spectrum = grism_object.disperse(image_highres, V, D)
 	print(f'DEBUG: PSF shape before disperse: {grism_object.PSF.shape}')
@@ -485,282 +488,272 @@ def make_mock_data(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n
 	observed_image = image if ideal else convolved_image
 	return observed_image, image_error, image, grism_spectrum_noise, grism_error, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object
 
-def run_fit(mock_params, priors,parametric = False):
+def run_fit(mock_params, fit_config, parametric=False):
 	'''
-		Run the fitting code
-	'''
+		Run the fitting code.
 
+		Parameters
+		----------
+		fit_config : FitConfiguration
+			Priors and MCMC settings. Replaces the old priors dict.
+	'''
 	line = 'H_alpha'
-	#need to make a preprocessing function just for the mock data, probably add an entry to run_full_pre that defaults to none
 
-	redshift, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = pre.run_full_preprocessing(None, None, line, mock_params, priors)
+	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = \
+		pre.run_full_preprocessing(None, None, line, mock_params=mock_params)
 
-	# Set default fitting parameters
-	num_samples = 1000
-	num_warmup = 1000
-	step_size = 1.0  # Let NUTS adapt from reasonable starting point (was 0.01 - too small!)
-	target_accept_prob = 0.7  # Standard NUTS setting (was 0.9 - too conservative!)
-	factor = 5
+	# Apply rotation model from config — raises NotImplementedError for unregistered components
+	kin_model.galaxy_model.rot_model = fit_config.build_rot_model(z_spec)
 
-	# # Soft SNR cut - only mask pixels with SNR < 1 (pure noise)
-	# mask = jnp.where(obs_map/obs_error < 0.01, 0, 1).astype(bool)
-	# num_masked = jnp.sum(~mask)
-	# print(f'SNR < 1 masking: {jnp.sum(mask)}/{mask.size} pixels included ({num_masked} masked)')
-	# No masking - use all pixels (set all to 1)
+	# Apply FitConfiguration to model (mirrors fitting.py)
+	kin_model.galaxy_model.morph_model.apply_prior_overrides(fit_config.morph_prior_overrides)
+	_apply_overrides_to_specs(kin_model.galaxy_model.shared_kin_specs,
+	                          fit_config.geom_prior_overrides)
+	for comp in kin_model.galaxy_model.rot_model.components:
+		comp.apply_prior_overrides(fit_config.rot_prior_overrides)
+	kin_model.galaxy_model.apply_fixed_params(fit_config.fixed_params)
+
+	num_samples      = fit_config.mcmc.num_samples
+	num_warmup       = fit_config.mcmc.num_warmup
+	target_accept_prob = fit_config.mcmc.target_accept_prob
+	num_chains       = fit_config.mcmc.num_chains
+	step_size        = 1.0
+
 	mask = jnp.ones_like(obs_map, dtype=bool)
 	print('Using no mask (all pixels included)')
-	# # Use flux-based masking instead of SNR-based to preserve rotation signal
-	# # Only mask true background (0.1% of max flux) to avoid excluding low-SNR but real signal
-	# flux_threshold = 0.001 * jnp.max(obs_map)
-	# mask = (jnp.where(obs_map < flux_threshold, 0, 1)).astype(bool) 
-	# ----------------------------------------------------------running the inference------------------------------------------------------------------------
-	kin_model.galaxy_model.set_parametric_priors_test(priors)
-	run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric = parametric)
+
+	run_fit_obj = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object,
+	                          kin_model=kin_model, inference_data=None, parametric=parametric)
 
 	rng_key = random.PRNGKey(4)
 
-	#check truth likelihood
 	if parametric:
-		inference_model = run_fit.kin_model.inference_model_parametric
+		inference_model = run_fit_obj.kin_model.inference_model_parametric
 	else:
-		inference_model = run_fit.kin_model.inference_model
+		inference_model = run_fit_obj.kin_model.inference_model
 	prior_predictive = Predictive(inference_model, num_samples=num_samples)
+	prior = prior_predictive(rng_key, grism_object=run_fit_obj.grism_object,
+	                         obs_map=run_fit_obj.obs_map, obs_error=run_fit_obj.obs_error,
+	                         mask=mask)
 
-	prior = prior_predictive(rng_key, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error, mask = mask)
+	run_fit_obj.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
+	                          median=True, step_size=step_size, adapt_step_size=True,
+	                          target_accept_prob=target_accept_prob, num_chains=num_chains,
+	                          init_vals=None, mask=mask)
 
-	
-	run_fit.run_inference(num_samples=num_samples, num_warmup=num_warmup, high_res=True,
-							  median=True, step_size=step_size, adapt_step_size=True, target_accept_prob=target_accept_prob,  num_chains=2, init_vals = None, mask = mask)
+	inf_data = az.from_numpyro(run_fit_obj.mcmc, prior=prior)
 
-	#get highest likelihood sample and compute liklihood
-
-	inf_data = az.from_numpyro(run_fit.mcmc, prior=prior)	
-	# best_indices = np.unravel_index(inf_data['sample_stats']['lp'].argmin(), inf_data['sample_stats']['lp'].shape)
-	# best_fit = inf_data.posterior.isel(chain=best_indices[0], draw=best_indices[1])	
-	# best_fit_vals = best_fit
-	# log_l_array = log_likelihood(run_fit.kin_model.inference_model, best_fit_vals, grism_object = run_fit.grism_object, obs_map = run_fit.obs_map, obs_error = run_fit.obs_error )
-	# print('nan indices: ', np.argwhere(np.isnan(log_l_array['obs'])))
-	# print('Log-L of best fit:',np.array(log_l_array['obs']))
-
-	return inf_data, kin_model, grism_object, num_samples
+	return inf_data, kin_model, grism_object, num_samples, z_spec
 
 
-def save_results(config_path, inf_data, test, j, r_t, kin_model, grism_object, num_samples, parametric, save_folder=None):
+def save_results(config_path, inf_data, z_spec, test, j, truth_rot_params, r_eff_truth, i_true,
+                 kin_model, grism_object, num_samples, parametric, save_folder=None):
 	'''
-		Save every result in a table so I can easily read it into a file to make all of the plots
-		Save the output file + summary ONLY for each mock run, all in the same folder where the mock
-		data is saved
-		save with name str(test) + index of row for that test
+		Save MCMC output and per-iteration results table.
+		Model-agnostic: truth v_re is computed via rot_model.rotation_curve(r_eff, truth_rot_params),
+		which works for any rotation component. Parameter names are derived from all_param_specs.
 	'''
 	if save_folder is None:
 		save_folder = test
-		# no ../ because the open() function reads from terminal directory (not module directory)
-	#save the output file
+
 	try:
-		output_path = 'testing/' + str(save_folder) + '/' + str(save_folder) + '_' + str(j) + '_' + 'output'
+		output_path = 'testing/' + str(save_folder) + '/' + str(save_folder) + '_' + str(j) + '_output'
 		inf_data.to_netcdf(output_path)
 		print(f'Saved MCMC output to {output_path}')
 	except Exception as e:
 		print(f'ERROR: Failed to save netcdf output: {e}')
 		raise
-	#post process results
-	# inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object,parametric)
-	#load results table
-	config_table = Table.read(config_path, format='ascii')
-	config_table_test = config_table[config_table['test'] == test]
 
-	#create a new table for results
-	params_single = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re', 'r_eff', 'n']
-	all_params_single = [[i + "_q16", i + "_q50", i + "_q84"] for i in params_single]
-	cat_col = np.append(["v_re"], np.concatenate(all_params_single))
-	t_empty = np.zeros((len(cat_col), 1))
-	res = Table(t_empty.T, names=cat_col)
-	#obtain quantiles for each parameter from the posterior distribution
-	params = [ 'PA', 'i', 'Va', 'r_t' ,'sigma0', 'v_re', 'r_eff', 'n']
-	quantiles = [0.16, 0.50, 0.84]
-		#compute the azimuthally average velocity at the effective radius
-	# r_eff = kin_model.r_eff_mean
-	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
+	# Add derived quantities (v_re, v_sigma, v_circ, M_dyn) to posterior
+	inf_data = compute_derived_posterior(inf_data, kin_model, z_spec)
 
-	for ii_p in params_single:
-		res[ii_p + "_q16"] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 16)
-		res[ii_p + "_q50"] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 50)
-		res[ii_p + "_q84"] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 84)
-	# for param in params:
-	# 	for quantile in quantiles:
-	# 		param_quantile = inf_data.posterior[param].quantile(quantile).values
-	# 		print(param_quantile)
-	# 		res[j] = param_quantile
+	# Derive param names from model specs — no hardcoded list
+	gm = kin_model.galaxy_model
+	specs = all_param_specs(gm.morph_model, gm.shared_kin_specs, gm.rot_model)
+	sampled_names = [s.name for s in specs if not s.fixed]
+	derived_names = [dq.name for dq in DERIVED_QUANTITIES]
+	all_names = sampled_names + derived_names
+	summary = summarize_posterior(inf_data, all_names)
 
+	# Build per-iteration results table
+	row = {}
+	for name in all_names:
+		if name in summary:
+			row[name + '_q16'] = summary[name]['16']
+			row[name + '_q50'] = summary[name]['50']
+			row[name + '_q84'] = summary[name]['84']
+	res = Table([row]) if row else Table()
 
-	# res_test['v_re_16'][j] = v_re_16
-	# res_test['v_re_50'][j] = v_re_med
-	# res_test['v_re_84'][j] = v_re_84
-	#add the truth v_re
-	#read truth values from the config table
-	PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n = read_config_table(config_path, test)
-	#initialize kin_model with the truth values
-	PA = np.radians(PA_image[j])
-	i = np.radians(i[j])
-	Va = Va[j]
-	r_t = r_t[j]
-	x = np.linspace(0 - 31//2, 31 - 31//2 - 1, 31*grism_object.factor)
-	y = np.linspace(0 - 31//2, 31 - 31//2 - 1, 31*grism_object.factor)
-	x,y = np.meshgrid(x,y)
-	r_eff = (1.676/0.4)*r_t
-	v_re_truth = kin_model.v_rad(x,y, PA, i, Va, r_t, r_eff)/np.sin(i)
-	res['v_re'] = v_re_truth
+	# Truth v_re: model-agnostic via rotation_curve(r_eff, truth_rot_params)
+	v_circ_truth = float(gm.rot_model.rotation_curve(jnp.array([r_eff_truth]), truth_rot_params)[0])
+	v_re_truth = v_circ_truth * np.sin(np.radians(i_true))
+	if len(res) > 0:
+		res['v_re_truth'] = v_re_truth
+
 	results_path = 'testing/' + str(save_folder) + '/' + 'results_' + str(j)
 	res.write(results_path, format='ascii', overwrite=True)
 	print(f'Saved per-iteration results table to {results_path}')
-	return v_re_med, v_re_truth, kin_model
+
+	v_re_med = summary.get('v_re', {}).get('50', np.nan)
+	return summary, v_re_truth, kin_model
 
 
-def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf, params_single, res, save_folder, psf_mode='2d'):
+def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
+             SN_image, SN_grism, n, psf, params_dict, params_single, res, save_folder,
+             psf_mode='2d', num_chains=2, num_warmup=1000, num_samples=1000):
 	'''
-		Wrapper function to run the test for the mock data
+		Wrapper function to run the test for the mock data.
+		Model-agnostic: rotation params are read from params_dict by spec name,
+		not hardcoded as Va/r_t.
 
 		Parameters
 		----------
+		params_dict : dict
+			All config table columns as numpy arrays (from read_config_table).
 		psf_mode : str, optional
 			'2d' for standard 2D PSF (default), '1d' for 1D PSF in mock (y-axis only)
+		num_chains, num_warmup, num_samples : int
+			MCMC settings — passed via CLI args from RunGekoTests.
 	'''
 	os.makedirs('testing/' + save_folder, exist_ok=True)
 
-	# Infer ideal mode from save_folder name
 	ideal = '_ideal' in save_folder
 
-	# Use the same centers as the prior centers (15.0 for 31x31 image)
-	# This ensures mock and inference use identical coordinate grids
-	# Both morphological and velocity field centers are set to image center for mock tests
 	image_shape = 31
-	xc_morph_true = 15.0  # Morphological center X
-	yc_morph_true = 15.0  # Morphological center Y
-	x0_vel_true = 15.0    # Velocity field center X
-	y0_vel_true = 15.0    # Velocity field center Y
+	factor = 5
+	xc_morph_true = 15.0
+	yc_morph_true = 15.0
+	x0_vel_true   = 15.0
+	y0_vel_true   = 15.0
+
+	# Build rotation model from config — raises NotImplementedError for unregistered components
+	rot_model_temp = fit_config.build_rot_model()  # no z_spec needed for spec names only
+	gm_temp = GalaxyModel((image_shape, image_shape), factor, rot_model=rot_model_temp)
+	rot_param_names = [s.name for s in gm_temp.rot_model.parameters]
+	truth_rot_params = {name: float(params_dict[name][j])
+	                    for name in rot_param_names if name in params_dict}
+	r_eff_true = float(params_dict['r_eff'][j])
 
 	convolved_noise_image, image_error, intrinsic_image, grism_spectrum_noise, grism_error, wave_space, \
 	wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object \
-	= make_mock_data(PA_image[j], PA_grism[j], i[j], Va[j], r_t[j], sigma0[j],SN_image[j], SN_grism[j], n[j], psf,
-					 image_shape=image_shape, ideal=ideal,
-					 x0_vel=x0_vel_true, y0_vel=y0_vel_true,
-					 xc_morph=xc_morph_true, yc_morph=yc_morph_true, psf_mode=psf_mode)
-	#summarize ouputs in one mock_params dictionary
+	= make_mock_data(PA_image[j], PA_grism[j], i[j], truth_rot_params, sigma0[j],
+	                 SN_image[j], SN_grism[j], n[j], psf,
+	                 image_shape=image_shape, ideal=ideal,
+	                 x0_vel=x0_vel_true, y0_vel=y0_vel_true,
+	                 xc_morph=xc_morph_true, yc_morph=yc_morph_true, psf_mode=psf_mode)
+
 	print('Convolved mock image max pixel: ' + str(jnp.max(convolved_noise_image)))
 	print(f'Mock morphology centers: xc_morph={xc_morph_true}, yc_morph={yc_morph_true}')
 	print(f'Mock velocity field centers: x0_vel={x0_vel_true}, y0_vel={y0_vel_true}')
-	mock_params = {'test': test, 'j': j ,'convolved_noise_image': convolved_noise_image, 'image_error': image_error, 'grism_spectrum_noise': grism_spectrum_noise, 'grism_error': grism_error, 'wave_space': wave_space, 'wavelength': wavelength, 'delta_wave_cutoff': delta_wave_cutoff, 'y_factor': y_factor, 'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min, 'grism_object': grism_object, 'PSF': psf}
-	priors = {'PA': PA_image[j], 'i': i[j], 'Va': Va[j], 'r_t': r_t[j], 'sigma0': sigma0[j], 'n': n[j]}
-	#run fitting
-	inf_data, kin_model, grism_object, num_samples  = run_fit(mock_params,priors, parametric = parametric)
-	#post process inference data
 
-	inf_data, model_map,  model_flux, fluxes_mean, model_velocities, model_dispersions = kin_model.compute_model(inf_data, grism_object, parametric = parametric)	
-	# #save the masks in a fit file
-	# #create list 
-	# hdul = fits.HDUList()
-	# primary_hdu = fits.PrimaryHDU(kin_model.mask)
-	# primary_hdu.name = '2D_MASK'
-	# hdul.append(primary_hdu)
-	# mask_hdu = fits.ImageHDU(kin_model.masked_indices)
-	# mask_hdu.name = 'MASKED_IND'
-	# hdul.append(mask_hdu)
-	# hdul.writeto('testing/' + str(test) + '/' + str(j)+ '_masks', overwrite=True)	
-	# --- Cornerplots (non-critical) ---
+	mock_params = {'test': test, 'j': j, 'convolved_noise_image': convolved_noise_image,
+	               'image_error': image_error, 'grism_spectrum_noise': grism_spectrum_noise,
+	               'grism_error': grism_error, 'wave_space': wave_space, 'wavelength': wavelength,
+	               'delta_wave_cutoff': delta_wave_cutoff, 'y_factor': y_factor,
+	               'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min,
+	               'grism_object': grism_object, 'PSF': psf}
+
+	# Build rot_prior_overrides from truth values — model-driven param names
+	rot_prior_overrides = {}
+	for name, val in truth_rot_params.items():
+		width = max(abs(val) * 2.0, 100.0)
+		rot_prior_overrides[f'{name}_min'] = val - width
+		rot_prior_overrides[f'{name}_max'] = val + width
+
+	fit_config = FitConfiguration(
+	    mcmc=MCMCSettings(num_chains=num_chains, num_warmup=num_warmup, num_samples=num_samples),
+	    morph_prior_overrides={
+	        'PA_morph_mu': PA_image[j], 'PA_morph_std': 5.0,
+	        'r_eff_mu': r_eff_true, 'r_eff_std': float(max(3.0, r_eff_true)),
+	        'r_eff_min': 0.0, 'r_eff_max': 15.0,
+	        'n_mu': float(n[j]), 'n_std': 1.0, 'n_min': 0.36, 'n_max': 8.0,
+	        'amplitude_mu': 200.0, 'amplitude_std': 40.0, 'amplitude_min': 0.0,
+	        'xc_morph_mu': 15.0, 'xc_morph_std': 1.0,
+	        'yc_morph_mu': 15.0, 'yc_morph_std': 1.0,
+	    },
+	    geom_prior_overrides={
+	        'PA_mu': PA_image[j], 'PA_std': 10.0,
+	        'i_mu': float(i[j]), 'i_std': 5.0,
+	        'sigma0_min': 0.0, 'sigma0_max': 600.0,
+	        'v0_mu': 0.0, 'v0_std': 200.0,
+	    },
+	    rot_prior_overrides=rot_prior_overrides,
+	)
+
+	inf_data, kin_model, grism_object, num_samples_out, z_spec = run_fit(mock_params, fit_config, parametric=parametric)
+	num_samples = num_samples_out
+
+	inf_data, model_map, model_flux, fluxes_mean, model_velocities, model_dispersions = \
+	    kin_model.compute_model(inf_data, grism_object, parametric=parametric)
+
+	# --- Cornerplots (non-critical): var_names derived from model — model-agnostic ---
 	try:
-		_var_names = ['PA', 'i', 'Va', 'r_t', 'sigma0']
-		_labels    = [r'$PA$', r'$i$', r'$V_a$', r'$r_t$', r'$\sigma_0$']
-		_truths    = [PA_grism[j], i[j], Va[j], r_t[j], sigma0[j]]
-		_post = np.column_stack([np.concatenate(inf_data.posterior[v].values) for v in _var_names])
-		_prior = np.column_stack([np.concatenate(inf_data.prior[v].values) for v in _var_names])
+		gm = kin_model.galaxy_model
+		specs = all_param_specs(gm.morph_model, gm.shared_kin_specs, gm.rot_model)
+		_var_names = [s.name for s in specs if not s.fixed and s.name in inf_data.posterior]
+		_labels    = [s.label for s in specs if not s.fixed and s.name in inf_data.posterior]
+		# Truth values: geom params known directly; rot params from truth_rot_params
+		_truths = []
+		truth_lookup = {
+		    'PA': PA_grism[j], 'i': float(i[j]), 'sigma0': float(sigma0[j]),
+		    **truth_rot_params,
+		}
+		for name in _var_names:
+		    _truths.append(truth_lookup.get(name, None))
+		_post  = np.column_stack([np.concatenate(inf_data.posterior[v].values) for v in _var_names])
+		_prior = np.column_stack([np.concatenate(inf_data.prior[v].values)     for v in _var_names])
 		_fig = corner.corner(_prior, labels=_labels, color='lightgray',
-			plot_datapoints=False, plot_density=False, fill_contours=False,
-			plot_contours=False, smooth=2, max_n_ticks=3)
+		    plot_datapoints=False, plot_density=False, fill_contours=False,
+		    plot_contours=False, smooth=2, max_n_ticks=3)
 		corner.corner(_post, labels=_labels, color='blue', truths=_truths, truth_color='crimson',
-			plot_datapoints=False, plot_density=False, fill_contours=True,
-			smooth=2, quantiles=[0.16, 0.5, 0.84], show_titles=True,
-			title_kwargs=dict(fontsize=12), max_n_ticks=3, fig=_fig)
+		    plot_datapoints=False, plot_density=False, fill_contours=True,
+		    smooth=2, quantiles=[0.16, 0.5, 0.84], show_titles=True,
+		    title_kwargs=dict(fontsize=12), max_n_ticks=3, fig=_fig)
 		plt.savefig('testing/' + save_folder + '/' + str(j) + '_cornerplot_kin.png', dpi=300)
 		plt.close()
 		if parametric:
-			plotting.plot_pp_cornerplot(inf_data, kin_model=kin_model, choice='real', save_to_folder=save_folder, name=str(j) + '_cornerplot_real', PA=PA_grism[j], i=i[j], Va=Va[j], r_t=r_t[j], sigma0=sigma0[j])
+		    plotting.plot_pp_cornerplot(inf_data, kin_model=kin_model, choice='real',
+		        save_to_folder=save_folder, name=str(j) + '_cornerplot_real',
+		        PA=PA_grism[j], i=float(i[j]), sigma0=float(sigma0[j]), **truth_rot_params)
 	except Exception as e:
 		print(f'Warning: cornerplot failed with error: {e}')
 		plt.close('all')
 
 	# --- Critical: save output file and per-iteration results table ---
-	v_re_med, v_re_truth, kin_model = save_results(config_path, inf_data, test, j, r_t[j], kin_model, grism_object, num_samples, parametric, save_folder=save_folder)
+	summary, v_re_truth, kin_model = save_results(
+	    config_path, inf_data, z_spec, test, j,
+	    truth_rot_params, r_eff_true, float(i[j]),
+	    kin_model, grism_object, num_samples, parametric,
+	    save_folder=save_folder)
+
+	v_re_med = summary.get('v_re', {}).get('50', np.nan)
 
 	# --- Trace and summary plots (non-critical) ---
+	# Derived quantities (v_sigma, v_circ, M_dyn) already added by save_results
 	try:
-		inf_data.posterior['v_sigma'] = inf_data.posterior['v_re'] / inf_data.posterior['sigma0']
-		inf_data.prior['v_sigma'] = inf_data.prior['v_re'] / inf_data.prior['sigma0']
-		# compute Mdyn posterior and quantiles
-		pressure_cor = 3.35 #= 2*re/rd
-		inf_data.posterior['v_circ2'] = inf_data.posterior['v_re']**2 + inf_data.posterior['sigma0']**2*pressure_cor
-		inf_data.prior['v_circ2'] = inf_data.prior['v_re']**2 + inf_data.prior['sigma0']**2*pressure_cor
-		inf_data.posterior['v_circ'] = np.sqrt(inf_data.posterior['v_circ2'])
-		inf_data.prior['v_circ'] = np.sqrt(inf_data.prior['v_circ2'])
-		ktot = 1.8 #for q0 = 0.2
-		G = 4.3009172706e-3 #gravitational constant in pc*M_sun^-1*(km/s)^2
-		DA = cosmo.angular_diameter_distance(3.0).to('m')
-		meters_to_pc = 3.086e16
-		inf_data.posterior['r_eff_pc'] = np.deg2rad(inf_data.posterior['r_eff']*0.06/3600)*DA.value/meters_to_pc
-		inf_data.prior['r_eff_pc'] = np.deg2rad(inf_data.prior['r_eff']*0.06/3600)*DA.value/meters_to_pc
-		inf_data.posterior['M_dyn'] = np.log10(ktot*inf_data.posterior['v_circ2']*inf_data.posterior['r_eff_pc']/G)
-		inf_data.prior['M_dyn'] = np.log10(ktot*inf_data.prior['v_circ2']*inf_data.prior['r_eff_pc']/G)
-		az.plot_trace(inf_data, var_names=['PA', 'i', 'Va', 'r_t', 'sigma0'], divergences=True)
+		trace_var_names = [v for v in _var_names if v in inf_data.posterior]
+		az.plot_trace(inf_data, var_names=trace_var_names, divergences=True)
 		plt.savefig('testing/' + save_folder + '/' + str(j) + '_chains.png', dpi=500)
 		plt.show()
 		plt.close('all')
-		kin_model.plot_summary(grism_spectrum_noise, grism_error, inf_data, wave_space[index_min:index_max+1], save_to_folder=save_folder, name=str(j) + '_summary', v_re=v_re_med, PA=PA_grism[j], i=i[j], Va=Va[j], r_t=r_t[j], sigma0=sigma0[j])
+		kin_model.plot_summary(grism_spectrum_noise, grism_error, inf_data,
+		    wave_space[index_min:index_max+1], save_to_folder=save_folder,
+		    name=str(j) + '_summary', v_re=v_re_med, PA=PA_grism[j], i=float(i[j]),
+		    sigma0=float(sigma0[j]), **truth_rot_params)
 		plt.close('all')
 	except Exception as e:
 		print(f'Warning: trace/summary plots failed with error: {e}')
 		plt.close('all')
-	#plot and save delta map of the fluxes
 	plt.close('all')
-	# median = np.where(kin_model.mask == 1, kin_model.fluxes_mean, 0.0)
-	# truth = np.where(kin_model.mask == 1, intrinsic_image, 0.0)
-	# chi = (median - truth)/kin_model.flux_error
-	# plt.imshow(chi, origin = 'lower', cmap = 'coolwarm')
-	# plt.colorbar()
-	# plt.title('Flux Chi')
-	# plt.savefig('testing/' + str(test) + '/' + str(j)+ '_fluxchi.png', dpi=500)
-	# plt.show()
-	# plt.close()
 
-	# #plot MAP:
-	
-	# grism_MAP,PA_map, inc_map, Va_map, r_t_map, sigma0_map = utils.compute_MAP(inf_data, grism_object, convolved_noise_image)
-	# plt.imshow(grism_MAP, origin='lower')
-	# plt.colorbar()
-	# plt.title('MAP: ' + str(PA_map) + ', ' + str(inc_map) + ', ' + str(Va_map) + ', ' + str(r_t_map) + ', ' + str(sigma0_map))
-	# plt.xlabel('Wavelength')
-	# plt.ylabel('Spatial Position')
-	# plt.savefig('testing/' + str(test) + '/' + str(j)+ '_MAP.png', dpi=500)
-	# plt.close()
-
-	# plt.imshow((grism_spectrum_noise - grism_MAP)/grism_error, origin='lower')
-	# plt.colorbar()
-	# plt.title('Residuals')
-	# plt.xlabel('Wavelength')
-	# plt.ylabel('Spatial Position')
-	# plt.savefig('testing/' + str(test) + '/' + str(j)+ '_MAP_residuals.png', dpi=500)
-	# plt.close()
-
-	#save all of the results in one table
-		#obtain quantiles for each parameter from the posterior distribution
-	params = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re', 'r_eff', 'n']
-	quantiles = [0.16, 0.50, 0.84]
-	#compute the azimuthally average velocity at the effective radius
-	inf_data, v_re_16, v_re_med, v_re_84 = utils.add_v_re(inf_data, kin_model, grism_object, num_samples)
-
+	# --- Fill aggregate results table from summary dict ---
 	for ii_p in params_single:
-		res[ii_p + "_q16"][j] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 16)
-		res[ii_p + "_q50"][j] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 50)
-		res[ii_p + "_q84"][j] = np.percentile(np.concatenate(inf_data['posterior'][ii_p][:]), 84)
-	res['v_re'][j] = v_re_truth
+		if ii_p + '_q50' in res.colnames and ii_p in summary:
+		    res[ii_p + '_q16'][j] = summary[ii_p]['16']
+		    res[ii_p + '_q50'][j] = summary[ii_p]['50']
+		    res[ii_p + '_q84'][j] = summary[ii_p]['84']
+	if 'v_re' in res.colnames:
+		res['v_re'][j] = v_re_truth
 
 
 

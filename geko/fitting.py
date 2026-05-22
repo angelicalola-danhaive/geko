@@ -583,19 +583,8 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
         # Set morphology model
         kin_model.galaxy_model.morph_model = MORPH_REGISTRY[cfg.morphology_model]()
 
-        # Build rotation components (compute kpc_per_px for mass-based components)
-        pixel_scale_arcsec = 0.0629
-        kpc_per_px = (pixel_scale_arcsec
-                      * cosmo.angular_diameter_distance(z_spec).to('kpc').value
-                      * np.pi / (180.0 * 3600.0))
-        components = []
-        for comp_name in cfg.rotation_components:
-            cls = COMPONENT_REGISTRY[comp_name]
-            comp = cls()
-            if cls.NEEDS_PHYSICAL_SCALE:
-                comp.kpc_per_px = kpc_per_px
-            components.append(comp)
-        kin_model.galaxy_model.rot_model = CompositeRotationCurve(components)
+        # Build rotation model from config (raises NotImplementedError for unknown components)
+        kin_model.galaxy_model.rot_model = cfg.build_rot_model(z_spec)
 
         # Set priors: PySersic first (if available), then config overrides always applied on top
         if pysersic_available:
@@ -805,19 +794,8 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
         # Set morphology model
         kin_model.galaxy_model.morph_model = MORPH_REGISTRY[cfg.morphology_model]()
 
-        # Build rotation components (compute kpc_per_px for mass-based components)
-        pixel_scale_arcsec = 0.0629
-        kpc_per_px = (pixel_scale_arcsec
-                      * cosmo.angular_diameter_distance(z_spec).to('kpc').value
-                      * np.pi / (180.0 * 3600.0))
-        components = []
-        for comp_name in cfg.rotation_components:
-            cls = COMPONENT_REGISTRY[comp_name]
-            comp = cls()
-            if cls.NEEDS_PHYSICAL_SCALE:
-                comp.kpc_per_px = kpc_per_px
-            components.append(comp)
-        kin_model.galaxy_model.rot_model = CompositeRotationCurve(components)
+        # Build rotation model from config (raises NotImplementedError for unknown components)
+        kin_model.galaxy_model.rot_model = cfg.build_rot_model(z_spec)
 
         # Set priors: PySersic first (if available), then config overrides always applied on top
         if pysersic_available:
