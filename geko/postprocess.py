@@ -225,15 +225,13 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 	data_matrix = np.column_stack(
 	    [inf_data.posterior[v].values.ravel() for v in corner_vars])
 
-	# v_sigma is NaN wherever sigma0 < floor; drop those rows so corner's
-	# percentile-based titles are finite.  Other variables have no NaN.
+	# sigma0 has no NaN; v_sigma has NaN where sigma0 < floor, but corner_ranges
+	# already holds a finite range for v_sigma so np.histogram ignores those NaNs.
 	if 'v_sigma' in corner_vars:
-		finite_mask = np.isfinite(data_matrix[:, corner_vars.index('v_sigma')])
-		n_dropped = int((~finite_mask).sum())
-		if n_dropped:
-			print(f'  Corner plot: dropped {n_dropped} v_sigma NaN samples '
-			      f'(sigma0 below floor)')
-		data_matrix = data_matrix[finite_mask]
+		n_nan = int(np.isnan(data_matrix[:, corner_vars.index('v_sigma')]).sum())
+		if n_nan:
+			print(f'  Corner plot: {n_nan} v_sigma NaN samples (sigma0 below floor) '
+			      f'excluded from histogram by range clipping')
 
 	fig = plt.figure(figsize=(10, 10))
 	CORNER_KWARGS = dict(
@@ -250,8 +248,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 		titles=corner_labels,
 		max_n_ticks=3,
 	)
-	corner.corner(data_matrix, color='royalblue', range=corner_ranges,
-	              **CORNER_KWARGS)
+
 	plt.tight_layout()
 	plt.savefig(save_runs_path + output + '/' + str(ID) + '_derived_corner.png',
 	            dpi=300)
