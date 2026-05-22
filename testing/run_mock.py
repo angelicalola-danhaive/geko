@@ -600,7 +600,8 @@ def save_results(config_path, inf_data, z_spec, test, j, truth_rot_params, r_eff
 
 def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
              SN_image, SN_grism, n, psf, params_dict, params_single, res, save_folder,
-             psf_mode='2d', num_chains=2, num_warmup=1000, num_samples=1000):
+             psf_mode='2d', num_chains=2, num_warmup=1000, num_samples=1000,
+             fit_config=None):
 	'''
 		Wrapper function to run the test for the mock data.
 		Model-agnostic: rotation params are read from params_dict by spec name,
@@ -614,6 +615,11 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 			'2d' for standard 2D PSF (default), '1d' for 1D PSF in mock (y-axis only)
 		num_chains, num_warmup, num_samples : int
 			MCMC settings — passed via CLI args from RunGekoTests.
+		fit_config : FitConfiguration, optional
+			Base configuration. rotation_components is taken from here, so passing a
+			custom config is how you test non-default rotation models. Prior overrides
+			and MCMC settings are derived from the config table / CLI args and will
+			override whatever is in the passed config. Defaults to FitConfiguration().
 	'''
 	os.makedirs('testing/' + save_folder, exist_ok=True)
 
@@ -626,8 +632,11 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	x0_vel_true   = 15.0
 	y0_vel_true   = 15.0
 
-	# Build rotation model from config — raises NotImplementedError for unregistered components
-	rot_model_temp = fit_config.build_rot_model()  # no z_spec needed for spec names only
+	if fit_config is None:
+		fit_config = FitConfiguration()
+
+	# Use the input config's rotation_components to read parameter spec names
+	rot_model_temp = fit_config.build_rot_model()
 	gm_temp = GalaxyModel((image_shape, image_shape), factor, rot_model=rot_model_temp)
 	rot_param_names = [s.name for s in gm_temp.rot_model.parameters]
 	truth_rot_params = {name: float(params_dict[name][j])
@@ -661,6 +670,7 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 		rot_prior_overrides[f'{name}_max'] = val + width
 
 	fit_config = FitConfiguration(
+	    rotation_components=fit_config.rotation_components,
 	    mcmc=MCMCSettings(num_chains=num_chains, num_warmup=num_warmup, num_samples=num_samples),
 	    morph_prior_overrides={
 	        'PA_morph_mu': PA_image[j], 'PA_morph_std': 5.0,
