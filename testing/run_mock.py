@@ -91,24 +91,22 @@ def read_config_table(config_path, test):
 
 	return PA_image, PA_grism, i, sigma0, SN_image, SN_grism, n, params_dict
 
-def make_image(PA_image, i, r_t, SN_image, n, psf, image_shape, xc_morph=None, yc_morph=None):
+def make_image(PA_image, i, r_eff, SN_image, n, psf, image_shape, xc_morph=None, yc_morph=None):
 	'''
 		Make mock image from inputs
 
 		Parameters
 		----------
+		r_eff : float
+			Effective radius in pixels (passed directly from config table).
 		xc_morph, yc_morph : float, optional
 			Morphological center coordinates. If None, uses image_shape//2 (image center)
 		psf : array
 			PSF array to convolve with (already idealized for ideal mode if needed)
 	'''
-	# from inclination infer the ellipticity
-	# Use inclination from config (removed hardcoded i=60)
 	axis_ratio = utils.compute_axis_ratio(i, q0 = 0.2)
 	ellip = 1 - axis_ratio
 	print('Ellipticity: ' + str(ellip) + ', inclination: ' + str(i))
-	#infer r_eff from the turnaround radius
-	r_eff = (1.676/0.4)*r_t
 	print('Reff: ', r_eff)
 
 	# Use provided centers or default to image center
@@ -278,7 +276,7 @@ def make_vel_fields(PA_grism, i, truth_rot_params, sigma0, image_shape, x0_vel=N
 
 	return V, D
 
-def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN_grism, n, psf, image_shape = 31, factor = 5, ideal = False, x0_vel=None, y0_vel=None, xc_morph=None, yc_morph=None, psf_mode='2d'):
+def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN_grism, n, psf, r_eff, image_shape = 31, factor = 5, ideal = False, x0_vel=None, y0_vel=None, xc_morph=None, yc_morph=None, psf_mode='2d'):
 	'''
 		Make mock images and grism spectra from inputs
 
@@ -292,7 +290,7 @@ def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN
 			'2d' for standard 2D PSF, '1d' for 1D PSF (only spatial y-axis)
 	'''
 	#make direct image
-	image, image_highres, convolved_image, noise_image, convolved_noise_image = make_image(PA_image, i, r_t, SN_image, n, psf, image_shape, xc_morph=xc_morph, yc_morph=yc_morph)
+	image, image_highres, convolved_image, noise_image, convolved_noise_image = make_image(PA_image, i, r_eff, SN_image, n, psf, image_shape, xc_morph=xc_morph, yc_morph=yc_morph)
 	max_image = jnp.max(image)
 	image_error = (max_image/SN_image)*jnp.ones((image_shape, image_shape))
 	#make grism object
@@ -651,7 +649,7 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	convolved_noise_image, image_error, intrinsic_image, grism_spectrum_noise, grism_error, wave_space, \
 	wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min, grism_object \
 	= make_mock_data(PA_image[j], PA_grism[j], i[j], truth_rot_params, sigma0[j],
-	                 SN_image[j], SN_grism[j], n[j], psf,
+	                 SN_image[j], SN_grism[j], n[j], psf, r_eff_true,
 	                 image_shape=image_shape, ideal=ideal,
 	                 x0_vel=x0_vel_true, y0_vel=y0_vel_true,
 	                 xc_morph=xc_morph_true, yc_morph=yc_morph_true, psf_mode=psf_mode)
