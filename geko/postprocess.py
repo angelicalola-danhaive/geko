@@ -198,10 +198,29 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 	          format='ascii', overwrite=True)
 
 	# Corner plot: sampled params + all derived quantities flagged include_in_corner
-	all_labels    = {dq.name: dq.label for dq in DERIVED_QUANTITIES}
-	corner_vars   = _CORNER_SAMPLED_PARAMS + [
-	                    dq.name for dq in DERIVED_QUANTITIES if dq.include_in_corner]
-	corner_labels = [all_labels.get(n, n) for n in corner_vars]
+	all_labels  = {dq.name: dq.label for dq in DERIVED_QUANTITIES}
+	candidate_vars   = _CORNER_SAMPLED_PARAMS + [
+	                       dq.name for dq in DERIVED_QUANTITIES if dq.include_in_corner]
+
+	# Filter out variables whose finite samples don't span a valid range (e.g. v_sigma
+	# when sigma0 is always below the floor → all NaN → matplotlib rejects NaN limits).
+	corner_vars, corner_labels, corner_ranges = [], [], []
+	for var in candidate_vars:
+		if var not in inf_data.posterior:
+			continue
+		flat = inf_data.posterior[var].values.ravel()
+		finite = flat[np.isfinite(flat)]
+		if len(finite) < 10:
+			print(f'  Corner plot: skipping {var!r} (fewer than 10 finite samples)')
+			continue
+		lo = np.percentile(finite, 0.5)
+		hi = np.percentile(finite, 99.5)
+		if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
+			print(f'  Corner plot: skipping {var!r} (degenerate range [{lo}, {hi}])')
+			continue
+		corner_vars.append(var)
+		corner_labels.append(all_labels.get(var, var))
+		corner_ranges.append((lo, hi))
 
 	fig = plt.figure(figsize=(10, 10))
 	CORNER_KWARGS = dict(
@@ -220,7 +239,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 		divergences=False,
 	)
 	corner.corner(inf_data, group='posterior', var_names=corner_vars,
-	              color='royalblue', range=[0.99] * len(corner_vars),
+	              color='royalblue', range=corner_ranges,
 	              **CORNER_KWARGS)
 	plt.tight_layout()
 	plt.savefig(save_runs_path + output + '/' + str(ID) + '_v_sigma_corner.png',
