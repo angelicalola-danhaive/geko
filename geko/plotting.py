@@ -10,6 +10,17 @@ __all__ = ['plot_disk_summary', 'plot_pp_cornerplot']
 import matplotlib.pyplot as plt
 import numpy as np
 import corner
+
+LINE_LABELS = {
+    'H_alpha': r'H$\alpha$',
+    'Halpha':  r'H$\alpha$',
+    'Ha':      r'H$\alpha$',
+    'H_beta':  r'H$\beta$',
+    'Hbeta':   r'H$\beta$',
+    'Hb':      r'H$\beta$',
+    'OIII':    r'[OIII]',
+    'O3':      r'[OIII]',
+}
 from matplotlib import gridspec
 from scipy.constants import c, pi
 from jax import image
@@ -351,7 +362,7 @@ def compute_r90(n, r_eff):
 	return result.root if result.converged else None
 
 
-def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None, ID = None, galaxy_model = None):
+def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dispersions, v_rot, fluxes_mean, inf_data, wave_space, x0 = 31, y0 = 31, factor = 2 , direct_image_size = 62, save_to_folder = None, name = None,  PA = None, i = None, Va = None, r_t = None, sigma0 = None, obs_radius = None, ellip = None, theta_obs = None, theta_Ha =None, n = None, save_runs_path = None, ID = None, galaxy_model = None, line = None):
 	"""
 	Create comprehensive summary plot for disk model fitting results.
 
@@ -682,7 +693,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# cbar = plt.colorbar(cp, ax = flux_map_ax)
 	# cbar.ax.set_ylabel('flux [Mjy?]', fontsize = 5)
 	# cbar.ax.tick_params(labelsize = 5)
-	flux_map_ax.set_title(r'H$\alpha$ map', fontsize=10)
+	_line_label = LINE_LABELS.get(line, line) if line else r'H$\alpha$'
+	flux_map_ax.set_title(_line_label + ' map', fontsize=10)
 	flux_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, color = 'black')
 	flux_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, label = 'flux centroid', color = 'crimson')
 	flux_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
@@ -771,7 +783,7 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
                             direct_image_size=62, save_to_folder=None, name=None, PA=None, i=None,
                             Va=None, r_t=None, sigma0=None, obs_radius=None, ellip=None,
                             theta_obs=None, theta_Ha=None, n=None, save_runs_path=None, ID=None,
-                            galaxy_model=None):
+                            galaxy_model=None, line=None):
 	"""
 	Create comprehensive summary plot for multi-observation disk model fitting results.
 
@@ -1068,7 +1080,8 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	flux_map_ax = fig.add_subplot(gs0[n_obs, 2])
 	cp = flux_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, fluxes_mean, shading='nearest', cmap='BuPu')
 	flux_map_ax.axis('off')
-	flux_map_ax.set_title(r'H$\alpha$ map', fontsize=10)
+	_line_label = LINE_LABELS.get(line, line) if line else r'H$\alpha$'
+	flux_map_ax.set_title(_line_label + ' map', fontsize=10)
 
 	flux_map_ax.plot((x0_vel - x0), (y0_vel - y0), '+', markersize=10, label='velocity centroid', color='black')
 	flux_map_ax.plot((x0_morph - x0), (y0_morph - y0), '.', markersize=10, label='flux centroid', color='crimson')

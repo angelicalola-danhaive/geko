@@ -301,7 +301,7 @@ def process_results(output, master_cat, line, mock_params=None, test=None,
 	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space,
 	                       save_to_folder=output, name='summary',
 	                       v_re=summary.get('v_re', {}).get('50'),
-	                       save_runs_path=save_runs_path, ID=ID)
+	                       save_runs_path=save_runs_path, ID=ID, line=line)
 
 	return summary, kin_model, inf_data
 
@@ -362,6 +362,7 @@ def process_results_multi(observations, results, output, master_cat, line,
 		save_runs_path=save_runs_path,
 		ID=ID,
 		galaxy_model=kin_model.galaxy_model,
+		line=line,
 	)
 
 	try:
