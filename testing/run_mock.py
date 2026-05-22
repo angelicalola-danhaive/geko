@@ -311,29 +311,26 @@ def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN
 		grism_object.use_lsf = True
 		print(f'Realistic mode: Using instrument PSF and LSF')
 
-	# Modify PSF for 1D mode (mock data only - inference keeps 2D)
+	# Modify PSF for 1D mode — applies to both mock and inference (self-consistent)
 	if psf_mode == '1d':
 		# Create 1D PSF: Gaussian in y (spatial perpendicular to dispersion), delta in x
 		# For row dispersion (pupil='R'): dispersion is along x, spatial is y
 		psf_2d = grism_object.PSF[:, :, 0]  # Get 2D PSF from first wavelength slice
 		psf_size_y, psf_size_x = psf_2d.shape
 
-		# Create 1D PSF: integrate 2D PSF along x to get y-profile, then make x=delta function
-		psf_1d_profile = jnp.sum(psf_2d, axis=1)  # Sum along x to get y profile
-		psf_1d_profile = psf_1d_profile / jnp.sum(psf_1d_profile)  # Normalize
+		# Integrate 2D PSF along x to get y-profile, delta function in x
+		psf_1d_profile = jnp.sum(psf_2d, axis=1)
+		psf_1d_profile = psf_1d_profile / jnp.sum(psf_1d_profile)
 
-		# Create 2D array with this 1D profile in y, delta function in x
 		psf_1d = jnp.zeros((psf_size_y, psf_size_x))
 		center_x = psf_size_x // 2
-		psf_1d = psf_1d.at[:, center_x].set(psf_1d_profile)  # Delta in x, profile in y
+		psf_1d = psf_1d.at[:, center_x].set(psf_1d_profile)
 
-		# Store original 2D PSF for later restoration (inference needs 2D)
-		grism_object.PSF_2d_original = grism_object.PSF.copy()
-		grism_object.PSF = psf_1d[:, :, jnp.newaxis]  # Add wavelength dimension
-		print(f'Mock PSF mode: 1D (convolution only in y-axis, spatial perpendicular to dispersion)')
+		grism_object.PSF = psf_1d[:, :, jnp.newaxis]
+		print(f'PSF mode: 1D (spatial y-axis only) — used for both mock and inference')
 		print(f'  Original 2D PSF shape: {psf_2d.shape}, 1D PSF shape: {psf_1d.shape}')
 	else:
-		print(f'Mock PSF mode: 2D (standard convolution in both x and y)')
+		print(f'PSF mode: 2D (standard convolution in both axes) — used for both mock and inference')
 	#make velocity and velocity dispersion fields
 	# Use inclination from config (removed hardcoded i=60)
 	print('Params for vel fields: PA = ' + str(PA_grism) + ', i = ' + str(i) + ', rot_params = ' + str(truth_rot_params) + ', sigma0 = ' + str(sigma0))
@@ -481,11 +478,6 @@ def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN
 	plt.colorbar()
 	plt.show()
 	
-
-	# Restore 2D PSF for inference if we used 1D for mock generation
-	if psf_mode == '1d' and hasattr(grism_object, 'PSF_2d_original'):
-		grism_object.PSF = grism_object.PSF_2d_original
-		print(f'Inference PSF: Restored 2D PSF for inference model (shape: {grism_object.PSF.shape})')
 
 	# In ideal mode return the unconvolved image; otherwise return PSF-convolved image
 	observed_image = image if ideal else convolved_image
