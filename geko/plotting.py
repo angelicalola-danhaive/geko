@@ -695,6 +695,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	# cbar.ax.tick_params(labelsize = 5)
 	_line_label = LINE_LABELS.get(line, line) if line else r'H$\alpha$'
 	flux_map_ax.set_title(_line_label + ' map', fontsize=10)
+	cax = inset_axes(flux_map_ax, width="30%", height="5%", loc="upper left", borderpad=0.5)
+	cbar = plt.colorbar(cp, cax=cax, orientation='horizontal')
+	cbar.ax.tick_params(labelsize=10)
 	flux_map_ax.plot((x0_vel-x0), (y0_vel-y0), '+', markersize=10, color = 'black')
 	flux_map_ax.plot((x0_morph-x0), (y0_morph-y0), '.', markersize=10, label = 'flux centroid', color = 'crimson')
 	flux_map_ax.legend(fontsize = 8, loc = 'lower right',borderaxespad = 2)
@@ -1082,6 +1085,9 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	flux_map_ax.axis('off')
 	_line_label = LINE_LABELS.get(line, line) if line else r'H$\alpha$'
 	flux_map_ax.set_title(_line_label + ' map', fontsize=10)
+	cax = inset_axes(flux_map_ax, width="30%", height="5%", loc="upper left", borderpad=0.5)
+	cbar = plt.colorbar(cp, cax=cax, orientation='horizontal')
+	cbar.ax.tick_params(labelsize=10)
 
 	flux_map_ax.plot((x0_vel - x0), (y0_vel - y0), '+', markersize=10, label='velocity centroid', color='black')
 	flux_map_ax.plot((x0_morph - x0), (y0_morph - y0), '.', markersize=10, label='flux centroid', color='crimson')
