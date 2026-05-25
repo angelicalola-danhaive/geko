@@ -714,9 +714,12 @@ class Grism:
 
 		Forward models the grism spectroscopy by:
 		1. Shifting wavelengths based on velocity field
-		2. Broadening by velocity dispersion and LSF
-		3. Convolving with spatial PSF in 3D cube space
+		2. Broadening by velocity dispersion
+		3. Convolving with 2D spatial PSF in 3D cube space
 		4. Collapsing to 2D grism spectrum
+
+		The 2D PSF handles spectral broadening in the dispersion direction;
+		no separate LSF term is applied (the empirical LSF is PSF-dominated).
 
 		Parameters
 		----------
@@ -727,7 +730,7 @@ class Grism:
 		D : jax.numpy.ndarray
 			2D velocity dispersion field in km/s (spatial y, spatial x)
 		use_lsf : bool, optional
-			If True, include LSF broadening (default: True)
+			Unused — retained for API compatibility.
 
 		Returns
 		-------
@@ -754,19 +757,9 @@ class Grism:
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
 		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
 
-		#set the effective dispersion which also accounts for the LSF
-		# use_lsf parameter is overridden by the instance attribute self.use_lsf
-		apply_lsf = use_lsf and self.use_lsf
-		if apply_lsf:
-			sigma_LSF = self.sigma_lsf
-			wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(sigma_LSF))
-		else:
-			# Apply minimum sigma floor to prevent numerical singularities in ideal mode
-			# A tiny floor (0.1 pixels worth of wavelength) prevents erf from having infinite slope
-			# Calculate wavelength spacing from wave_space array
-			delta_wave = jnp.mean(jnp.diff(self.wave_space))
-			min_sigma = 0.1 * delta_wave
-			wave_sigmas_eff = jnp.maximum(wave_sigmas, min_sigma)
+		# Velocity dispersion only — 2D PSF convolution handles spectral broadening
+		# in the dispersion direction, so no separate LSF term is needed.
+		wave_sigmas_eff = wave_sigmas
 
 		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
