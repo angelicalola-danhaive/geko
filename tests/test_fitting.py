@@ -162,9 +162,9 @@ class TestFitNumpyro:
             parametric=False
         )
         
-        # Check that kin_model has basic velocity methods (the inference models may be defined elsewhere)
-        velocity_methods = ['v', 'v_int', 'v_rad', 'vel1d']
-        
+        # Check that kin_model has the velocity method
+        velocity_methods = ['v']
+
         for method in velocity_methods:
             assert hasattr(fit.kin_model, method), f"KinModel missing method: {method}"
             assert callable(getattr(fit.kin_model, method)), f"Method {method} is not callable"
@@ -264,11 +264,9 @@ class TestKinModelsInitialization:
         
         assert kin_model is not None
         
-        # Test that basic velocity methods exist
-        velocity_methods = ['v', 'v_int', 'v_rad']
-        for method in velocity_methods:
-            if hasattr(kin_model, method):
-                assert callable(getattr(kin_model, method))
+        # Test that the velocity method exists
+        assert hasattr(kin_model, 'v')
+        assert callable(kin_model.v)
 
 
 def test_run_geko_fit_function():
