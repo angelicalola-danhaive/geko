@@ -74,7 +74,7 @@ The PSF convolution is the dominant computational cost. The PSF is applied as a 
 
 ### Adding a new rotation curve component
 
-1. Subclass `RotationCurveComponent` in `rotation_models.py`, define `_DEFAULT_PARAMETERS` and `rotation_curve(r, all_params)`.
+1. Subclass `RotationCurveComponent` in `rotation_models.py`, define `_DEFAULT_PARAMETERS`, `v_sq(r, all_params)`, and `velocity_sign(all_params)` (returns the sign of the rotation direction from one of the component's parameters).
 2. Register it in `COMPONENT_REGISTRY`.
 3. Use it by name in `FitConfiguration(rotation_components=['Arctan', 'MyComponent'])`.
 

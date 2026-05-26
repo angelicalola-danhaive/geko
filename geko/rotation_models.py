@@ -1,8 +1,8 @@
 """
 Rotation curve components and composite rotation curve for geko.
 
-Adding a new model: subclass RotationCurveComponent, define _DEFAULT_PARAMETERS
-and v_sq(), then add to COMPONENT_REGISTRY.
+Adding a new model: subclass RotationCurveComponent, define _DEFAULT_PARAMETERS,
+v_sq(), and velocity_sign(), then add to COMPONENT_REGISTRY.
 """
 
 __all__ = [
@@ -27,6 +27,11 @@ class RotationCurveComponent(BaseModel):
     @abstractmethod
     def v_sq(self, r_px: jnp.ndarray, all_params: dict) -> jnp.ndarray:
         """Return v²(r) contribution in (km/s)²."""
+        ...
+
+    @abstractmethod
+    def velocity_sign(self, all_params: dict) -> jnp.ndarray:
+        """Return the sign (±1) of the rotation direction from this component's parameters."""
         ...
 
     def sample(self, morph_params: dict) -> dict:
@@ -57,7 +62,10 @@ class CompositeRotationCurve:
     def rotation_curve(self, r_px: jnp.ndarray, all_params: dict) -> jnp.ndarray:
         # TODO: asymmetric drift correction using all_params['sigma0']
         v2 = sum(c.v_sq(r_px, all_params) for c in self.components)
-        return jnp.sqrt(jnp.clip(v2, 0.0))
+        sign = jnp.array(1.0)
+        for c in self.components:
+            sign = sign * c.velocity_sign(all_params)
+        return sign * jnp.sqrt(jnp.clip(v2, 0.0))
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +85,9 @@ class ArctanComponent(RotationCurveComponent):
     def v_sq(self, r_px: jnp.ndarray, all_params: dict) -> jnp.ndarray:
         v = all_params['Va'] * (2.0 / jnp.pi) * jnp.arctan(r_px / all_params['r_t'])
         return v ** 2
+
+    def velocity_sign(self, all_params: dict) -> jnp.ndarray:
+        return jnp.sign(all_params['Va'])
 
 
 COMPONENT_REGISTRY = {
