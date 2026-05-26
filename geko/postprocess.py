@@ -248,6 +248,8 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 		titles=corner_labels,
 		max_n_ticks=3,
 	)
+	corner.corner(data_matrix, fig=fig, color='royalblue',
+	              range=corner_ranges, **CORNER_KWARGS)
 
 	plt.tight_layout()
 	plt.savefig(save_runs_path + output + '/' + str(ID) + '_derived_corner.png',
