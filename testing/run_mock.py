@@ -657,13 +657,6 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	               'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min,
 	               'grism_object': grism_object, 'PSF': psf}
 
-	# Build rot_prior_overrides from truth values — model-driven param names
-	rot_prior_overrides = {}
-	for name, val in truth_rot_params.items():
-		width = max(abs(val) * 2.0, 100.0)
-		rot_prior_overrides[f'{name}_min'] = val - width
-		rot_prior_overrides[f'{name}_max'] = val + width
-
 	fit_config = FitConfiguration(
 	    rotation_components=fit_config.rotation_components,
 	    mcmc=MCMCSettings(num_chains=num_chains, num_warmup=num_warmup, num_samples=num_samples),
@@ -682,7 +675,6 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	        'sigma0_min': 0.0, 'sigma0_max': 600.0,
 	        'v0_mu': 0.0, 'v0_std': 200.0,
 	    },
-	    rot_prior_overrides=rot_prior_overrides,
 	)
 
 	inf_data, kin_model, grism_object, num_samples_out, z_spec = run_fit(mock_params, fit_config, parametric=parametric)
