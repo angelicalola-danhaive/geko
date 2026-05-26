@@ -596,7 +596,7 @@ def save_results(config_path, inf_data, z_spec, test, j, truth_rot_params, r_eff
 def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
              SN_image, SN_grism, n, psf, params_dict, params_single, res, save_folder,
              psf_mode='2d', num_chains=2, num_warmup=1000, num_samples=1000,
-             fit_config=None):
+             fit_config=None, inference_psf='2d'):
 	'''
 		Wrapper function to run the test for the mock data.
 		Model-agnostic: rotation params are read from params_dict by spec name,
@@ -615,6 +615,10 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 			custom config is how you test non-default rotation models. Prior overrides
 			and MCMC settings are derived from the config table / CLI args and will
 			override whatever is in the passed config. Defaults to FitConfiguration().
+		inference_psf : str, optional
+			PSF used for inference forward model. '2d' = same PSF as mock (default).
+			'rank1' = rank-1 SVD approximation of the mock PSF. Mock is always
+			generated with the full PSF; only the inference PSF is swapped.
 	'''
 	os.makedirs('testing/' + save_folder, exist_ok=True)
 
@@ -649,6 +653,19 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	print('Convolved mock image max pixel: ' + str(jnp.max(convolved_noise_image)))
 	print(f'Mock morphology centers: xc_morph={xc_morph_true}, yc_morph={yc_morph_true}')
 	print(f'Mock velocity field centers: x0_vel={x0_vel_true}, y0_vel={y0_vel_true}')
+
+	# Swap inference PSF if requested (mock was already generated with full PSF above)
+	if inference_psf == 'rank1':
+		psf_2d = np.array(grism_object.PSF[:, :, 0])
+		U, s, Vt = np.linalg.svd(psf_2d)
+		psf_r1 = s[0] * np.outer(U[:, 0], Vt[0, :])
+		psf_r1 = psf_r1 / psf_r1.sum()
+		grism_object.PSF = jnp.array(psf_r1)[:, :, jnp.newaxis]
+		rank1_var = float(s[0]**2 / np.sum(s**2)) * 100
+		print(f'Inference PSF: rank-1 SVD approximation  '
+		      f'(variance fraction {rank1_var:.2f}%, PSF shape {psf_r1.shape})')
+	else:
+		print(f'Inference PSF: full 2D PSF')
 
 	mock_params = {'test': test, 'j': j, 'convolved_noise_image': convolved_noise_image,
 	               'image_error': image_error, 'grism_spectrum_noise': grism_spectrum_noise,
