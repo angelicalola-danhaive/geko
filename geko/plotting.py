@@ -7,6 +7,7 @@ All the plotting related functions for the post-processing
 __all__ = ['plot_disk_summary', 'plot_pp_cornerplot']
 
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import corner
@@ -661,7 +662,11 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	veldisp_map_ax = fig.add_subplot(gs0[1,1])
 
-	veldisp_map_ax.pcolormesh(X, Y,model_dispersions, shading='nearest', cmap = 'RdBu_r', vmin = np.nanmin(model_velocities - velocites_center), vmax = np.nanmax(model_velocities - velocites_center))
+	vel_max = np.nanmax(np.abs(model_velocities - v0))
+	cmap_disp = matplotlib.colors.LinearSegmentedColormap.from_list(
+	    'RdBu_r_pos', plt.cm.RdBu_r(np.linspace(0.5, 1.0, 128)))
+	cp_disp = veldisp_map_ax.pcolormesh(X, Y, model_dispersions, shading='nearest',
+	                                     cmap=cmap_disp, vmin=0, vmax=vel_max)
 	# plt.xlabel(r'$\Delta$ RA ["]',fontsize = 5)
 	# plt.ylabel(r'$\Delta$ DEC ["]',fontsize = 5)
 	# veldisp_map_ax.tick_params(axis='both', which='major', labelsize=5)
@@ -677,8 +682,8 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 	veldisp_map_ax.text(0.2, 0.5, '0.5"', color = 'black', fontsize = 10, ha='center', va='center', rotation = 90, transform=veldisp_map_ax.transAxes)
 
 	cax = inset_axes(veldisp_map_ax, width="30%", height="5%", loc="upper right", borderpad=0.5)
-	cbar = plt.colorbar(cp, cax = cax, orientation='horizontal')
-	cbar.ax.tick_params(labelsize = 10)
+	cbar = plt.colorbar(cp_disp, cax=cax, orientation='horizontal')
+	cbar.ax.tick_params(labelsize=10)
 
 	veldisp_map_ax.add_patch(ellipse_re2)
 	if not is_ideal:
@@ -1052,9 +1057,11 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 
 	# Panel 2: Dispersion map
 	veldisp_map_ax = fig.add_subplot(gs0[n_obs, 1])
+	vel_max = np.nanmax(np.abs(model_velocities - v0))
+	cmap_disp = matplotlib.colors.LinearSegmentedColormap.from_list(
+	    'RdBu_r_pos', plt.cm.RdBu_r(np.linspace(0.5, 1.0, 128)))
 	veldisp_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, model_dispersions, shading='nearest',
-	                          cmap='RdBu_r', vmin=np.nanmin(model_velocities - velocites_center),
-	                          vmax=np.nanmax(model_velocities - velocites_center))
+	                          cmap=cmap_disp, vmin=0, vmax=vel_max)
 	veldisp_map_ax.axis('off')
 	veldisp_map_ax.set_title(r'$\sigma_0$ map', fontsize=10)
 
