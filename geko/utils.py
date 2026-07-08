@@ -38,6 +38,7 @@ from photutils.isophote import Ellipse, EllipseGeometry, Isophote
 from photutils.isophote import build_ellipse_model
 
 from skimage import color, data, restoration
+from skimage.transform import resize as sk_resize
 
 from matplotlib import pyplot as plt
 
@@ -401,43 +402,37 @@ def save_fits_image(image, masked_indices, inference_data, filename):
     
 def downsample_psf_centered(psf_full, size):
     """
-    Crop and downsample a PSF around its center.
+    Crop a PSF around its centre and downsample from 0.031 to 0.063 arcsec/px.
 
-    Extracts a centered region from the full PSF and downsamples it by a factor of 2.
+    The input PSF is at 2× detector oversampling (0.031 arcsec/px). The output
+    is at detector scale (0.063 arcsec/px), ready for compute_PSF which then
+    upsamples to model resolution.
 
     Parameters
     ----------
     psf_full : numpy.ndarray
-        Full PSF array (typically high-resolution)
+        Full PSF array at 0.031 arcsec/px (e.g. 669×669).
     size : int
-        Half-width of the region to extract (output will be (2*size+1, 2*size+1) before downsampling)
+        Half-width of the crop in input pixels; crop is (2*size+1, 2*size+1).
+        Output shape is approximately (size, size) after 2× downsampling.
 
     Returns
     -------
     numpy.ndarray
-        Downsampled PSF with shape approximately (size, size)
-
-    Notes
-    -----
-    The PSF is cropped symmetrically around its center before downsampling.
+        PSF at detector scale (0.063 arcsec/px), shape ≈ (size, size).
     """
-    psf_crop = np.array(psf_full[psf_full.shape[0]//2 - size:psf_full.shape[0]//2 + size + 1, \
-                                            psf_full.shape[1]//2 - size:psf_full.shape[1]//2 + size + 1])
-
-
-    #downsample the psf by a factor of 2
-    psf_downsampled = np.zeros(((psf_crop.shape[0]-1)//2 , (psf_crop.shape[0]-1)//2))
-
-    print(psf_downsampled.shape)
-    #each pixel in the downsized image is equal to the sum of its original pizel plus half of each of the 4 neighboring pixel
-    # for i in np.linspace(1, (psf_crop.shape[0]-1)//2, (psf_crop.shape[0]-1)//2):
-    #     for j in np.linspace(1, (psf_crop.shape[0]-1)//2, (psf_crop.shape[0]-1)//2):
-    i= jnp.linspace(0, (psf_crop.shape[0]-1)//2 -1, (psf_crop.shape[0]-1)//2).astype(int)
-    j= jnp.linspace(0, (psf_crop.shape[0]-1)//2 -1, (psf_crop.shape[0]-1)//2).astype(int)   
-    i,j = jnp.meshgrid(i,j)
-    psf_downsampled[i,j] = psf_crop[2*i + 1,2*j + 1] + 0.5*(psf_crop[2*i + 2,2*j + 1] + psf_crop[2*i,2*j + 1] + psf_crop[2*i + 1,2*j + 2] + psf_crop[2*i + 1,2*j])
-
-    return psf_downsampled
+    cy, cx = psf_full.shape[0] // 2, psf_full.shape[1] // 2
+    psf_crop = np.array(psf_full[cy - size:cy + size + 1,
+                                  cx - size:cx + size + 1])
+    # Target an odd output so there is an exact central pixel.
+    # size/(2*size+1) maps the input centre exactly to the output centre.
+    out_size = size if size % 2 == 1 else size - 1
+    # skimage.transform.resize uses pixel-centre coordinates (same convention as
+    # jax.image.resize used in compute_PSF), so the PSF peak maps exactly to the
+    # central output pixel. scipy.ndimage.zoom uses pixel-boundary coordinates and
+    # shifts the peak by ~0.3 px for this zoom factor.
+    return sk_resize(psf_crop, (out_size, out_size), order=1,
+                     anti_aliasing=False, preserve_range=True)
 
 def load_psf( filter, y_factor, size = 9, psf_folder = 'mpsf_gds/'):
     """

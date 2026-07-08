@@ -62,7 +62,14 @@ class DerivedQuantity:
 _CORNER_SAMPLED_PARAMS = ['sigma0']
 
 # Ordered by dependency: each entry may use results from earlier entries.
+# v_re is computed by utils.add_v_re before this loop runs; the entry here is
+# a pass-through so that v_re is included in summarize_posterior automatically.
 DERIVED_QUANTITIES = [
+	DerivedQuantity(
+		name='v_re',
+		label=r'$v_{re}$ [km/s]',
+		compute=lambda post, ctx: post['v_re'],
+	),
 	DerivedQuantity(
 		name='r_eff_pc',
 		label=r'$r_e$ [pc]',
