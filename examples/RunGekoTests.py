@@ -111,7 +111,26 @@ if __name__ == "__main__":
 	from geko.param_spec import all_param_specs
 	from geko.postprocess import DERIVED_QUANTITIES
 	from geko.config import FitConfiguration
+	import copy
 	_default_cfg = FitConfiguration(rotation_components=['Arctan'], morphology_model='Sersic')
+
+	# Prior tests: the config table encodes the PRIOR CENTRE for each row, not the truth.
+	# Mock data is always generated from a fixed standard galaxy; only the prior moves.
+	#   prior_test1/3 → vary r_eff and r_t prior centre  (truth: r_eff=4.19, r_t=1.0, n=1.0)
+	#   prior_test2/4 → vary n prior centre               (truth: r_eff=4.19, r_t=1.0, n=1.0)
+	_PRIOR_TEST_TRUTH = {'r_eff': 4.19, 'r_t': 1.0, 'n': 1.0}
+	is_prior_test = test.startswith('prior_test')
+	if is_prior_test:
+		print(f'Prior test detected: mock truth fixed at {_PRIOR_TEST_TRUTH}; '
+		      f'config table values are used as prior centres.')
+		# Keep originals as prior-centre arrays, then fix truth in params_dict and n
+		_prior_r_eff = params_dict['r_eff'].copy()
+		_prior_r_t   = params_dict['r_t'].copy()
+		_prior_n     = n.copy()
+		params_dict  = copy.copy(params_dict)
+		params_dict['r_eff'] = np.full_like(params_dict['r_eff'], _PRIOR_TEST_TRUTH['r_eff'])
+		params_dict['r_t']   = np.full_like(params_dict['r_t'],   _PRIOR_TEST_TRUTH['r_t'])
+		n = np.full_like(n, _PRIOR_TEST_TRUTH['n'])
 	_gm = GalaxyModel((31, 31), 5, rot_model=_default_cfg.build_rot_model())
 	_specs = all_param_specs(_gm.morph_model, _gm.shared_kin_specs, _gm.rot_model)
 	params_single = [s.name for s in _specs if not s.fixed] + [dq.name for dq in DERIVED_QUANTITIES]
@@ -144,11 +163,25 @@ if __name__ == "__main__":
 
 		if n[j] is None or not np.isfinite(float(n[j])) or n[j] <= 0:
 			n[j] = 1
+
+		if is_prior_test:
+			# Build per-iteration config with prior centres from the original table values
+			iter_cfg = FitConfiguration(
+			    rotation_components=_default_cfg.rotation_components,
+			    morph_prior_overrides={
+			        'r_eff_mu': float(_prior_r_eff[j]),
+			        'r_eff_std': float(max(3.0, _prior_r_eff[j])),
+			        'n_mu': float(_prior_n[j]),
+			    },
+			)
+		else:
+			iter_cfg = _default_cfg
+
 		run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 		         SN_image, SN_grism, n, psf, params_dict, params_single, res,
 		         save_folder=save_folder, psf_mode=psf_mode,
 		         num_chains=num_chains, num_warmup=num_warmup, num_samples=num_samples,
-		         fit_config=_default_cfg, inference_psf=inference_psf,
+		         fit_config=iter_cfg, inference_psf=inference_psf,
 		         inference_lsf=inference_lsf)
 
 		

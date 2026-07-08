@@ -298,18 +298,14 @@ def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN
 
 	# Configure PSF and LSF settings for ideal vs realistic mode
 	if ideal:
-		# Ideal mode: PSF already set from RunGekoTests (sigma=0.5 pix, 11x11 grid)
-		# Only need to set idealized LSF: better than real instrument but not too sharp
-		# Real instrument LSF sigma ~ 0.003 microns, use 0.001 microns (3x better)
 		grism_object.sigma_lsf = 0.0002
 		grism_object.use_psf = True
-		grism_object.use_lsf = True
-		print(f'Ideal mode: Using idealized PSF from RunGekoTests and LSF (sigma={grism_object.sigma_lsf} um)')
+		grism_object.use_lsf = False   # mock is always LSF-free
+		print(f'Ideal mode: Using idealized PSF (sigma={grism_object.sigma_lsf} um, no LSF in mock)')
 	else:
-		# Realistic mode: use instrument PSF and LSF
 		grism_object.use_psf = True
-		grism_object.use_lsf = True
-		print(f'Realistic mode: Using instrument PSF and LSF')
+		grism_object.use_lsf = False   # mock is always LSF-free
+		print(f'Realistic mode: Using instrument PSF, no LSF in mock')
 
 	# Modify PSF for 1D mode — applies to both mock and inference (self-consistent)
 	if psf_mode == '1d':
@@ -596,7 +592,7 @@ def save_results(config_path, inf_data, z_spec, test, j, truth_rot_params, r_eff
 def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
              SN_image, SN_grism, n, psf, params_dict, params_single, res, save_folder,
              psf_mode='2d', num_chains=2, num_warmup=1000, num_samples=1000,
-             fit_config=None, inference_psf='2d'):
+             fit_config=None, inference_psf='2d', inference_lsf=False):
 	'''
 		Wrapper function to run the test for the mock data.
 		Model-agnostic: rotation params are read from params_dict by spec name,
@@ -674,26 +670,36 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	               'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min,
 	               'grism_object': grism_object, 'PSF': psf}
 
+	# Build default priors from params_dict, then merge any overrides from the
+	# passed fit_config on top (passed overrides win). For most tests fit_config
+	# has empty dicts so this is a no-op; prior tests use it to set prior centres
+	# independently of the truth values used for mock generation.
+	_morph_defaults = {
+	    'PA_morph_mu': PA_image[j], 'PA_morph_std': 5.0,
+	    'r_eff_mu': r_eff_true, 'r_eff_std': float(max(3.0, r_eff_true)),
+	    'r_eff_min': 0.0, 'r_eff_max': 15.0,
+	    'n_mu': float(n[j]), 'n_std': 1.0, 'n_min': 0.36, 'n_max': 8.0,
+	    'amplitude_mu': 200.0, 'amplitude_std': 40.0, 'amplitude_min': 0.0,
+	    'xc_morph_mu': 15.0, 'xc_morph_std': 1.0,
+	    'yc_morph_mu': 15.0, 'yc_morph_std': 1.0,
+	}
+	_geom_defaults = {
+	    'PA_mu': PA_image[j], 'PA_std': 10.0,
+	    'i_mu': float(i[j]), 'i_std': 5.0,
+	    'sigma0_min': 0.0, 'sigma0_max': 600.0,
+	    'v0_mu': 0.0, 'v0_std': 200.0,
+	}
+	_morph_defaults.update(fit_config.morph_prior_overrides)
+	_geom_defaults.update(fit_config.geom_prior_overrides)
+
 	fit_config = FitConfiguration(
 	    rotation_components=fit_config.rotation_components,
 	    mcmc=MCMCSettings(num_chains=num_chains, num_warmup=num_warmup, num_samples=num_samples),
-	    morph_prior_overrides={
-	        'PA_morph_mu': PA_image[j], 'PA_morph_std': 5.0,
-	        'r_eff_mu': r_eff_true, 'r_eff_std': float(max(3.0, r_eff_true)),
-	        'r_eff_min': 0.0, 'r_eff_max': 15.0,
-	        'n_mu': float(n[j]), 'n_std': 1.0, 'n_min': 0.36, 'n_max': 8.0,
-	        'amplitude_mu': 200.0, 'amplitude_std': 40.0, 'amplitude_min': 0.0,
-	        'xc_morph_mu': 15.0, 'xc_morph_std': 1.0,
-	        'yc_morph_mu': 15.0, 'yc_morph_std': 1.0,
-	    },
-	    geom_prior_overrides={
-	        'PA_mu': PA_image[j], 'PA_std': 10.0,
-	        'i_mu': float(i[j]), 'i_std': 5.0,
-	        'sigma0_min': 0.0, 'sigma0_max': 600.0,
-	        'v0_mu': 0.0, 'v0_std': 200.0,
-	    },
+	    morph_prior_overrides=_morph_defaults,
+	    geom_prior_overrides=_geom_defaults,
 	)
 
+	mock_params['grism_object'].use_lsf = inference_lsf
 	inf_data, kin_model, grism_object, num_samples_out, z_spec = run_fit(mock_params, fit_config, parametric=parametric)
 	num_samples = num_samples_out
 
