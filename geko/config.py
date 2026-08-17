@@ -2,10 +2,31 @@
 Configuration system for geko fitting parameters.
 """
 
-__all__ = ["FitConfiguration", "MCMCSettings"]
+__all__ = ["FitConfiguration", "MCMCSettings", "FluxScalingConfig"]
 
 from dataclasses import dataclass, field, asdict
 import yaml
+
+
+@dataclass
+class FluxScalingConfig:
+    """Configuration for non-parametric intrinsic flux scaling.
+
+    Parameters
+    ----------
+    mode : str
+        'row_wise' — analytical S(y) rescaling in the grism plane (no extra parameters).
+        'pixel_wise' — sampled 2D log-scale map in the galaxy frame with smoothness regularisation.
+    sigma_reg : float
+        Prior width on each log-scale pixel (pixel_wise only). Controls how far each
+        pixel's scale can deviate from 1. Default 0.3 (~30% amplitude freedom).
+    sigma_smooth : float
+        Width of the smoothness penalty on adjacent-pixel differences (pixel_wise only).
+        Smaller values enforce smoother scale maps. Should be <= sigma_reg. Default 0.1.
+    """
+    mode: str = 'pixel_wise'
+    sigma_reg: float = 0.3
+    sigma_smooth: float = 0.1
 
 
 @dataclass
@@ -68,6 +89,7 @@ class FitConfiguration:
     rot_prior_overrides: dict = field(default_factory=dict)
     geom_prior_overrides: dict = field(default_factory=dict)
     fixed_params: dict = field(default_factory=dict)
+    flux_scaling: FluxScalingConfig = None
 
     def build_rot_model(self, z_spec=None):
         """Build a CompositeRotationCurve from rotation_components.
@@ -125,6 +147,10 @@ class FitConfiguration:
             print(f"  geom_prior_overrides:  {self.geom_prior_overrides}")
         if self.fixed_params:
             print(f"  fixed_params:          {self.fixed_params}")
+        if self.flux_scaling is not None:
+            print(f"  flux_scaling:          mode={self.flux_scaling.mode}, "
+                  f"sigma_reg={self.flux_scaling.sigma_reg}, "
+                  f"sigma_smooth={self.flux_scaling.sigma_smooth}")
         print(f"\nMCMC Settings:")
         for f_name in ('num_chains', 'num_warmup', 'num_samples',
                        'target_accept_prob', 'max_tree_depth', 'step_size'):
@@ -141,6 +167,7 @@ class FitConfiguration:
             'rot_prior_overrides': self.rot_prior_overrides,
             'geom_prior_overrides': self.geom_prior_overrides,
             'fixed_params': self.fixed_params,
+            'flux_scaling': asdict(self.flux_scaling) if self.flux_scaling is not None else None,
             'mcmc': asdict(self.mcmc),
             '_metadata': {
                 'geko_version': '2.0.0',
@@ -167,6 +194,9 @@ class FitConfiguration:
         d.pop('_metadata', None)
         mcmc_dict = d.pop('mcmc', {})
 
+        fs_dict = d.get('flux_scaling', None)
+        fs = FluxScalingConfig(**fs_dict) if fs_dict is not None else None
+
         cfg = cls(
             morphology_model=d.get('morphology_model', 'Sersic'),
             rotation_components=d.get('rotation_components', ['Arctan']),
@@ -174,6 +204,7 @@ class FitConfiguration:
             rot_prior_overrides=d.get('rot_prior_overrides', {}),
             geom_prior_overrides=d.get('geom_prior_overrides', {}),
             fixed_params=d.get('fixed_params', {}),
+            flux_scaling=fs,
         )
         if mcmc_dict:
             cfg.mcmc = MCMCSettings(**mcmc_dict)

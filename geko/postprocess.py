@@ -273,7 +273,7 @@ def process_results(output, master_cat, line, mock_params=None, test=None,
                     field=None, grism_filter='F444W', delta_wave_cutoff=0.02,
                     factor=5, wave_factor=10, model_name='Disk',
                     manual_psf_name=None, manual_grism_file=None,
-                    sigma0_floor=20.0):
+                    sigma0_floor=20.0, flux_scaling=None):
 	"""Post-process single-observation inference data and save all outputs."""
 	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = \
 		pre.run_full_preprocessing(
@@ -291,11 +291,48 @@ def process_results(output, master_cat, line, mock_params=None, test=None,
 		inf_data = az.InferenceData.from_netcdf(
 			'testing/' + str(test) + '/' + str(test) + '_' + str(j) + '_output')
 
+	# Save S/N mask image (once, for diagnostics)
+	if flux_scaling is not None and flux_scaling.mode == 'row_wise':
+		import numpy as np
+		sn_mask = np.abs(np.array(obs_map)) / np.array(obs_error) > 1.0
+		fig, ax = plt.subplots(figsize=(5, 4))
+		ax.imshow(sn_mask, origin='lower', cmap='gray_r', vmin=0, vmax=1)
+		ax.set_title('S/N > 1 mask (row-wise scaling)')
+		ax.set_xlabel('wavelength'); ax.set_ylabel('spatial')
+		plt.tight_layout()
+		plt.savefig(save_runs_path + output + '/' + str(ID) + '_sn_mask.png', dpi=150)
+		plt.close()
+
 	data = fit.Fit_Numpyro(obs_map=obs_map, obs_error=obs_error,
 	                        grism_object=grism_object, kin_model=kin_model,
 	                        inference_data=inf_data, parametric=parametric)
+	kin_model.flux_scaling = flux_scaling
 	inf_data, model_map, model_flux, fluxes_mean, model_velocities, model_dispersions = \
-		kin_model.compute_model(inf_data, grism_object, parametric)
+		kin_model.compute_model(inf_data, grism_object, parametric,
+		                        obs_map=obs_map, obs_error=obs_error)
+
+	# Save posterior-mean pixel-wise scale map
+	if flux_scaling is not None and flux_scaling.mode == 'pixel_wise':
+		if 'log_intrinsic_scale' in inf_data.posterior:
+			import numpy as np
+			log_s = np.array(inf_data.posterior['log_intrinsic_scale'].median(dim=['chain', 'draw']))
+			scale_map = np.exp(log_s)
+			vmax = np.percentile(np.abs(log_s), 99)
+			fig, axes = plt.subplots(1, 2, figsize=(10, 4))
+			im0 = axes[0].imshow(log_s, origin='lower', cmap='RdBu_r',
+			                     vmin=-vmax, vmax=vmax)
+			axes[0].set_title('log scale map (posterior median)')
+			plt.colorbar(im0, ax=axes[0])
+			im1 = axes[1].imshow(scale_map, origin='lower', cmap='RdBu_r',
+			                     vmin=1/np.exp(vmax), vmax=np.exp(vmax))
+			axes[1].set_title('scale map exp(log s)')
+			plt.colorbar(im1, ax=axes[1])
+			for ax in axes:
+				ax.set_xlabel('x'); ax.set_ylabel('y')
+			plt.tight_layout()
+			plt.savefig(save_runs_path + output + '/' + str(ID) + '_scale_map.png', dpi=150)
+			plt.close()
+			np.save(save_runs_path + output + '/' + str(ID) + '_scale_map.npy', scale_map)
 
 	index_min = grism_object.index_min
 	index_max = grism_object.index_max

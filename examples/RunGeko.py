@@ -10,6 +10,7 @@ Run from your project directory:
     python examples/RunGeko.py --out_folder MyRuns --start 0 --end 10
 """
 from geko.fitting import run_geko_fit
+from geko.config import FluxScalingConfig
 import geko.config as config
 import numpyro
 
@@ -63,12 +64,26 @@ ROT_PRIOR_OVERRIDES = {}
 # Fix inclination to a known value:
 #   FIXED_PARAMS = {'i': 60.0}
 
-FIXED_PARAMS = {}
-# Example: tie velocity centroids to morphological centroids (removes 2 free parameters)
-# FIXED_PARAMS = {
-#     'x0_vel': 'xc_morph',
-#     'y0_vel': 'yc_morph',
-# }
+FIXED_PARAMS = {
+    'x0_vel': 'xc_morph',
+    'y0_vel': 'yc_morph',
+}
+
+# ============================================================================
+# FLUX SCALING — set to None to disable (default Sérsic-only model)
+#
+# 'row_wise'  : analytical per-row S(y) rescaling in the grism plane.
+#               No extra sampled parameters. Only pixels with S/N > 1 contribute.
+#               Use this to reduce sensitivity to non-Sérsic emission structure.
+#
+# 'pixel_wise': sampled 2D log-scale map in the galaxy frame (image_shape × image_shape
+#               free parameters) with smoothness regularisation.
+#               sigma_reg   — prior width per pixel (scale freedom, ~30% per pixel)
+#               sigma_smooth — smoothness penalty between adjacent pixels (smaller = smoother)
+#
+# FLUX_SCALING = FluxScalingConfig(mode='row_wise')
+FLUX_SCALING = FluxScalingConfig(mode='pixel_wise', sigma_reg=0.5, sigma_smooth=0.1)
+# ============================================================================
 
 # Model selection — change these lines to switch rotation/morphology model
 # Supported rotation components: 'Arctan' (more to come)
@@ -86,7 +101,8 @@ print("=" * 60)
 
 def create_geko_config(num_chains, num_warmup, num_samples,
                        morph_overrides=None, geom_overrides=None, rot_overrides=None,
-                       fixed_params=None, rotation_components=None, morphology_model=None):
+                       fixed_params=None, rotation_components=None, morphology_model=None,
+                       flux_scaling=None):
     """Create a FitConfiguration from override dicts."""
     return config.FitConfiguration(
         mcmc=config.MCMCSettings(
@@ -100,6 +116,7 @@ def create_geko_config(num_chains, num_warmup, num_samples,
         geom_prior_overrides=geom_overrides or {},
         rot_prior_overrides=rot_overrides or {},
         fixed_params=fixed_params or {},
+        flux_scaling=flux_scaling,
     )
 
 #command line inputs
@@ -120,6 +137,8 @@ parser.add_argument('--num_warmup', type=int, default=500,
 						help = 'number of warmup steps for each chain')
 parser.add_argument('--num_samples', type=int, default=500,
 						help = 'number of samples to draw from each chain after warmup')
+parser.add_argument('--overwrite', action='store_true', default=False,
+						help = 'overwrite existing results files instead of skipping')
 
 if __name__ == "__main__":
 	args = parser.parse_args()
@@ -140,8 +159,9 @@ if __name__ == "__main__":
 		print(f"End index {end} exceeds the number of IDs in the catalog {catalog['ID'].shape[0]}. Adjusting to the maximum available index.")
 		end = catalog['ID'].shape[0] -1
 
-	list_IDs = catalog['ID'].data[start:end]
-	sample = catalog['sample'].data[start:end]
+	os.makedirs(out_folder, exist_ok=True)
+	list_IDs = [191250]
+	sample = None  # not used when running a fixed ID list
 
 	for output in list_IDs:
 		try:
@@ -151,7 +171,7 @@ if __name__ == "__main__":
 			#check if that galaxy has already been run
 			out_file = out_folder + str(output_id) + '_results'
 			#if the outfile already exists, skip this ID
-			if os.path.exists(out_file):
+			if os.path.exists(out_file) and not args.overwrite:
 				print(f"Skipping ID {output_id} as results file already exists: {out_file}")
 				continue
 
@@ -165,20 +185,28 @@ if __name__ == "__main__":
 			# 	print(f"Skipping ID {output_id} as it is not in the 'gold' sample.")
 			# 	continue
 
-			field_value = match['field'][0]
-			print('Field value for ID {}: {}'.format(output_id, field_value))
+			field_raw = match['field'][0]
 
-			# Choose catalog  # SURVEY-SPECIFIC: map your field names to master catalog paths
-			if field_value in ['GOODS-S-FRESCO', 'GDN-FRESCO']:
+			# Choose catalog based on survey (use raw catalog value)
+			if 'FRESCO' in field_raw:
 				master_cat = 'catalogs/fresco_Ha_cat.txt'
 			else:
 				master_cat = 'catalogs/congress_Ha_cat'
+
+			# Map catalog field names to geko-expected field names
+			field_map = {
+				'GDN-CONGRESS':  'GOODS-N-CONGRESS',
+				'GDN-FRESCO':    'GOODS-N',
+				'GOODS-N':       'GOODS-N',
+			}
+			field_value = field_map.get(field_raw, field_raw)
+			print('Field value for ID {}: {} -> {}'.format(output_id, field_raw, field_value))
 
 			# Get redshift from catalog (try different possible column names)
 			redshift = None
 			possible_z_columns = ['z_spec', 'redshift', 'z', 'zspec', 'z_phot']
 			for col in possible_z_columns:
-				if col in match.colnames and not match[col].mask[0]:  # Check if column exists and is not masked
+				if col in match.colnames and not (hasattr(match[col], 'mask') and match[col].mask[0]):
 					redshift = float(match[col][0])
 					break
 			
@@ -197,7 +225,11 @@ if __name__ == "__main__":
 				fixed_params=FIXED_PARAMS,
 				rotation_components=ROTATION_COMPONENTS,
 				morphology_model=MORPHOLOGY_MODEL,
+				flux_scaling=FLUX_SCALING,
 			)
+
+			grism_filter = 'F444W' if redshift >= 5.1 else 'F356W'
+			print(f'Grism filter auto-detected: {grism_filter} (z={redshift:.3f})')
 
 			print('Running geko for galaxy ID: ', output_id, ' with line: ', line, ' redshift: ', redshift)
 			print('Master catalog: ', master_cat, ' parametric: ', parametric)
@@ -210,7 +242,7 @@ if __name__ == "__main__":
 			run_geko_fit(str(output) + '/', master_cat, line, parametric=parametric,
 						 save_runs_path=out_folder, num_chains=num_chains, num_warmup=num_warmup,
 						 num_samples=num_samples, source_id=output_id, field=field_value,
-						 config=fit_config)
+						 grism_filter=grism_filter, config=fit_config)
 			plt.close('all')
 		except Exception as e:
 			print(f"Error processing ID {output_id}: {e}")

@@ -13,6 +13,7 @@ Run from your project directory:
     python examples/RunGekoMulti.py --multi_obs_catalog my_catalog.txt --out_folder MyMultiRuns
 """
 from geko.fitting import run_geko_fit_multi, run_geko_fit
+from geko.config import FluxScalingConfig
 import geko.config as config
 import numpyro
 
@@ -91,6 +92,24 @@ FIXED_PARAMS = {}
 #     'y0_vel': 'yc_morph',
 # }
 
+# ============================================================================
+# FLUX SCALING — set to None to disable (default Sérsic-only model)
+#
+# 'row_wise'  : analytical per-row S(y) rescaling in the grism plane.
+#               No extra sampled parameters. Only pixels with S/N > 1 contribute.
+#               Use this to reduce sensitivity to non-Sérsic emission structure.
+#
+# 'pixel_wise': sampled 2D log-scale map in the galaxy frame (image_shape × image_shape
+#               free parameters) with smoothness regularisation. Scale is shared across
+#               all observations and rotated into each observation's frame.
+#               sigma_reg   — prior width per pixel (scale freedom, ~30% per pixel)
+#               sigma_smooth — smoothness penalty between adjacent pixels (smaller = smoother)
+#
+# FLUX_SCALING = FluxScalingConfig(mode='row_wise')
+# FLUX_SCALING = FluxScalingConfig(mode='pixel_wise', sigma_reg=0.3, sigma_smooth=0.1)
+FLUX_SCALING = None
+# ============================================================================
+
 # Model selection — change these lines to switch rotation/morphology model
 # Supported rotation components: 'Arctan' (more to come)
 # Supported morphology models:   'Sersic' (more to come)
@@ -107,7 +126,8 @@ print("=" * 60)
 
 def create_geko_config(num_chains, num_warmup, num_samples,
                        morph_overrides=None, geom_overrides=None, rot_overrides=None,
-                       fixed_params=None, rotation_components=None, morphology_model=None):
+                       fixed_params=None, rotation_components=None, morphology_model=None,
+                       flux_scaling=None):
     """Create a FitConfiguration from override dicts."""
     return config.FitConfiguration(
         mcmc=config.MCMCSettings(
@@ -121,6 +141,7 @@ def create_geko_config(num_chains, num_warmup, num_samples,
         geom_prior_overrides=geom_overrides or {},
         rot_prior_overrides=rot_overrides or {},
         fixed_params=fixed_params or {},
+        flux_scaling=flux_scaling,
     )
 
 
@@ -226,8 +247,9 @@ if __name__ == "__main__":
                         continue
 
             if redshift is None:
-                print(f"Warning: No redshift found for ID {output_id}, using default z=3.0")
-                redshift = 3.0
+                print(f"Warning: No redshift found for ID {output_id}, skipping this galaxy.")
+                #break  # or continue, depending on whether you want to skip this galaxy
+                continue  # Skip this galaxy if no redshift is found
 
             # Build observations_config list from catalog rows
             observations_config = []
@@ -253,6 +275,7 @@ if __name__ == "__main__":
                 fixed_params=FIXED_PARAMS,
                 rotation_components=ROTATION_COMPONENTS,
                 morphology_model=MORPHOLOGY_MODEL,
+                flux_scaling=FLUX_SCALING,
             )
 
             print(f'Running multi-observation geko for galaxy ID: {output_id}')

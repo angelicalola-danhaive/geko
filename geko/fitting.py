@@ -599,6 +599,10 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
         #raise non-parametric fitting not implemented error
         raise ValueError("Non-parametric fitting is not implemented yet. Please set --parametric to True to use the parametric fitting.")
 
+    # Wire flux scaling: explicit argument takes precedence over config
+    _flux_scaling = flux_scaling if flux_scaling is not None else (cfg.flux_scaling if cfg is not None else None)
+    kin_model.flux_scaling = _flux_scaling
+
     # ----------------------------------------------------------running the inference------------------------------------------------------------------------
 
     run_fit = Fit_Numpyro(obs_map=obs_map, obs_error=obs_error, grism_object=grism_object, kin_model=kin_model, inference_data=None, parametric=parametric, config=config)
@@ -624,7 +628,8 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
         output, master_cat, line, parametric=parametric, ID=source_id, save_runs_path=save_runs_path,
         field=field, grism_filter=grism_filter, delta_wave_cutoff=delta_wave_cutoff,
         factor=factor, wave_factor=wave_factor, model_name=model_name,
-        manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file)
+        manual_psf_name=manual_psf_name, manual_grism_file=manual_grism_file,
+        flux_scaling=_flux_scaling)
 
     return inf_data
 
@@ -632,7 +637,7 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 def run_geko_fit_multi(observations_config, output, master_cat, line, parametric, save_runs_path,
                        num_chains, num_warmup, num_samples, source_id, field, grism_filter='F444W',
                        delta_wave_cutoff=0.02, factor=5, wave_factor=9, model_name='Disk', config=None,
-                       manual_psf_name=None, manual_pysersic_file=None, step_size=0.1,
+                       flux_scaling=None, manual_psf_name=None, manual_pysersic_file=None, step_size=0.1,
                        adapt_step_size=True, target_accept_prob=0.8):
     """
     Run geko multi-observation fitting for multiple grism observations.
@@ -797,17 +802,29 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
         # Build rotation model from config (raises NotImplementedError for unknown components)
         kin_model.galaxy_model.rot_model = cfg.build_rot_model(z_spec)
 
-        # Set priors: PySersic first (if available), then config overrides always applied on top
+        # Set priors: PySersic first (if available), then config overrides always applied on top.
+        # theta_rot=0.0 keeps the shared prior in the true sky/imaging frame (matching PySersic's
+        # own frame) -- each observation's adjust_for_observation() call below then does the one
+        # correct rotation into that observation's real frame. Passing observations_config[0]'s
+        # real theta_rot here instead (as this used to) double-rotates every observation, since
+        # the per-observation loop always applies its own theta_rot on top of it. The single-obs
+        # path (inference_model_parametric) avoids this by explicitly using theta_rot=0.0 for its
+        # one GrismObservation, relying on the prior alone -- this makes the multi-obs prior setup
+        # consistent with that.
         if pysersic_available:
             kin_model.galaxy_model.set_parametric_priors(
                 pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
-                delta_wave, theta_rot=theta_rot_ref, shape=obs_map_ref.shape[0]
+                delta_wave, theta_rot=0.0, shape=obs_map_ref.shape[0]
             )
         else:
             print("\nUsing config priors (no PySersic file available)...")
         kin_model.galaxy_model.apply_config_overrides(cfg)
     else:
         raise ValueError("Non-parametric fitting is not implemented yet. Please set parametric=True.")
+
+    # Wire flux scaling: explicit argument takes precedence over config
+    _flux_scaling = flux_scaling if flux_scaling is not None else (cfg.flux_scaling if cfg is not None else None)
+    kin_model.flux_scaling = _flux_scaling
 
     # Create GrismObservation objects for all observations
     print(f"\nCreating {len(observations_config)} GrismObservation objects...")

@@ -567,6 +567,7 @@ class GrismFitter(KinModels):
 		print('GrismFitter created')
 		self.var_names = []
 		self.labels = []
+		self.flux_scaling = None
 
 	def set_bounds(self, im_shape, factor, wave_factor, x0, x0_vel, y0, y0_vel):
 		"""
@@ -703,6 +704,17 @@ class GrismFitter(KinModels):
 		center = (image_shape - 1) / 2
 		n_obs = len(observations)
 
+		# Sample pixel-wise log-scale map ONCE in galaxy frame (shared across all observations)
+		if self.flux_scaling is not None and self.flux_scaling.mode == 'pixel_wise':
+			log_s_gal = numpyro.sample(
+				'log_intrinsic_scale',
+				dist.Normal(0.0, self.flux_scaling.sigma_reg).expand([image_shape, image_shape])
+			)
+			numpyro.factor('log_scale_smooth_rows',
+				-0.5 * jnp.sum((jnp.diff(log_s_gal, axis=0) / self.flux_scaling.sigma_smooth) ** 2))
+			numpyro.factor('log_scale_smooth_cols',
+				-0.5 * jnp.sum((jnp.diff(log_s_gal, axis=1) / self.flux_scaling.sigma_smooth) ** 2))
+
 		# Loop over observations and compute likelihood for each
 		for idx, (obs, mask) in enumerate(zip(observations, masks)):
 
@@ -747,6 +759,11 @@ class GrismFitter(KinModels):
 
 			fluxes_high = self.galaxy_model.generate_flux_map(morph_params_obs, shared_params)
 
+			# Apply pixel-wise intrinsic flux scaling (galaxy frame, rotated per observation)
+			if self.flux_scaling is not None and self.flux_scaling.mode == 'pixel_wise':
+				log_s_high = utils.rotate_and_upsample_scale(log_s_gal, theta_rot_rad, obs.grism.factor)
+				fluxes_high = fluxes_high * jnp.exp(log_s_high)
+
 			# Build velocity coordinate grids using direct high-res method (Gemini's suggestion)
 			X_grid = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape * obs.grism.factor)
 			Y_grid = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape * obs.grism.factor)
@@ -769,6 +786,30 @@ class GrismFitter(KinModels):
 				mask == 1, obs.obs_error, 1e6
 			)
 
+			# Apply row-wise analytical S(y) rescaling in the grism plane
+			if self.flux_scaling is not None and self.flux_scaling.mode == 'row_wise':
+				# Per-row signal mask — data-only constant during sampling.
+				# Strategy: identify wavelength columns where the galaxy emits by finding
+				# columns whose column-summed S/N exceeds mean+std, then compute the
+				# row-restricted S/N only over those signal columns.  This avoids diluting
+				# compact edge-row emission (bright in a few wavelength pixels) by the
+				# many sky-wavelength pixels that inflate the full-row sum.
+				n_cols = obs.obs_map.shape[1]
+				col_sn = jnp.sum(obs.obs_map / obs_error_masked, axis=0)
+				signal_cols = col_sn > (jnp.mean(col_sn) + jnp.std(col_sn))
+				n_sig_cols = jnp.maximum(jnp.sum(signal_cols.astype(float)), 1.0)
+				row_restricted_sn = jnp.sum(
+					jnp.where(signal_cols[None, :], obs.obs_map / obs_error_masked, 0.0), axis=1)
+				row_above = row_restricted_sn > 3.0 * jnp.sqrt(n_sig_cols)
+				cum_fwd = jnp.cumsum(row_above) > 0
+				cum_bwd = jnp.cumsum(row_above[::-1])[::-1] > 0
+				row_has_signal = cum_fwd & cum_bwd
+				inv_var = 1.0 / obs_error_masked ** 2
+				num_y = jnp.sum(inv_var * obs.obs_map * model_map, axis=1)   # (n_y,)
+				den_y = jnp.sum(inv_var * model_map ** 2, axis=1)             # (n_y,)
+				S_y = jnp.where(row_has_signal & (den_y > 0), num_y / jnp.where(den_y > 0, den_y, 1.0), 1.0)
+				model_map = model_map * S_y[:, None]
+
 			# Add likelihood for this observation
 			numpyro.sample(
 				f'obs_{obs.name}',
@@ -776,10 +817,13 @@ class GrismFitter(KinModels):
 				obs=obs.obs_map
 			)
 
-	def compute_model_parametric(self, inference_data, grism_object):
+	def compute_model_parametric(self, inference_data, grism_object, obs_map=None, obs_error=None):
 		"""
 
-		Function used to post-process the MCMC samples and plot results from the model
+		Function used to post-process the MCMC samples and plot results from the model.
+
+		obs_map and obs_error are optional; required only when flux_scaling.mode == 'row_wise'
+		to apply the analytical S(y) rescaling to the posterior-mean model.
 
 		"""
 
@@ -821,6 +865,16 @@ class GrismFitter(KinModels):
 		self.ellip_mean = gm.ellip_mean; self.ellip_16 = gm.ellip_16; self.ellip_84 = gm.ellip_84
 		self.model_flux = self.fluxes_mean_high
 
+		# Apply pixel-wise scaling at posterior mean (single-obs: theta_rot = 0)
+		if self.flux_scaling is not None and self.flux_scaling.mode == 'pixel_wise':
+			if 'log_intrinsic_scale' in inference_data.posterior:
+				log_s_gal = jnp.array(
+					inference_data.posterior['log_intrinsic_scale'].median(dim=["chain", "draw"])
+				)
+				log_s_high = utils.rotate_and_upsample_scale(log_s_gal, 0.0, grism_object.factor)
+				self.model_flux = self.model_flux * jnp.exp(log_s_high)
+				self.fluxes_mean = utils.resample(self.model_flux, grism_object.factor, grism_object.factor)
+
 		image_shape =  self.im_shape[0]
 		# Create velocity coordinate grids using direct high-res method (Gemini's suggestion)
 		X_grid = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape * grism_object.factor)
@@ -839,7 +893,28 @@ class GrismFitter(KinModels):
 		# self.model_map_high = grism_object.disperse(self.convolved_fluxes, self.convolved_velocities, self.convolved_dispersions)
 
 		self.model_map = utils.resample(self.model_map_high, grism_object.factor, self.wave_factor)
-		# print('Model vels:', self.model_velocities)
+
+		# Apply row-wise analytical S(y) rescaling to the posterior-mean model
+		if self.flux_scaling is not None and self.flux_scaling.mode == 'row_wise':
+			if obs_map is not None and obs_error is not None:
+				_obs_map = jnp.array(obs_map)
+				_obs_err = jnp.array(obs_error)
+				n_cols = _obs_map.shape[1]
+				col_sn = jnp.sum(_obs_map / _obs_err, axis=0)
+				signal_cols = col_sn > (jnp.mean(col_sn) + jnp.std(col_sn))
+				n_sig_cols = jnp.maximum(jnp.sum(signal_cols.astype(float)), 1.0)
+				row_restricted_sn = jnp.sum(
+					jnp.where(signal_cols[None, :], _obs_map / _obs_err, 0.0), axis=1)
+				row_above = row_restricted_sn > 3.0 * jnp.sqrt(n_sig_cols)
+				cum_fwd = jnp.cumsum(row_above) > 0
+				cum_bwd = jnp.cumsum(row_above[::-1])[::-1] > 0
+				row_has_signal = cum_fwd & cum_bwd
+				inv_var = 1.0 / _obs_err ** 2
+				num_y = jnp.sum(inv_var * _obs_map * self.model_map, axis=1)
+				den_y = jnp.sum(inv_var * self.model_map ** 2, axis=1)
+				S_y = jnp.where(row_has_signal & (den_y > 0), num_y / jnp.where(den_y > 0, den_y, 1.0), 1.0)
+				self.model_map = self.model_map * S_y[:, None]
+
 		#compute velocity grid in flux image resolution for plotting velocity maps
 		self.model_velocities_low = image.resize(self.model_velocities, (int(self.model_velocities.shape[0]/grism_object.factor), int(self.model_velocities.shape[1]/grism_object.factor)), method='linear')
 		# print(self.fluxes_mean)
@@ -981,6 +1056,17 @@ class GrismFitter(KinModels):
 			shared_params_mean = {'i': self.i_mean}
 			model_flux = self.galaxy_model.generate_flux_map(morph_params_obs, shared_params_mean)
 
+			# Apply pixel-wise scaling at posterior mean, rotated for this observation
+			if self.flux_scaling is not None and self.flux_scaling.mode == 'pixel_wise':
+				if 'log_intrinsic_scale' in inference_data.posterior:
+					log_s_gal = jnp.array(
+						inference_data.posterior['log_intrinsic_scale'].median(dim=["chain", "draw"])
+					)
+					log_s_high = utils.rotate_and_upsample_scale(log_s_gal, theta_rot_rad, obs.grism.factor)
+					model_flux = model_flux * jnp.exp(log_s_high)
+					# update native-res flux map used for plotting
+					fluxes_mean = utils.resample(model_flux, obs.grism.factor, obs.grism.factor)
+
 			# Build velocity coordinate grids using direct high-res method (Gemini's suggestion)
 			X_grid = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape * obs.grism.factor)
 			Y_grid = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape * obs.grism.factor)
@@ -995,6 +1081,26 @@ class GrismFitter(KinModels):
 			# Generate grism model
 			model_map_high = obs.grism.disperse(model_flux, model_velocities, model_dispersions)
 			model_map = utils.resample(model_map_high, obs.grism.factor, self.wave_factor)
+
+			# Apply row-wise analytical S(y) rescaling to the posterior-mean model
+			if self.flux_scaling is not None and self.flux_scaling.mode == 'row_wise':
+				_obs_map = jnp.array(obs.obs_map)
+				_obs_err = jnp.array(obs.obs_error)
+				n_cols = _obs_map.shape[1]
+				col_sn = jnp.sum(_obs_map / _obs_err, axis=0)
+				signal_cols = col_sn > (jnp.mean(col_sn) + jnp.std(col_sn))
+				n_sig_cols = jnp.maximum(jnp.sum(signal_cols.astype(float)), 1.0)
+				row_restricted_sn = jnp.sum(
+					jnp.where(signal_cols[None, :], _obs_map / _obs_err, 0.0), axis=1)
+				row_above = row_restricted_sn > 3.0 * jnp.sqrt(n_sig_cols)
+				cum_fwd = jnp.cumsum(row_above) > 0
+				cum_bwd = jnp.cumsum(row_above[::-1])[::-1] > 0
+				row_has_signal = cum_fwd & cum_bwd
+				inv_var = 1.0 / _obs_err ** 2
+				num_y = jnp.sum(inv_var * _obs_map * model_map, axis=1)
+				den_y = jnp.sum(inv_var * model_map ** 2, axis=1)
+				S_y = jnp.where(row_has_signal & (den_y > 0), num_y / jnp.where(den_y > 0, den_y, 1.0), 1.0)
+				model_map = model_map * S_y[:, None]
 
 			# Downsample for plotting
 			model_velocities_low = image.resize(model_velocities, (int(model_velocities.shape[0]/obs.grism.factor), int(model_velocities.shape[1]/obs.grism.factor)), method='linear')
@@ -1041,7 +1147,7 @@ class GrismFitter(KinModels):
 
 		return inference_data, results
 
-	def compute_model(self,inference_data, grism_object, parametric = False):
+	def compute_model(self, inference_data, grism_object, parametric=False, obs_map=None, obs_error=None):
 		"""
 
 		Function used to post-process the MCMC samples and plot results from the model
@@ -1049,7 +1155,8 @@ class GrismFitter(KinModels):
 		"""
 
 		if parametric:
-			return self.compute_model_parametric(inference_data, grism_object)
+			return self.compute_model_parametric(inference_data, grism_object,
+			                                     obs_map=obs_map, obs_error=obs_error)
 		else:
 			raise NotImplementedError('Non-parametric flux model not implemented yet for GrismFitter')
 

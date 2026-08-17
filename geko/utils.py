@@ -6,8 +6,9 @@
 """
 
 __all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', 'compute_gal_props',
-           'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile', 
-           'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux', 'rotate_coords']
+           'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile',
+           'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux', 'rotate_coords',
+           'rotate_and_upsample_scale']
            
 # geko imports
 
@@ -668,9 +669,9 @@ def add_v_re(inf_data, kin_model, grism_object=None, num_samples=None, re_manual
                 name: float(inf_data.posterior[name][i, int(sample)].values)
                 for name in param_names if name in inf_data.posterior
             }
-            inf_data.posterior['v_re'][i, int(sample)] = float(jnp.abs(
+            inf_data.posterior['v_re'][i, int(sample)] = float(
                 rot_model.rotation_curve(jnp.array(re), all_params)
-            ))
+            )
 
     for sample in range(num_samples_prior):
         re = re_manual if re_manual is not None else float(
@@ -679,9 +680,9 @@ def add_v_re(inf_data, kin_model, grism_object=None, num_samples=None, re_manual
             name: float(inf_data.prior[name][0, int(sample)].values)
             for name in param_names if name in inf_data.prior
         }
-        inf_data.prior['v_re'][0, int(sample)] = float(jnp.abs(
+        inf_data.prior['v_re'][0, int(sample)] = float(
             rot_model.rotation_curve(jnp.array(re), all_params)
-        ))
+        )
 
 
 def compute_MAP(inf_data, grism_object, image):
@@ -1060,6 +1061,56 @@ def choose_mspf(bithash_file, psf_dir, RA, DEC, image_list):
         psf_list.append(psf_path)
 
     return psf_list
+
+def rotate_and_upsample_scale(log_s_gal, theta_rot_rad, factor):
+    """Rotate a native-resolution log-scale map from galaxy frame to observation frame and upsample.
+
+    For each output (observation-frame) pixel, the source galaxy-frame position is found via
+    the inverse rotation (-theta_rot_rad), then bilinear interpolation retrieves the scale value.
+    The result is upsampled by `factor` using nearest-neighbour repeat so that each native pixel
+    becomes a constant factor×factor block — consistent with how fluxes_high is constructed.
+
+    Parameters
+    ----------
+    log_s_gal : jnp.ndarray, shape (n, n)
+        Log-scale map in the galaxy intrinsic frame (native instrument resolution).
+    theta_rot_rad : float
+        Rotation angle in radians FROM galaxy frame TO observation frame (obs.theta_rot in radians).
+    factor : int
+        Spatial oversampling factor (obs.grism.factor).
+
+    Returns
+    -------
+    log_s_high : jnp.ndarray, shape (n*factor, n*factor)
+        Log-scale map in the observation frame at oversampled resolution.
+    """
+    n = log_s_gal.shape[0]
+    center = (n - 1) / 2.0
+
+    # Build obs-frame pixel coordinate grids (row=i, col=j)
+    i_out = jnp.arange(n, dtype=jnp.float32)
+    j_out = jnp.arange(n, dtype=jnp.float32)
+    J_out, I_out = jnp.meshgrid(j_out, i_out)  # both shape (n, n)
+
+    # Inverse rotation: obs -> galaxy is clockwise rotation by -theta_rot_rad
+    # (same convention as rotate_coords: x=col, y=row, clockwise by angle)
+    dx = J_out - center
+    dy = I_out - center
+    cos_t = jnp.cos(-theta_rot_rad)
+    sin_t = jnp.sin(-theta_rot_rad)
+    J_src = center + cos_t * dx + sin_t * dy
+    I_src = center - sin_t * dx + cos_t * dy
+
+    # Bilinear interpolation in galaxy frame (differentiable)
+    coords = jnp.array([I_src.ravel(), J_src.ravel()])
+    log_s_obs = jax.scipy.ndimage.map_coordinates(
+        log_s_gal, coords, order=1, mode='nearest'
+    ).reshape(n, n)
+
+    # Upsample: each native pixel becomes a factor×factor block of identical values
+    log_s_high = jnp.repeat(jnp.repeat(log_s_obs, factor, axis=0), factor, axis=1)
+    return log_s_high
+
 
 @jax.jit
 def rotate_coords(x, y, xc, yc, theta):
