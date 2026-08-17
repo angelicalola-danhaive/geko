@@ -9,6 +9,7 @@ from . import postprocess as post
 from . import grism
 
 import os
+import glob
 
 import jax
 import jax.numpy as jnp
@@ -435,9 +436,25 @@ class Fit_Numpyro():
         return new_mask
 # -----------------------------------------------------------running the inference-----------------------------------------------------------------------------------
 
+def _autodiscover_pysersic_file(save_runs_path, source_id):
+    """For field='manual' with no manual_pysersic_file given, look for a
+    single summary_{source_id}_image_*_svi.cat in save_runs_path/morph_fits/
+    and use it if exactly one exists. Returns the filename (not full path),
+    or None if zero or more than one match is found (caller falls back to
+    config-only priors, same as if this were never called)."""
+    pattern = os.path.join(save_runs_path, 'morph_fits', f'summary_{source_id}_image_*_svi.cat')
+    matches = sorted(glob.glob(pattern))
+    if len(matches) == 1:
+        return os.path.basename(matches[0])
+    if len(matches) > 1:
+        print(f"WARNING: multiple PySersic files found for source {source_id} ({[os.path.basename(m) for m in matches]}); "
+              f"pass manual_pysersic_file explicitly to disambiguate. Will use config priors.")
+    return None
+
+
 def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples,
                  source_id, field, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5, wave_factor=9,
-                 model_name='Disk', config=None,
+                 model_name='Disk', config=None, flux_scaling=None,
                  manual_psf_name=None, manual_theta_rot=None, manual_pysersic_file=None,
                  manual_grism_file=None):
     """
@@ -510,6 +527,8 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
         # Handle manual field option
         if field == 'manual':
+            if manual_pysersic_file is None:
+                manual_pysersic_file = _autodiscover_pysersic_file(save_runs_path, source_id)
             if manual_pysersic_file is None:
                 if config is None:
                     raise ValueError(
@@ -741,6 +760,8 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
 
         if field == 'manual':
             if manual_pysersic_file is None:
+                manual_pysersic_file = _autodiscover_pysersic_file(save_runs_path, source_id)
+            if manual_pysersic_file is None:
                 if config is None:
                     raise ValueError(
                         "When field='manual', you must provide either:\n"
@@ -784,10 +805,6 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
         int_flux_err_high = 10**(log_int_flux + log_int_flux_err) - 10**log_int_flux
         int_flux_err_low = 10**log_int_flux - 10**(log_int_flux - log_int_flux_err)
         int_flux_err = np.mean([int_flux_err_high, int_flux_err_low])
-
-        # For multi-observation fitting, we use the reference frame (first observation)
-        # and rotation angles are applied per-observation
-        theta_rot_ref = jnp.radians(observations_config[0]['theta_rot'])
 
         # Assemble model components from config
         from .morph_models import MORPH_REGISTRY
