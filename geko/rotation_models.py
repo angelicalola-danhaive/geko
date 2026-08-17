@@ -76,7 +76,7 @@ class ArctanComponent(RotationCurveComponent):
     """Phenomenological arctangent rotation curve: v(r) = Va * (2/π) * arctan(r/r_t)."""
     NEEDS_PHYSICAL_SCALE = False
     _DEFAULT_PARAMETERS = [
-        ParameterSpec('Va',  r'$V_a$ [km/s]', r'$V_a$', 'Uniform',
+        ParameterSpec('Va',  r'$v_a$ [km/s]', r'$v_a$', 'Uniform',
                       prior_min=-1000.0, prior_max=1000.0),
         ParameterSpec('r_t', r'$r_t$ [px]',   r'$r_t$', 'Uniform',
                       prior_min=0.0, prior_max=None),  # prior_max=None → r_eff from context

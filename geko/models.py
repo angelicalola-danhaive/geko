@@ -205,12 +205,6 @@ class GalaxyModel:
 		self.rot_model = rot_model or CompositeRotationCurve([ArctanComponent()])
 		self.shared_kin_specs = deepcopy(SHARED_KINEMATIC_SPEC)
 
-		# Link kinematic center to morphological center by default
-		_apply_fixed_to_specs(self.shared_kin_specs, {
-			'x0_vel': 'xc_morph',
-			'y0_vel': 'yc_morph',
-		})
-
 	@property
 	def amplitude_mu(self):
 		for spec in self.morph_model.parameters:
@@ -297,6 +291,8 @@ class GalaxyModel:
 			'PA_mu': PA, 'PA_std': PA_std * 2,
 			'sigma0_min': 0.0, 'sigma0_max': 500.0,
 			'v0_mu': 0.0, 'v0_std': 200.0,
+			'x0_vel_mu': xc_morph_rot, 'x0_vel_std': xc_std,
+			'y0_vel_mu': yc_morph_rot, 'y0_vel_std': yc_std,
 		})
 
 		for comp in self.rot_model.components:
@@ -323,6 +319,8 @@ class GalaxyModel:
 			'PA_mu': priors['PA'], 'PA_std': 10,
 			'sigma0_min': 0, 'sigma0_max': 600,
 			'v0_mu': 0.0, 'v0_std': 200.0,
+			'x0_vel_mu': 15.0, 'x0_vel_std': 1.0,
+			'y0_vel_mu': 15.0, 'y0_vel_std': 1.0,
 		})
 
 		for comp in self.rot_model.components:

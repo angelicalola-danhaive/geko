@@ -163,13 +163,15 @@ class BaseModel(ABC):
 # all_params for the asymmetric drift correction (TODO: not yet implemented).
 
 SHARED_KINEMATIC_SPEC = [
-    ParameterSpec('PA',     r'PA [deg]',         r'PA',          'Normal'),
+    ParameterSpec('PA',     r'PA$_{\rm kin}$ [deg]', r'PA$_{\rm kin}$', 'Normal'),
     ParameterSpec('i',      r'$i$ [deg]',         r'$i$',         'TruncatedNormal',
                   prior_min=0.0, prior_max=90.0),
     ParameterSpec('sigma0', r'$\sigma_0$ [km/s]', r'$\sigma_0$',  'Uniform'),
-    ParameterSpec('x0_vel', r'$x_{0,v}$ [px]',   r'$x_{0,v}$',   'Normal'),
-    ParameterSpec('y0_vel', r'$y_{0,v}$ [px]',   r'$y_{0,v}$',   'Normal'),
-    ParameterSpec('v0',     r'$v_0$ [km/s]',     r'$v_0$',       'Normal',
+    ParameterSpec('x0_vel', r'$x_v$ [px]',        r'$x_v$',        'Normal',
+                  prior_mu=15.0, prior_std=1.0),
+    ParameterSpec('y0_vel', r'$y_v$ [px]',        r'$y_v$',        'Normal',
+                  prior_mu=15.0, prior_std=1.0),
+    ParameterSpec('v0',     r'$v_{\rm sys}$ [km/s]', r'$v_{\rm sys}$', 'Normal',
                   prior_mu=0.0, prior_std=200.0),
 ]
 

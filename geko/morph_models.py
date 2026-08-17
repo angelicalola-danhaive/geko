@@ -65,7 +65,7 @@ class SersicMorphology(MorphologyModel):
     """Parametric Sersic morphology model."""
 
     _DEFAULT_PARAMETERS = [
-        ParameterSpec('amplitude', r'amplitude',              r'amplitude',
+        ParameterSpec('amplitude', r'$A$',                    r'$A$',
                       'TruncatedNormal'),
         ParameterSpec('r_eff',    r'$r_{\rm e}$ [px]',        r'$r_{\rm e}$',
                       'TruncatedNormal'),

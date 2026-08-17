@@ -5,7 +5,8 @@ Post-processing functions for geko grism fits.
 """
 
 __all__ = ['process_results', 'process_results_multi',
-           'compute_derived_posterior', 'DERIVED_QUANTITIES']
+           'compute_derived_posterior', 'DERIVED_QUANTITIES',
+           'compute_information_gain']
 
 from dataclasses import dataclass
 from typing import Callable
@@ -59,7 +60,8 @@ class DerivedQuantity:
 
 
 # Sampled parameters to include alongside derived quantities in the corner plot.
-_CORNER_SAMPLED_PARAMS = ['sigma0']
+_CORNER_SAMPLED_PARAMS  = ['sigma0']
+_CORNER_SAMPLED_LABELS  = {'sigma0': r'$\sigma_0$ [km/s]'}
 
 # Ordered by dependency: each entry may use results from earlier entries.
 # v_re is computed by utils.add_v_re before this loop runs; the entry here is
@@ -144,6 +146,85 @@ def summarize_posterior(inf_data, names):
 	return summary
 
 
+def _kl_kde(post, prior, n_grid=1000):
+	"""KL(posterior || prior) via KDE — works for any prior shape."""
+	from scipy.stats import gaussian_kde
+	lo = min(post.min(), prior.min())
+	hi = max(post.max(), prior.max())
+	margin = 0.05 * (hi - lo) if hi > lo else 1.0
+	x = np.linspace(lo - margin, hi + margin, n_grid)
+	q = gaussian_kde(post)(x);  q /= np.trapz(q, x)
+	p = gaussian_kde(prior)(x); p /= np.trapz(p, x)
+	mask = q > 1e-10 * q.max()
+	return float(np.trapz(
+		np.where(mask, q * np.log(np.clip(q, 1e-300, None) / np.clip(p, 1e-300, None)), 0.0), x))
+
+
+def compute_information_gain(inf_data, param_names=None):
+	"""Compute per-parameter KL divergence and posterior contraction.
+
+	KL divergence is KL(posterior || prior) estimated via KDE (no Gaussian assumption).
+	Posterior contraction is 1 - Var(posterior) / Var(prior).
+
+	Parameters
+	----------
+	inf_data : arviz.InferenceData
+		Must contain both 'posterior' and 'prior' groups.
+	param_names : list of str, optional
+		Parameters to compute. Defaults to all variables present in both groups.
+
+	Returns
+	-------
+	astropy.table.Table
+		Columns: param, kl_divergence, posterior_contraction,
+		prior_mean, prior_std, post_mean, post_std.
+	"""
+	if not hasattr(inf_data, 'prior'):
+		raise ValueError("inf_data has no 'prior' group.")
+
+	avail = {p for p in set(inf_data.posterior.data_vars) & set(inf_data.prior.data_vars)
+	         if not p.startswith('unscaled_')}
+	if param_names is None:
+		param_names = sorted(avail)
+	else:
+		param_names = [p for p in param_names if p in avail]
+
+	rows = []
+	for name in param_names:
+		post = inf_data.posterior[name].values.ravel()
+		prior = inf_data.prior[name].values.ravel()
+		post  = post[np.isfinite(post)]
+		prior = prior[np.isfinite(prior)]
+		if len(post) < 2 or len(prior) < 2:
+			continue
+
+		mu_prior    = float(np.mean(prior))
+		sigma_prior = float(np.std(prior))
+		mu_post     = float(np.mean(post))
+		sigma_post  = float(np.std(post))
+
+		if sigma_prior <= 0 or sigma_post <= 0:
+			continue
+
+		var_ratio = (sigma_post / sigma_prior) ** 2
+		kl = _kl_kde(post, prior)
+		pc = 1.0 - var_ratio
+
+		rows.append({
+			'param':                 name,
+			'kl_divergence':         float(kl),
+			'posterior_contraction': float(pc),
+			'prior_mean':            mu_prior,
+			'prior_std':             sigma_prior,
+			'post_mean':             mu_post,
+			'post_std':              sigma_post,
+		})
+
+	_empty_cols = ['param', 'kl_divergence', 'posterior_contraction',
+	               'prior_mean', 'prior_std', 'post_mean', 'post_std']
+	return Table(rows) if rows else Table(names=_empty_cols)
+
+
 def build_results_table(ID, kin_model, summary):
 	"""Build an astropy Table from a posterior summary dict.
 
@@ -204,8 +285,17 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 	res.write(save_runs_path + output + '/' + str(ID) + '_results',
 	          format='ascii', overwrite=True)
 
+	try:
+		info_table = compute_information_gain(inf_data, sampled_names)
+		if len(info_table) > 0:
+			info_path = save_runs_path + output + '/' + str(ID) + '_info_gain'
+			info_table.write(info_path, format='ascii', overwrite=True)
+			print(f'Saved information gain table to {info_path}')
+	except Exception as e:
+		print(f'Warning: failed to compute information gain: {e}')
+
 	# Corner plot: sampled params + all derived quantities flagged include_in_corner
-	all_labels  = {dq.name: dq.label for dq in DERIVED_QUANTITIES}
+	all_labels  = {**_CORNER_SAMPLED_LABELS, **{dq.name: dq.label for dq in DERIVED_QUANTITIES}}
 	candidate_vars   = _CORNER_SAMPLED_PARAMS + [
 	                       dq.name for dq in DERIVED_QUANTITIES if dq.include_in_corner]
 
@@ -232,35 +322,46 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 	data_matrix = np.column_stack(
 	    [inf_data.posterior[v].values.ravel() for v in corner_vars])
 
-	# sigma0 has no NaN; v_sigma has NaN where sigma0 < floor, but corner_ranges
-	# already holds a finite range for v_sigma so np.histogram ignores those NaNs.
-	if 'v_sigma' in corner_vars:
-		n_nan = int(np.isnan(data_matrix[:, corner_vars.index('v_sigma')]).sum())
-		if n_nan:
-			print(f'  Corner plot: {n_nan} v_sigma NaN samples (sigma0 below floor) '
-			      f'excluded from histogram by range clipping')
-
+	# Pass the full data matrix (NaN rows kept so sigma0 is uncut).
+	# Quantile lines and titles are drawn manually with nanpercentile so columns
+	# with NaN (v_sigma) get correct lines and no NaN in the title text.
 	fig = plt.figure(figsize=(10, 10))
 	CORNER_KWARGS = dict(
 		smooth=4,
 		label_kwargs=dict(fontsize=20),
-		title_kwargs=dict(fontsize=20),
-		quantiles=[0.16, 0.5, 0.84],
 		plot_density=False,
 		plot_datapoints=False,
 		fill_contours=True,
 		plot_contours=True,
-		show_titles=True,
+		show_titles=False,
 		labels=corner_labels,
-		titles=corner_labels,
 		max_n_ticks=3,
 	)
 	corner.corner(data_matrix, fig=fig, color='royalblue',
 	              range=corner_ranges, **CORNER_KWARGS)
 
-	plt.tight_layout()
+	def _fmt(val):
+		if abs(val) >= 100:
+			return f'{val:.0f}'
+		elif abs(val) >= 10:
+			return f'{val:.1f}'
+		else:
+			return f'{val:.2f}'
+
+	ndim = len(corner_vars)
+	axes = np.array(fig.get_axes()).reshape(ndim, ndim)
+	for i, (var, label) in enumerate(zip(corner_vars, corner_labels)):
+		col = data_matrix[:, i]
+		q16, q50, q84 = np.nanpercentile(col, [16, 50, 84])
+		ax = axes[i, i]
+		for qval in (q16, q50, q84):
+			ax.axvline(qval, color='royalblue', linestyle='dashed', lw=1.5)
+		title = (f'{label}\n'
+		         f'${_fmt(q50)}' + r'^{+' + _fmt(q84 - q50) + r'}_{-' + _fmt(q50 - q16) + r'}$')
+		ax.set_title(title, fontsize=12)
+
 	plt.savefig(save_runs_path + output + '/' + str(ID) + '_derived_corner.png',
-	            dpi=300)
+	            dpi=300, bbox_inches='tight')
 	plt.close()
 
 

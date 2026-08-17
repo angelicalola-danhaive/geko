@@ -395,11 +395,7 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
         PSF = mock_params['PSF']
     else:
         PSF = fits.getdata(psf_path)
-
-    # PSF = utils.load_psf(grism_filter, 1, 9)
-
-    #downsample it down to the grism resolution
-    PSF = utils.downsample_psf_centered(PSF, size = 15)
+        PSF = utils.downsample_psf_centered(PSF, size = 15)
     #run pysersic fit to get morphological parameters
     if mock_params == None:
         path_output = save_runs_path + output

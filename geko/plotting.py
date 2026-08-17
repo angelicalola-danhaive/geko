@@ -730,9 +730,9 @@ def plot_disk_summary(obs_map, model_map, obs_error, model_velocities, model_dis
 
 	# Generate and save the big corner plot (prior + posterior overlay)
 	if save_to_folder is not None and name == 'summary':
-		v_sigma_16 = float(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]).values)
-		v_sigma_84 = float(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]).values)
-		v_sigma_50 = float(inf_data.posterior['v_sigma'].quantile(0.5,  dim=["chain", "draw"]).values)
+		v_sigma_16 = float(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"], skipna=True).values)
+		v_sigma_84 = float(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"], skipna=True).values)
+		v_sigma_50 = float(inf_data.posterior['v_sigma'].quantile(0.5,  dim=["chain", "draw"], skipna=True).values)
 		sigma0_16  = float(inf_data.posterior['sigma0'].quantile(0.16,  dim=["chain", "draw"]).values)
 		sigma0_84  = float(inf_data.posterior['sigma0'].quantile(0.84,  dim=["chain", "draw"]).values)
 		sigma0_50  = float(inf_data.posterior['sigma0'].quantile(0.5,   dim=["chain", "draw"]).values)
@@ -1130,9 +1130,9 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 
  #, 'fluxes_scaling': None}
 	
-	v_sigma_16 = float(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"]).values)
-	v_sigma_84 = float(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"]).values)
-	v_sigma_50 = float(inf_data.posterior['v_sigma'].quantile(0.5, dim=["chain", "draw"]).values)
+	v_sigma_16 = float(inf_data.posterior['v_sigma'].quantile(0.16, dim=["chain", "draw"], skipna=True).values)
+	v_sigma_84 = float(inf_data.posterior['v_sigma'].quantile(0.84, dim=["chain", "draw"], skipna=True).values)
+	v_sigma_50 = float(inf_data.posterior['v_sigma'].quantile(0.5, dim=["chain", "draw"], skipna=True).values)
 
 	sigma0_16 = float(inf_data.posterior['sigma0'].quantile(0.16, dim=["chain", "draw"]).values)
 	sigma0_84 = float(inf_data.posterior['sigma0'].quantile(0.84, dim=["chain", "draw"]).values)
