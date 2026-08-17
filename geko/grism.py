@@ -215,7 +215,7 @@ class Grism:
 
 		# Flags to disable instrument effects (useful for ideal/noiseless tests)
 		self.use_psf = True
-		self.use_lsf = True
+		self.use_lsf = False   # LSF off by default — 2D PSF captures spectral broadening
 
 
 	def __str__(self):
@@ -690,14 +690,21 @@ class Grism:
 		else:
 			# self.oversampled_PSF = utils.oversample_PSF(PSF, self.factor)
 			self.oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method = 'bilinear')
-			# Crop to central 25x25 pixels (generous enough to preserve PSF wings)
-			# For 9x9 input at factor=5, this crops 45x45 -> 25x25
-			crop_half = 4 #12  # Creates 25x25 crop (2*12+1)
+			# Crop to central 9x9 pixels
+			# For 9x9 input at factor=5, this crops 45x45 -> 9x9
+			crop_half = 4  # Creates 9x9 crop (2*4+1)
 			if self.oversampled_PSF.shape[0] > 2*crop_half + 1:
 				center = self.oversampled_PSF.shape[0]//2
 				self.oversampled_PSF = self.oversampled_PSF[center - crop_half:center + crop_half + 1, center - crop_half:center + crop_half + 1]
 			#normalize the PSF to sum = 1
 			self.oversampled_PSF = self.oversampled_PSF/jnp.sum(self.oversampled_PSF)
+			# Diagnostic: report effective PSF FWHM in model pixels
+			psf_2d = np.array(self.oversampled_PSF)
+			peak = psf_2d.max()
+			above_half = (psf_2d >= peak / 2).sum()
+			fwhm_px = float(np.sqrt(above_half / np.pi) * 2)  # effective circular FWHM
+			print(f'[PSF] kernel shape={psf_2d.shape}, peak={peak:.4f}, '
+			      f'effective FWHM={fwhm_px:.2f} model px = {fwhm_px/self.factor:.2f} detector px')
 		# print('oversampled PSF sum = ', jnp.sum(self.oversampled_PSF ))
 		# plt.imshow(self.oversampled_PSF)
 		# plt.title('PSF')
@@ -757,9 +764,10 @@ class Grism:
 		wave_centers = self.wavelength*( V/(c/1000) ) + self.wave_array
 		wave_sigmas = self.wavelength*(D/(c/1000) ) #the velocity dispersion doesn't need to be translated to the ref frame of the central pixel
 
-		# Velocity dispersion only — 2D PSF convolution handles spectral broadening
-		# in the dispersion direction, so no separate LSF term is needed.
-		wave_sigmas_eff = wave_sigmas
+		if self.use_lsf:
+			wave_sigmas_eff = jnp.sqrt(jnp.square(wave_sigmas) + jnp.square(self.sigma_lsf))
+		else:
+			wave_sigmas_eff = wave_sigmas
 
 		#make a 3D cube (spacial, spectral, wavelengths)
 		mu = wave_centers[:,:,jnp.newaxis]
