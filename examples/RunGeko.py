@@ -43,30 +43,13 @@ matplotlib.use('Agg')
 # Set a dict to {} to use all defaults for that group.
 
 # Morphology priors: amplitude, r_eff, n, PA_morph, xc_morph, yc_morph
-MORPH_PRIOR_OVERRIDES = {
-    # 'r_eff_mu': 3.0,   # Effective radius prior centre (pixels)
-    # 'r_eff_std': 1.0,  # Effective radius prior width
-    # 'n_mu': 1.0,       # Sersic index prior centre (1=exponential, 4=de Vaucouleurs)
-    # 'n_std': 0.5,
-}
+MORPH_PRIOR_OVERRIDES = {}
 
 # Geometry / shared kinematics: PA, i, sigma0, x0_vel, y0_vel, v0
-GEOM_PRIOR_OVERRIDES = {
-    'PA_min': 0,         # Kinematic position angle minimum (degrees)
-    'PA_max': 180,       # Kinematic position angle maximum (degrees)
-    'i_min': 30,         # Inclination minimum (degrees) - avoid very face-on
-    'i_max': 80,         # Inclination maximum (degrees) - avoid edge-on
-    'sigma0_min': 20,    # Velocity dispersion minimum (km/s)
-    'sigma0_max': 200,   # Velocity dispersion maximum (km/s)
-}
+GEOM_PRIOR_OVERRIDES = {}
 
 # Rotation curve priors: Va, r_t (Arctan); log_M_star (Sersic); log_M_halo, c_halo (NFW)
-ROT_PRIOR_OVERRIDES = {
-    'Va_min': 50,        # Asymptotic velocity minimum (km/s)
-    'Va_max': 500,       # Asymptotic velocity maximum (km/s)
-    # 'r_t_mu': 2.0,     # Turnover radius prior centre (pixels)
-    # 'r_t_std': 1.0,
-}
+ROT_PRIOR_OVERRIDES = {}
 
 # EXAMPLE CONFIGURATIONS:
 #
