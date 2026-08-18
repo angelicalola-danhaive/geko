@@ -1003,12 +1003,14 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 
 		ax_residuals.set_title(r'Residual $\chi$ map', fontsize=10)
 
-	# Last row: Intrinsic velocity, dispersion, and flux maps (shared across observations)
-	# Use results from first observation for the intrinsic fields
+	# Last row: Intrinsic velocity, dispersion, and flux maps (shared across observations).
+	# Genuinely unrotated -- same (PySersic/sky) frame as the xc_morph/yc_morph markers
+	# plotted below -- NOT observation 0's own rotated rendering.
 	first_obs_name = observations[0].name
-	model_velocities = results[first_obs_name]['model_velocities_low']
-	model_dispersions = results[first_obs_name]['model_dispersions_low']
-	fluxes_mean = results[first_obs_name]['fluxes_mean']
+	intrinsic = results.get('intrinsic', results[first_obs_name])
+	model_velocities = intrinsic['model_velocities_low']
+	model_dispersions = intrinsic['model_dispersions_low']
+	fluxes_mean = intrinsic['fluxes_mean']
 
 	velocites_center = model_velocities[int(x0_vel), int(y0_vel)] if model_velocities.shape[0] > int(x0_vel) and model_velocities.shape[1] > int(y0_vel) else 0
 
@@ -1027,8 +1029,10 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 	angle = -np.degrees(theta_Ha)
 
 	# Panel 1: Velocity map
+	# No v0 subtraction here -- the intrinsic field never had a v0 offset added
+	# (v0 is a per-observation wavelength-calibration term, not intrinsic to the galaxy).
 	vel_map_ax = fig.add_subplot(gs0[n_obs, 0])
-	cp = vel_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, (model_velocities - v0),
+	cp = vel_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, model_velocities,
 	                           shading='nearest', cmap='RdBu_r')
 	vel_map_ax.axis('off')
 
@@ -1057,7 +1061,7 @@ def plot_disk_summary_multi(observations, results, inf_data, wave_space, x0=31, 
 
 	# Panel 2: Dispersion map
 	veldisp_map_ax = fig.add_subplot(gs0[n_obs, 1])
-	vel_max = np.nanmax(np.abs(model_velocities - v0))
+	vel_max = np.nanmax(np.abs(model_velocities))
 	cmap_disp = matplotlib.colors.LinearSegmentedColormap.from_list(
 	    'RdBu_r_pos', plt.cm.RdBu_r(np.linspace(0.5, 1.0, 128)))
 	veldisp_map_ax.pcolormesh(X_intrinsic, Y_intrinsic, model_dispersions, shading='nearest',

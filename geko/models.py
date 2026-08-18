@@ -1133,6 +1133,59 @@ class GrismFitter(KinModels):
 				'amplitude_mean': obs_amplitude_mean,
 			}
 
+		# Genuinely unrotated "intrinsic" fields, in the same frame as morph_means
+		# (the PySersic/sky frame, since priors are now set with theta_rot=0.0) --
+		# used for the shared summary row, so it lines up with the xc_morph/yc_morph
+		# markers plotted on top of it (both come from the raw, unrotated posterior).
+		# Distinct from results[first_obs_name], which is observation 0's own
+		# rotated rendering and only matches its own row.
+		morph_params_intrinsic = {k: v for k, v in self.morph_means.items() if v is not None}
+		morph_params_intrinsic['amplitude'] = self.amplitude_mean
+		shared_params_mean = {'i': self.i_mean}
+		model_flux_intrinsic = self.galaxy_model.generate_flux_map(morph_params_intrinsic, shared_params_mean)
+
+		if self.flux_scaling is not None and self.flux_scaling.mode == 'pixel_wise':
+			if 'log_intrinsic_scale' in inference_data.posterior:
+				log_s_gal = jnp.array(
+					inference_data.posterior['log_intrinsic_scale'].median(dim=["chain", "draw"])
+				)
+				model_flux_intrinsic = model_flux_intrinsic * jnp.exp(log_s_gal)
+
+		fluxes_mean_intrinsic = utils.resample(model_flux_intrinsic, self.galaxy_model.factor, self.galaxy_model.factor)
+
+		intrinsic_factor = observations[0].grism.factor
+		X_grid_intrinsic = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape * intrinsic_factor)
+		Y_grid_intrinsic = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape * intrinsic_factor)
+		X_grid_intrinsic, Y_grid_intrinsic = jnp.meshgrid(X_grid_intrinsic, Y_grid_intrinsic)
+		_all_params_mean_intrinsic = {**morph_params_intrinsic, **self.rot_means}
+		# No v0 added -- v0 is a per-observation wavelength-calibration offset, not
+		# part of the intrinsic (frame-independent) rotation curve.
+		model_velocities_intrinsic = jnp.asarray(
+			self.galaxy_model.velocity_field(X_grid_intrinsic, Y_grid_intrinsic, self.PA_mean, self.i_mean, _all_params_mean_intrinsic)
+		)
+		model_dispersions_intrinsic = self.sigma0_mean_model * jnp.ones_like(model_velocities_intrinsic)
+
+		model_velocities_low_intrinsic = image.resize(
+			model_velocities_intrinsic,
+			(int(model_velocities_intrinsic.shape[0] / intrinsic_factor), int(model_velocities_intrinsic.shape[1] / intrinsic_factor)),
+			method='linear')
+		model_dispersions_low_intrinsic = image.resize(
+			model_dispersions_intrinsic,
+			(int(model_dispersions_intrinsic.shape[0] / intrinsic_factor), int(model_dispersions_intrinsic.shape[1] / intrinsic_factor)),
+			method='linear')
+
+		vel_mask_intrinsic = np.where(fluxes_mean_intrinsic > 0.01 * fluxes_mean_intrinsic.max(), 1.0, np.nan)
+		model_velocities_low_intrinsic = np.where(np.isnan(vel_mask_intrinsic), np.nan, model_velocities_low_intrinsic)
+		model_dispersions_low_intrinsic = jnp.where(np.isnan(vel_mask_intrinsic), np.nan, model_dispersions_low_intrinsic)
+
+		results['intrinsic'] = {
+			'fluxes_mean': fluxes_mean_intrinsic,
+			'model_velocities': model_velocities_intrinsic,
+			'model_dispersions': model_dispersions_intrinsic,
+			'model_velocities_low': model_velocities_low_intrinsic,
+			'model_dispersions_low': model_dispersions_low_intrinsic,
+		}
+
 		# Store first observation's results as default (for backward compatibility)
 		first_obs_name = observations[0].name
 		self.model_map = results[first_obs_name]['model_map']
