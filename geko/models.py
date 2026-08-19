@@ -1140,7 +1140,14 @@ class GrismFitter(KinModels):
 		# Distinct from results[first_obs_name], which is observation 0's own
 		# rotated rendering and only matches its own row.
 		morph_params_intrinsic = {k: v for k, v in self.morph_means.items() if v is not None}
-		morph_params_intrinsic['amplitude'] = self.amplitude_mean
+		# amplitude is sampled per-observation, not shared (self.amplitude_mean is
+		# never set for multi-obs fits) -- average the per-obs means for this
+		# purely-cosmetic intrinsic flux-map display.
+		if self.amplitude_per_obs:
+			morph_params_intrinsic['amplitude'] = jnp.mean(
+				jnp.array([v['mean'] for v in self.amplitude_per_obs.values()]))
+		else:
+			morph_params_intrinsic['amplitude'] = self.amplitude_mean
 		shared_params_mean = {'i': self.i_mean}
 		model_flux_intrinsic = self.galaxy_model.generate_flux_map(morph_params_intrinsic, shared_params_mean)
 
