@@ -1,4 +1,4 @@
-__all__ = ["Fit_Numpyro", "run_geko_fit", "run_geko_fit_multi"]
+__all__ = ["Fit_Numpyro", "run_geko_fit", "run_geko_fit_multi", "postprocess_geko_fit_multi"]
 
 # imports
 
@@ -952,6 +952,178 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
     for name, stats in summary.items():
         print(f"  {name}: {stats['50']:.3f} (+{stats['84']-stats['50']:.3f}/-{stats['50']-stats['16']:.3f})")
     print(f"  Results available for: {list(results.keys())}")
+
+
+def postprocess_geko_fit_multi(observations_config, output, master_cat, line, parametric, save_runs_path,
+                               source_id, field, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5,
+                               wave_factor=9, model_name='Disk', config=None, flux_scaling=None,
+                               manual_psf_name=None, manual_pysersic_file=None):
+    """
+    Re-run postprocessing (derived quantities, results table, summary plots) for an
+    existing multi-observation geko fit, without re-running MCMC.
+
+    Mirrors the pre-MCMC setup in run_geko_fit_multi (preprocessing, PySersic priors,
+    GrismObservation construction) exactly, then loads the already-saved
+    `{source_id}_output_multi` netcdf instead of sampling. Useful for regenerating
+    summary plots after a geko code change (e.g. a plotting or model fix) without
+    redoing the expensive sampling. Keep in sync with run_geko_fit_multi's setup phase
+    if that changes.
+    """
+    first_obs_file = observations_config[0]['grism_file']
+
+    print("Running preprocessing on first observation...")
+    z_spec, wavelength, wave_space, obs_map_ref, obs_error_ref, kin_model, grism_object_ref, delta_wave = \
+        pre.run_full_preprocessing(
+            output=output,
+            master_cat=master_cat,
+            line=line,
+            save_runs_path=save_runs_path,
+            source_id=source_id,
+            field=field,
+            grism_filter=grism_filter,
+            delta_wave_cutoff=delta_wave_cutoff,
+            factor=factor,
+            wave_factor=wave_factor,
+            model_name=model_name,
+            manual_psf_name=manual_psf_name,
+            manual_grism_file=first_obs_file
+        )
+
+    if not parametric:
+        raise ValueError("Non-parametric fitting is not implemented yet. Please set parametric=True.")
+
+    pysersic_available = False
+    if field == 'manual':
+        if manual_pysersic_file is None:
+            manual_pysersic_file = _autodiscover_pysersic_file(save_runs_path, source_id)
+        if manual_pysersic_file is None:
+            if config is None:
+                raise ValueError(
+                    "When field='manual', you must provide either:\n"
+                    "  1. manual_pysersic_file parameter, or\n"
+                    "  2. Complete morphological priors via the config parameter"
+                )
+            print(f"WARNING: No manual_pysersic_file provided for field='manual'. Will use config priors.")
+        else:
+            try:
+                pysersic_summary = Table.read(save_runs_path + 'morph_fits/' + manual_pysersic_file, format='ascii')
+                pysersic_available = True
+            except:
+                if config is None:
+                    raise FileNotFoundError(
+                        f"PySersic file not found at {save_runs_path}morph_fits/{manual_pysersic_file}\n"
+                        f"To run without PySersic, you must provide morphological priors via the config parameter."
+                    )
+                print(f"WARNING: PySersic file not found. Will use config priors.")
+    else:
+        try:
+            pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F150W_svi.cat', format='ascii')
+            pysersic_available = True
+        except:
+            try:
+                pysersic_summary = Table.read(save_runs_path + 'morph_fits/summary_' + str(source_id) + '_image_F182M_svi.cat', format='ascii')
+                pysersic_available = True
+            except:
+                if config is None:
+                    raise FileNotFoundError(
+                        f"No PySersic morphology file found for source {source_id}\n"
+                        f"To run without PySersic, you must provide morphological priors via the config parameter."
+                    )
+                print(f"WARNING: No PySersic file found for source {source_id}. Will use config priors.")
+
+    master_cat_table = Table.read(master_cat, format="ascii")
+    log_int_flux = master_cat_table['fit_flux_cgs'][master_cat_table['ID'] == source_id][0]
+    int_flux = 10**log_int_flux
+    log_int_flux_err = master_cat_table['fit_flux_cgs_e'][master_cat_table['ID'] == source_id][0]
+    int_flux_err_high = 10**(log_int_flux + log_int_flux_err) - 10**log_int_flux
+    int_flux_err_low = 10**log_int_flux - 10**(log_int_flux - log_int_flux_err)
+    int_flux_err = np.mean([int_flux_err_high, int_flux_err_low])
+
+    from .morph_models import MORPH_REGISTRY
+    from .rotation_models import COMPONENT_REGISTRY, CompositeRotationCurve
+    from .config import FitConfiguration
+
+    cfg = config if config is not None else FitConfiguration()
+
+    kin_model.galaxy_model.morph_model = MORPH_REGISTRY[cfg.morphology_model]()
+    kin_model.galaxy_model.rot_model = cfg.build_rot_model(z_spec)
+
+    # theta_rot=0.0 here for the same reason as in run_geko_fit_multi: the shared
+    # prior stays in the true sky/PySersic frame, and each observation's own
+    # adjust_for_observation() call (inside compute_model_parametric_multi below)
+    # does the one correct rotation into that observation's frame.
+    if pysersic_available:
+        kin_model.galaxy_model.set_parametric_priors(
+            pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
+            delta_wave, theta_rot=0.0, shape=obs_map_ref.shape[0]
+        )
+    else:
+        print("\nUsing config priors (no PySersic file available)...")
+    kin_model.galaxy_model.apply_config_overrides(cfg)
+
+    _flux_scaling = flux_scaling if flux_scaling is not None else (cfg.flux_scaling if cfg is not None else None)
+    kin_model.flux_scaling = _flux_scaling
+
+    print(f"\nCreating {len(observations_config)} GrismObservation objects...")
+    observations = []
+
+    for i, obs_config in enumerate(observations_config):
+        obs_name = obs_config.get('name', f'obs{i}')
+        grism_file = obs_config['grism_file']
+        theta_rot = obs_config['theta_rot']
+        dispersion = obs_config['dispersion']
+
+        if i == 0:
+            obs_map = obs_map_ref
+            obs_error = obs_error_ref
+            grism_obj = grism_object_ref
+        else:
+            print(f"  Loading observation {obs_name}...")
+            _, _, _, obs_map, obs_error, _, grism_obj, _ = pre.run_full_preprocessing(
+                output=output,
+                master_cat=master_cat,
+                line=line,
+                save_runs_path=save_runs_path,
+                source_id=source_id,
+                field=field,
+                grism_filter=grism_filter,
+                delta_wave_cutoff=delta_wave_cutoff,
+                factor=factor,
+                wave_factor=wave_factor,
+                model_name=model_name,
+                manual_psf_name=manual_psf_name,
+                manual_grism_file=grism_file
+            )
+
+        obs = grism.GrismObservation(
+            grism=grism_obj,
+            obs_map=obs_map,
+            obs_error=obs_error,
+            theta_rot=theta_rot,
+            dispersion=dispersion,
+            name=obs_name
+        )
+        observations.append(obs)
+        print(f"  Created: {obs}")
+
+    output_file = save_runs_path + output + '/' + str(source_id) + '_output_multi'
+    print(f"\nLoading existing posterior from: {output_file}")
+    inf_data = az.InferenceData.from_netcdf(output_file)
+
+    print("\nComputing model results for each observation...")
+    inf_data, results = kin_model.compute_model_parametric_multi(inf_data, observations)
+
+    print("\nPost-processing results...")
+    summary, kin_model, inf_data = post.process_results_multi(
+        observations, results, output, master_cat, line, parametric, source_id, save_runs_path,
+        field, grism_filter, delta_wave_cutoff, factor, wave_factor, model_name,
+        manual_psf_name=manual_psf_name, manual_grism_file=observations_config[0]['grism_file'])
+
+    print("\nPost-processing complete!")
+    for name, stats in summary.items():
+        print(f"  {name}: {stats['50']:.3f} (+{stats['84']-stats['50']:.3f}/-{stats['50']-stats['16']:.3f})")
+
+    return summary, kin_model, inf_data
 
     return inf_data, results
 
