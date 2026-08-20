@@ -1,4 +1,5 @@
 from geko.grism import *
+from geko import utils
 import pytest
 import numpy as np
 import matplotlib.pyplot as plt
@@ -157,6 +158,91 @@ def test_grism_C_no_velocity_tilt(grism_instance_C):
     # Use correlation as a measure of similarity
     correlation = np.corrcoef(profile_lower, profile_upper)[0, 1]
     assert correlation > 0.95, f"Vertical spectrum should not have tilt, got correlation {correlation}"
+
+
+def _make_linear_grism(pupil, im_shape=45, icenter=4, jcenter=4):
+    """Grism instance with position-independent, linear-only dispersion
+    (only b01 nonzero) so an R and a C instance differ *only* in geko's own
+    pupil-handling logic (disperse()'s collapse axis, set_wave_array()'s
+    offset-term axis) -- not in real, independently-calibrated AR/AC trace
+    curvature, which isn't what's being tested here.
+    """
+    # Same wave_space shape as grism_instance/grism_instance_C above so this
+    # reuses their already-JIT-compiled disperse() trace instead of paying
+    # for a fresh XLA compilation at a new array shape.
+    wave = 4.0
+    wave_space = np.arange(wave - 0.05, wave + 0.05 + 0.0001, 0.0001)
+    PSF = np.zeros((3, 3))
+    PSF[1, 1] = 1.0
+    g = Grism(im_shape, im_scale=0.0629 / 5, icenter=icenter, jcenter=jcenter,
+              wavelength=wave, wave_space=wave_space, index_min=0,
+              index_max=wave_space.shape[0], grism_filter='F444W',
+              grism_module='A', grism_pupil=pupil, PSF=PSF)
+    g.load_poly_factors(a01=0., a02=0., a03=0., a04=0., a05=0., a06=0.,
+                         b01=1000., b02=0., b03=0., b04=0., b05=0., b06=0.,
+                         c01=0., c02=0., c03=0., d01=0.)
+    g.load_poly_coefficients()
+    g.get_trace()
+    g.set_wave_array()
+    g.use_psf = False
+    g.use_lsf = False
+    return g
+
+
+def test_c_dispersion_matches_r_rotated_90_clockwise():
+    """C-pupil dispersion of a galaxy equals R-pupil dispersion of the same
+    galaxy rotated 90 deg CLOCKWISE (utils.rotate_coords' own sign convention
+    -- positive theta is clockwise), with the R output's spatial axis then
+    reversed.
+
+    Rotation direction note: physically this is a *clockwise* 90 deg
+    rotation, not counterclockwise -- verified numerically here (exact match,
+    RMS=0 to machine precision, for theta=+pi/2; a counterclockwise rotation,
+    theta=-pi/2, does not match, with or without the spatial-axis reversal).
+    The spatial-axis reversal is also required for an exact match and isn't
+    optional: it falls out of how disperse() collapses axis=0 (C) vs axis=1
+    (R) of the same (spatial_y, spatial_x, wavelength) cube -- summing over
+    each axis maps back to the retained axis with opposite index handedness,
+    independent of any calibration.
+
+    Uses identical synthetic linear dispersion coefficients for both pupils
+    (see _make_linear_grism) so real AR/AC calibration differences can't
+    contaminate the comparison -- this isolates geko's own rotation +
+    pupil-collapse code, which is what's under test.
+    """
+    im_shape = 45
+    grism_R = _make_linear_grism('R', im_shape=im_shape)
+    grism_C = _make_linear_grism('C', im_shape=im_shape)
+
+    center = (im_shape - 1) / 2
+
+    def gaussian_blob(xc, yc, sigma=3.0):
+        yy, xx = np.mgrid[0:im_shape, 0:im_shape]
+        return np.exp(-(((xx - xc) ** 2 + (yy - yc) ** 2) / (2 * sigma ** 2)))
+
+    # Offset asymmetric in x and y (dx != dy, dx != -dy) so a clockwise vs
+    # counterclockwise rotation give genuinely different, distinguishable results.
+    xc0, yc0 = center + 4.0, center + 10.0
+    F_C = gaussian_blob(xc0, yc0)
+    V = np.zeros((im_shape, im_shape))
+    D = 50.0 * np.ones((im_shape, im_shape))
+
+    image_C = np.array(grism_C.disperse(F_C, V, D))
+
+    # theta=+pi/2 is clockwise per utils.rotate_coords' documented convention
+    xc_rot, yc_rot = utils.rotate_coords(xc0, yc0, center, center, np.pi / 2)
+    F_R = gaussian_blob(float(xc_rot), float(yc_rot))
+    image_R_rotated = np.array(grism_R.disperse(F_R, V, D))
+
+    np.testing.assert_allclose(image_C, image_R_rotated[::-1, :], atol=1e-10)
+
+    # Counterclockwise (theta=-pi/2) should NOT match -- guards against the
+    # rotation-direction convention silently flipping in a future change.
+    xc_rot_ccw, yc_rot_ccw = utils.rotate_coords(xc0, yc0, center, center, -np.pi / 2)
+    F_R_ccw = gaussian_blob(float(xc_rot_ccw), float(yc_rot_ccw))
+    image_R_ccw = np.array(grism_R.disperse(F_R_ccw, V, D))
+    assert not np.allclose(image_C, image_R_ccw[::-1, :], atol=1e-6)
+    assert not np.allclose(image_C, image_R_ccw, atol=1e-6)
 
 
 # ============================================================================

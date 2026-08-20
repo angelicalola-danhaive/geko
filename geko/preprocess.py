@@ -6,7 +6,7 @@ Eventually should also add here scripts to automatically create folders for sour
     Written by A L Danhaive: ald66@cam.ac.uk
 """
 
-__all__ = ['run_full_preprocessing', 'prep_grism']
+__all__ = ['run_full_preprocessing', 'prep_grism', 'read_grism_reference_radec']
 
 #imports
 from . import  utils
@@ -200,6 +200,18 @@ def preprocess_data(grism_spectrum_path,wavelength, delta_wave_cutoff = 0.02, fi
     return module, pupil, jnp.array(obs_map), jnp.array(obs_error),  wave_space, d_wave, index_min, index_max, wavelength
 
 
+def read_grism_reference_radec(grism_spectrum_path):
+    """Read RA0/DEC0 (the grism reduction's reference sky position for the
+    source, corresponding to the grism model's own center pixel -- see
+    grism.py's icenter/jcenter) straight from the grism FITS header, without
+    re-running the rest of preprocessing.
+
+    Used by fitting.py to anchor set_parametric_priors' WCS-based PySersic
+    centroid conversion (geko.wcs_utils) to the same sky position the grism
+    reference frame is centered on.
+    """
+    with fits.open(grism_spectrum_path) as hdul:
+        return float(hdul[0].header['RA0']), float(hdul[0].header['DEC0'])
 
 
 def define_mock_params():

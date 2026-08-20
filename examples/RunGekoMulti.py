@@ -169,6 +169,9 @@ parser.add_argument('--manual_master_cat', type=str, default=None,
                     help='manual master catalog path (for field=manual)')
 parser.add_argument('--manual_psf', type=str, default=None,
                     help='manual PSF filename in psfs/ directory (for field=manual)')
+parser.add_argument('--pysersic_cutout_dir', type=str, default=None,
+                    help='directory containing PySersic input cutout FITS files (with a WCS), '
+                         'for the WCS-based PySersic-to-grism prior conversion (field=manual only)')
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -183,6 +186,7 @@ if __name__ == "__main__":
     multi_obs_catalog_file = args.multi_obs_catalog
     manual_master_cat = args.manual_master_cat
     manual_psf = args.manual_psf
+    pysersic_cutout_dir = args.pysersic_cutout_dir
 
     # Load the multi-observation catalog
     # Expected columns: ID, grism_file, theta_rot, dispersion, field, z_spec (optional)
@@ -335,7 +339,8 @@ if __name__ == "__main__":
                         config=fit_config,
                         manual_psf_name=manual_psf if field_value == 'manual' else None,
                         manual_theta_rot=obs_theta_rot,
-                        manual_grism_file=obs_grism_file
+                        manual_grism_file=obs_grism_file,
+                        pysersic_cutout_dir=pysersic_cutout_dir if field_value == 'manual' else None
                     )
                     print(f"  ✓ Completed {obs_name} individual fit")
                 except Exception as e:
@@ -364,7 +369,8 @@ if __name__ == "__main__":
                 source_id=output_id,
                 field=field_value,
                 config=fit_config,
-                manual_psf_name=manual_psf if field_value == 'manual' else None
+                manual_psf_name=manual_psf if field_value == 'manual' else None,
+                pysersic_cutout_dir=pysersic_cutout_dir if field_value == 'manual' else None
             )
 
             plt.close('all')

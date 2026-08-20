@@ -10,6 +10,7 @@ from . import grism
 
 import os
 import glob
+import re
 
 import jax
 import jax.numpy as jnp
@@ -36,6 +37,8 @@ import argparse
 import corner
 
 from astropy.table import Table
+from astropy.io import fits
+from astropy.wcs import WCS
 
 from photutils.segmentation import detect_sources, deblend_sources, make_2dgaussian_kernel, SourceCatalog
 from photutils.background import Background2D
@@ -452,11 +455,74 @@ def _autodiscover_pysersic_file(save_runs_path, source_id):
     return None
 
 
+def _autodiscover_pysersic_cutout(pysersic_cutout_dir, source_id, manual_pysersic_file):
+    """Given the resolved PySersic summary filename
+    (summary_{source_id}_image_{FILTER}_svi.cat), locate the matching
+    PySersic input cutout FITS ({pysersic_cutout_dir}/{source_id}_{FILTER}.fits,
+    which carries the WCS -- see make_cutouts_sapphires.py). Returns the
+    path, or None (with a warning) if pysersic_cutout_dir wasn't given, the
+    filename can't be parsed, or the file doesn't exist."""
+    if pysersic_cutout_dir is None or manual_pysersic_file is None:
+        return None
+    match = re.match(r'summary_\d+_image_(\w+)_svi\.cat', manual_pysersic_file)
+    if not match:
+        print(f"WARNING: could not parse a filter out of PySersic filename "
+              f"{manual_pysersic_file!r}; cannot locate its cutout WCS.")
+        return None
+    cutout_path = os.path.join(pysersic_cutout_dir, f'{source_id}_{match.group(1)}.fits')
+    if not os.path.exists(cutout_path):
+        print(f"WARNING: PySersic cutout FITS not found at {cutout_path}.")
+        return None
+    return cutout_path
+
+
+def _resolve_pysersic_wcs(field, pysersic_available, pysersic_cutout_dir, source_id,
+                          manual_pysersic_file, grism_spectrum_path):
+    """Resolve (cutout_wcs, ref_ra, ref_dec) for set_parametric_priors' WCS-
+    based PySersic conversion, for field='manual' only (see geko.wcs_utils).
+
+    Raises if a PySersic summary file *was* found (pysersic_available=True)
+    but the cutout/WCS can't be resolved -- this bug (hardcoded, wrong
+    pixel-scale/cutout-size assumptions) silently corrupted priors for
+    months, so once WCS support exists a missing cutout should fail loudly
+    rather than silently fall back. If no PySersic file was found at all
+    (pysersic_available=False, using config priors instead), that's a
+    distinct, legitimate, unaffected path -- returns (None, None, None).
+    """
+    if field != 'manual' or not pysersic_available:
+        return None, None, None
+
+    cutout_path = _autodiscover_pysersic_cutout(pysersic_cutout_dir, source_id, manual_pysersic_file)
+    if cutout_path is None:
+        raise FileNotFoundError(
+            f"PySersic summary file {manual_pysersic_file!r} was found for source {source_id}, "
+            f"but its cutout FITS (for WCS-based prior conversion) could not be resolved. "
+            f"Pass pysersic_cutout_dir pointing at the directory containing "
+            f"'{source_id}_{{FILTER}}.fits' (see make_cutouts_sapphires.py)."
+        )
+
+    with fits.open(cutout_path) as hdul:
+        cutout_wcs = WCS(hdul['SCI'].header)
+    if not cutout_wcs.has_celestial:
+        # astropy doesn't raise on a header with no real WCS keywords -- it
+        # silently builds a degenerate WCS (CRVAL=(0,0), CDELT=1deg/px) whose
+        # pixel_to_world() returns plain numbers, not sky coordinates. Left
+        # unchecked this fails later with a confusing low-level error deep in
+        # spherical_offsets_to(); catch it here with an actionable message.
+        raise ValueError(
+            f"Cutout FITS at {cutout_path} has no valid celestial WCS in its 'SCI' "
+            f"header (missing/invalid CTYPE, CRVAL, CD/CDELT). Cannot do the "
+            f"WCS-based PySersic prior conversion for source {source_id}."
+        )
+    ref_ra, ref_dec = pre.read_grism_reference_radec(grism_spectrum_path)
+    return cutout_wcs, ref_ra, ref_dec
+
+
 def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chains, num_warmup, num_samples,
                  source_id, field, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5, wave_factor=9,
                  model_name='Disk', config=None, flux_scaling=None,
                  manual_psf_name=None, manual_theta_rot=None, manual_pysersic_file=None,
-                 manual_grism_file=None):
+                 manual_grism_file=None, pysersic_cutout_dir=None):
     """
     Run geko fitting without requiring a YAML config file.
 
@@ -506,6 +572,13 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
     manual_grism_file : str, optional
         Grism spectrum filename (required if field='manual')
         Should be in save_runs_path/output/ directory
+    pysersic_cutout_dir : str, optional
+        Directory containing the PySersic input cutout FITS files
+        ({source_id}_{FILTER}.fits, with a WCS -- see make_cutouts_sapphires.py),
+        used for the WCS-based PySersic-to-grism prior conversion (field='manual'
+        only). If a PySersic summary file is used but this can't resolve a
+        cutout WCS, raises rather than silently using the legacy fixed-scale
+        conversion.
 
     Returns
     -------
@@ -607,9 +680,14 @@ def run_geko_fit(output, master_cat, line, parametric, save_runs_path, num_chain
 
         # Set priors: PySersic first (if available), then config overrides always applied on top
         if pysersic_available:
+            grism_spectrum_path = save_runs_path + output + '/' + manual_grism_file
+            cutout_wcs, ref_ra, ref_dec = _resolve_pysersic_wcs(
+                field, pysersic_available, pysersic_cutout_dir, source_id,
+                manual_pysersic_file, grism_spectrum_path)
             kin_model.galaxy_model.set_parametric_priors(
                 pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
-                delta_wave, theta_rot=theta_rot, shape=obs_map.shape[0]
+                delta_wave, theta_rot=theta_rot, shape=obs_map.shape[0],
+                cutout_wcs=cutout_wcs, ref_ra=ref_ra, ref_dec=ref_dec
             )
         else:
             print("\nUsing config priors (no PySersic file available)...")
@@ -657,7 +735,7 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
                        num_chains, num_warmup, num_samples, source_id, field, grism_filter='F444W',
                        delta_wave_cutoff=0.02, factor=5, wave_factor=9, model_name='Disk', config=None,
                        flux_scaling=None, manual_psf_name=None, manual_pysersic_file=None, step_size=0.1,
-                       adapt_step_size=True, target_accept_prob=0.8):
+                       adapt_step_size=True, target_accept_prob=0.8, pysersic_cutout_dir=None):
     """
     Run geko multi-observation fitting for multiple grism observations.
 
@@ -714,6 +792,9 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
         PSF filename (required if field='manual')
     manual_pysersic_file : str, optional
         PySersic results filename (required if field='manual' and parametric=True)
+    pysersic_cutout_dir : str, optional
+        Directory containing the PySersic input cutout FITS files (with a WCS)
+        for the WCS-based prior conversion -- see run_geko_fit's docstring.
     step_size : float, optional
         MCMC step size (default: 0.1)
     adapt_step_size : bool, optional
@@ -829,9 +910,14 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
         # one GrismObservation, relying on the prior alone -- this makes the multi-obs prior setup
         # consistent with that.
         if pysersic_available:
+            grism_spectrum_path = save_runs_path + output + '/' + first_obs_file
+            cutout_wcs, ref_ra, ref_dec = _resolve_pysersic_wcs(
+                field, pysersic_available, pysersic_cutout_dir, source_id,
+                manual_pysersic_file, grism_spectrum_path)
             kin_model.galaxy_model.set_parametric_priors(
                 pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
-                delta_wave, theta_rot=0.0, shape=obs_map_ref.shape[0]
+                delta_wave, theta_rot=0.0, shape=obs_map_ref.shape[0],
+                cutout_wcs=cutout_wcs, ref_ra=ref_ra, ref_dec=ref_dec
             )
         else:
             print("\nUsing config priors (no PySersic file available)...")
@@ -957,7 +1043,7 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
 def postprocess_geko_fit_multi(observations_config, output, master_cat, line, parametric, save_runs_path,
                                source_id, field, grism_filter='F444W', delta_wave_cutoff=0.02, factor=5,
                                wave_factor=9, model_name='Disk', config=None, flux_scaling=None,
-                               manual_psf_name=None, manual_pysersic_file=None):
+                               manual_psf_name=None, manual_pysersic_file=None, pysersic_cutout_dir=None):
     """
     Re-run postprocessing (derived quantities, results table, summary plots) for an
     existing multi-observation geko fit, without re-running MCMC.
@@ -1053,9 +1139,14 @@ def postprocess_geko_fit_multi(observations_config, output, master_cat, line, pa
     # adjust_for_observation() call (inside compute_model_parametric_multi below)
     # does the one correct rotation into that observation's frame.
     if pysersic_available:
+        grism_spectrum_path = save_runs_path + output + '/' + first_obs_file
+        cutout_wcs, ref_ra, ref_dec = _resolve_pysersic_wcs(
+            field, pysersic_available, pysersic_cutout_dir, source_id,
+            manual_pysersic_file, grism_spectrum_path)
         kin_model.galaxy_model.set_parametric_priors(
             pysersic_summary, [int_flux, int_flux_err], z_spec, wavelength,
-            delta_wave, theta_rot=0.0, shape=obs_map_ref.shape[0]
+            delta_wave, theta_rot=0.0, shape=obs_map_ref.shape[0],
+            cutout_wcs=cutout_wcs, ref_ra=ref_ra, ref_dec=ref_dec
         )
     else:
         print("\nUsing config priors (no PySersic file available)...")

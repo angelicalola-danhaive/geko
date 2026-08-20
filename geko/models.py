@@ -219,12 +219,22 @@ class GalaxyModel:
 				return spec.prior_std
 		raise AttributeError("amplitude ParameterSpec not found")
 
-	def set_parametric_priors(self, py_table, flux_measurements, redshift, wavelength, delta_wave, theta_rot=0.0, shape=31):
-		"""Set morphological and kinematic priors from PySersic fitting results."""
+	def set_parametric_priors(self, py_table, flux_measurements, redshift, wavelength, delta_wave, theta_rot=0.0, shape=31,
+	                          cutout_wcs=None, ref_ra=None, ref_dec=None):
+		"""Set morphological and kinematic priors from PySersic fitting results.
+
+		cutout_wcs/ref_ra/ref_dec : optional
+			If given, the PySersic centroid/PA/r_eff are converted into the
+			grism reference frame via the PySersic cutout's own WCS (pixel
+			scale and true sky orientation) instead of the legacy hardcoded
+			40x40px/2x-scale assumption -- see geko.wcs_utils. ref_ra/ref_dec
+			(degrees) is the grism's own reference sky position (RA0/DEC0).
+		"""
 		from .param_spec import _apply_overrides_to_specs
+		from . import wcs_utils
 
 		arcsec_per_kpc = cosmo.arcsec_per_kpc_proper(redshift).value
-		kpc_per_pixel = 0.063 / arcsec_per_kpc
+		kpc_per_pixel = wcs_utils.GRISM_PIXEL_SCALE_ARCSEC / arcsec_per_kpc
 
 		ellip = py_table['ellip_q50'][0]
 		inclination = utils.compute_inclination(ellip=ellip, q0=0.2)
@@ -232,7 +242,37 @@ class GalaxyModel:
 		                   (inclination - utils.compute_inclination(ellip=py_table['ellip_q16'][0], q0=0.2))) / 2
 		inclination_std = inclination_err
 
-		r_eff_UV = py_table['r_eff_q50'][0] / 2
+		xc_center, yc_center = (shape - 1) / 2, (shape - 1) / 2
+
+		if cutout_wcs is not None and ref_ra is not None and ref_dec is not None:
+			pix_ratio = wcs_utils.cutout_pixel_scale_arcsec(cutout_wcs) / wcs_utils.GRISM_PIXEL_SCALE_ARCSEC
+
+			r_eff_UV = py_table['r_eff_q50'][0] * pix_ratio
+
+			dx_ref_px, dy_ref_px = wcs_utils.sky_to_reference_pixel_offset(
+				cutout_wcs, py_table['xc_q50'][0], py_table['yc_q50'][0],
+				ref_ra, ref_dec, wcs_utils.GRISM_PIXEL_SCALE_ARCSEC)
+			xc_morph = xc_center + dx_ref_px
+			yc_morph = yc_center + dy_ref_px
+
+			theta = jnp.radians(wcs_utils.cutout_direction_to_reference_frame_angle_deg(
+				cutout_wcs, py_table['xc_q50'][0], py_table['yc_q50'][0], py_table['theta_q50'][0]))
+		else:
+			print("WARNING: set_parametric_priors called without cutout_wcs/ref_ra/ref_dec -- "
+			      "falling back to the LEGACY fixed-scale morphology-prior conversion, which is "
+			      "only correct for 40x40px PySersic cutouts at exactly 2x the grism's pixel "
+			      "scale. Pass cutout_wcs/ref_ra/ref_dec (or pysersic_cutout_dir at the "
+			      "fitting.py / driver-script level) for the WCS-accurate conversion.")
+			r_eff_UV = py_table['r_eff_q50'][0] / 2
+
+			xc_morph_py = py_table['xc_q50'][0] / 2
+			xc_morph = xc_morph_py + (shape - 20) / 2
+
+			yc_morph_py = py_table['yc_q50'][0] / 2
+			yc_morph = yc_morph_py + (shape - 20) / 2
+
+			theta = py_table['theta_q50'][0]
+
 		r_eff_Ha = r_eff_UV
 		r_eff_std = np.maximum(3, r_eff_Ha)
 
@@ -246,18 +286,11 @@ class GalaxyModel:
 		amplitude = utils.int_flux_to_flux_density(int_flux, wavelength, delta_wave)
 		amplitude_std = utils.int_flux_to_flux_density(int_flux, wavelength, delta_wave)
 
-		xc_morph_py = py_table['xc_q50'][0] / 2
-		xc_morph = xc_morph_py + (shape - 20) / 2
 		xc_std = 0.25 * r_eff_Ha
-
-		yc_morph_py = py_table['yc_q50'][0] / 2
-		yc_morph = yc_morph_py + (shape - 20) / 2
 		yc_std = 0.25 * r_eff_Ha
 
-		xc_center, yc_center = (shape - 1) / 2, (shape - 1) / 2
 		xc_morph_rot, yc_morph_rot = utils.rotate_coords(xc_morph, yc_morph, xc_center, yc_center, theta_rot)
 
-		theta = py_table['theta_q50'][0]
 		print('Rotating the prior by', theta_rot, 'radians, from', theta, 'radians to', theta - theta_rot, 'radians')
 		theta_rot_adj = (theta - theta_rot) % (2 * jnp.pi)
 

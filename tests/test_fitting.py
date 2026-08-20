@@ -280,7 +280,8 @@ def test_run_geko_fit_function():
                       'num_chains', 'num_warmup', 'num_samples', 'source_id', 'field',
                       'grism_filter', 'delta_wave_cutoff', 'factor', 'wave_factor',
                       'model_name', 'config', 'flux_scaling', 'manual_psf_name',
-                      'manual_theta_rot', 'manual_pysersic_file', 'manual_grism_file']
+                      'manual_theta_rot', 'manual_pysersic_file', 'manual_grism_file',
+                      'pysersic_cutout_dir']
 
     actual_params = list(sig.parameters.keys())
     assert actual_params == expected_params
