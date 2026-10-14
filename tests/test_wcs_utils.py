@@ -183,3 +183,112 @@ def test_wcs_rotation_composes_correctly_with_adjust_for_observation():
 		and np.isclose(float(obs_params_wrong_sign['yc_morph']), rotated_direct['yc_morph'], atol=1e-3)
 		and np.isclose(float(obs_params_wrong_sign['PA_morph']), rotated_direct['PA_morph'], atol=1e-3)
 	)
+
+
+# ============================================================================
+# Invariance to the PySersic cutout's size, pixel scale and framing
+# ============================================================================
+
+# One fixed physical galaxy, defined purely on the sky relative to the grism
+# reference position (RA0, DEC0).
+GAL_EAST_ARCSEC, GAL_NORTH_ARCSEC = 0.12, -0.08
+GAL_R_EFF_ARCSEC = 0.09
+GAL_MAJOR_AXIS_EAST, GAL_MAJOR_AXIS_NORTH = 0.6, 0.8  # sky direction of the major axis
+
+# (n_pix, pixel scale ["/px], cutout centre offset from the galaxy [" E, " N], CROTA2 [deg]).
+# Covers the legacy 40x40 @ 0.03"/px case, larger/smaller and even/odd
+# sizes, other pixel scales (incl. native grism scale), cutouts not centred
+# on the galaxy, and a rotated cutout.
+CUTOUT_CONFIGS = [
+	(40, 0.03, (0.0, 0.0), 0.0),
+	(40, 0.03, (0.25, -0.15), 0.0),
+	(75, 0.03, (0.0, 0.0), 0.0),
+	(101, 0.03, (-0.6, 0.4), 0.0),
+	(64, 0.04, (0.1, 0.1), 0.0),
+	(33, wcs_utils.GRISM_PIXEL_SCALE_ARCSEC, (0.0, 0.0), 0.0),
+	(50, 0.02, (0.05, -0.2), 25.0),
+]
+
+
+def _galaxy_sky_position():
+	from astropy.coordinates import SkyCoord
+	ref = SkyCoord(ra=RA0 * u.deg, dec=DEC0 * u.deg)
+	return ref.spherical_offsets_by(GAL_EAST_ARCSEC * u.arcsec, GAL_NORTH_ARCSEC * u.arcsec)
+
+
+def _make_cutout(n_pix, scale_arcsec, centre_offset_arcsec, crota2_deg):
+	"""Synthetic PySersic input cutout of n_pix x n_pix pixels at
+	scale_arcsec, whose central pixel is centre_offset_arcsec (E, N) away
+	from the galaxy, and the PySersic summary table that a fit of the fixed
+	physical galaxy above would produce *in that cutout's own pixel frame*."""
+	gal = _galaxy_sky_position()
+	cutout_centre = gal.spherical_offsets_by(
+		centre_offset_arcsec[0] * u.arcsec, centre_offset_arcsec[1] * u.arcsec)
+
+	scale_deg = scale_arcsec / 3600.0
+	crota = np.radians(crota2_deg)
+	w = WCS(naxis=2)
+	w.wcs.ctype = ['RA---TAN', 'DEC--TAN']
+	w.wcs.crval = [cutout_centre.ra.deg, cutout_centre.dec.deg]
+	w.wcs.crpix = [(n_pix - 1) / 2 + 1, (n_pix - 1) / 2 + 1]
+	w.wcs.cd = [
+		[-scale_deg * np.cos(crota), -scale_deg * np.sin(crota)],
+		[-scale_deg * np.sin(crota), scale_deg * np.cos(crota)],
+	]
+	w.pixel_shape = (n_pix, n_pix)
+
+	xc, yc = (float(v) for v in w.world_to_pixel(gal))
+	assert 0 <= xc <= n_pix - 1 and 0 <= yc <= n_pix - 1, "test galaxy must lie inside the cutout"
+
+	# Major-axis angle in this cutout's own pixel frame (PySersic convention:
+	# CCW from the cutout's +x axis), derived from the fixed sky direction.
+	step = 0.05  # arcsec
+	tip = gal.spherical_offsets_by(GAL_MAJOR_AXIS_EAST * step * u.arcsec,
+	                               GAL_MAJOR_AXIS_NORTH * step * u.arcsec)
+	x_tip, y_tip = (float(v) for v in w.world_to_pixel(tip))
+	theta = np.arctan2(y_tip - yc, x_tip - xc) % (2 * np.pi)
+
+	py_table = Table({
+		'ellip_q50': [0.4], 'ellip_q84': [0.45], 'ellip_q16': [0.35],
+		'r_eff_q50': [GAL_R_EFF_ARCSEC / scale_arcsec],
+		'n_q50': [1.5],
+		'xc_q50': [xc], 'yc_q50': [yc],
+		'theta_q50': [theta], 'theta_q84': [theta + 0.05], 'theta_q16': [theta - 0.05],
+	})
+	return w, py_table
+
+
+def _priors_from_cutout(n_pix, scale_arcsec, centre_offset_arcsec, crota2_deg):
+	w, py_table = _make_cutout(n_pix, scale_arcsec, centre_offset_arcsec, crota2_deg)
+	gm = GalaxyModel(SHAPE, 5)
+	gm.set_parametric_priors(
+		py_table, [1e-17, 1e-18], redshift=6.0, wavelength=4.0, delta_wave=0.01,
+		theta_rot=0.0, shape=SHAPE, cutout_wcs=w, ref_ra=RA0, ref_dec=DEC0)
+	return {name: _get_mu(gm.morph_model, name)
+	        for name in ['xc_morph', 'yc_morph', 'r_eff', 'PA_morph']}
+
+
+@pytest.mark.parametrize('n_pix, scale_arcsec, centre_offset_arcsec, crota2_deg', CUTOUT_CONFIGS)
+def test_priors_match_absolute_sky_truth_for_any_cutout(n_pix, scale_arcsec, centre_offset_arcsec, crota2_deg):
+	"""Whatever the cutout's size, pixel scale or framing, the centroid and
+	r_eff priors must land where the galaxy truly is in the grism reference
+	frame: (RA0, DEC0) at the frame centre, +x = West, +y = North,
+	GRISM_PIXEL_SCALE_ARCSEC per pixel."""
+	priors = _priors_from_cutout(n_pix, scale_arcsec, centre_offset_arcsec, crota2_deg)
+	grism_scale = wcs_utils.GRISM_PIXEL_SCALE_ARCSEC
+	assert priors['xc_morph'] == pytest.approx(CENTER - GAL_EAST_ARCSEC / grism_scale, abs=1e-4)
+	assert priors['yc_morph'] == pytest.approx(CENTER + GAL_NORTH_ARCSEC / grism_scale, abs=1e-4)
+	assert priors['r_eff'] == pytest.approx(GAL_R_EFF_ARCSEC / grism_scale, abs=1e-6)
+
+
+def test_priors_invariant_to_cutout_size_scale_and_framing():
+	"""The same physical galaxy described by differently-sized, -scaled,
+	-centred and -rotated PySersic cutouts must yield identical priors,
+	including PA_morph (compared mod 180, since a PA is axial)."""
+	results = [_priors_from_cutout(*cfg) for cfg in CUTOUT_CONFIGS]
+	ref = results[0]
+	for cfg, res in zip(CUTOUT_CONFIGS[1:], results[1:]):
+		for name in ['xc_morph', 'yc_morph', 'r_eff']:
+			assert res[name] == pytest.approx(ref[name], abs=1e-4), (cfg, name)
+		dpa = (res['PA_morph'] - ref['PA_morph'] + 90.0) % 180.0 - 90.0
+		assert abs(dpa) < 1e-3, (cfg, res['PA_morph'], ref['PA_morph'])
