@@ -71,7 +71,7 @@ def create_mock_observation(dispersion, theta_rot_deg, name):
     theta_rot_rad = np.radians(theta_rot_deg)
 
     # Adjust PA for this observation
-    PA_obs = PA - theta_rot_deg
+    PA_obs = PA + theta_rot_deg
 
     # Rotate centroids
     xc_obs, yc_obs = utils.rotate_coords(

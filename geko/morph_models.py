@@ -85,7 +85,9 @@ class SersicMorphology(MorphologyModel):
         import jax.numpy as jnp
         theta_rad = jnp.radians(theta_rot_deg)
         obs_params = dict(morph_params)
-        obs_params['PA_morph'] = morph_params['PA_morph'] - theta_rot_deg
+        # PA is measured from +y towards +x, so the clockwise rotate_coords(theta)
+        # applied to the centroids below turns it by +theta
+        obs_params['PA_morph'] = morph_params['PA_morph'] + theta_rot_deg
         xc_obs, yc_obs = utils.rotate_coords(
             morph_params['xc_morph'], morph_params['yc_morph'],
             center, center, theta_rad,

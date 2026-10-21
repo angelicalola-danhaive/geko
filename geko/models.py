@@ -773,7 +773,9 @@ class GrismFitter(KinModels):
 
 			# Rotate all observation-dependent parameters into this observation's frame
 			theta_rot_rad = jnp.radians(obs.theta_rot)
-			Pa_obs = Pa_ref - obs.theta_rot
+			# +theta_rot: PA (from +y towards +x) must turn with the same clockwise
+			# rotate_coords(theta_rot) applied to the centroids below
+			Pa_obs = Pa_ref + obs.theta_rot
 
 			# Morphology model handles its own spatial rotation (PA, centroids, etc.)
 			morph_params_obs = self.galaxy_model.morph_model.adjust_for_observation(
@@ -1069,7 +1071,7 @@ class GrismFitter(KinModels):
 			theta_rot_rad = jnp.radians(obs.theta_rot)
 
 			# Adjust PA for this observation
-			Pa_obs = self.PA_mean - obs.theta_rot
+			Pa_obs = self.PA_mean + obs.theta_rot
 
 			# Rotate morphological params (PA_morph, centroids) into this obs frame
 			morph_params_obs = self.galaxy_model.morph_model.adjust_for_observation(

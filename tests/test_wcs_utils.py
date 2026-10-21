@@ -96,27 +96,46 @@ def test_centroid_offset_invariant_to_cutout_rotation():
 def test_reference_frame_angle_degenerate_case():
 	"""Zero-rotation WCS (matches every real SAPPHIRES cutout exactly):
 	theta=0 (pointing along the cutout's own +x = West) -> 0deg;
-	theta=pi/2 (pointing along +y = North) -> 270deg. Hand-derivable directly
-	from the function's definition (-atan2(dy_ref, dx_ref) mod 360) without
-	going through any rotated-WCS reasoning."""
+	theta=pi/2 (pointing along +y = North) -> 90deg, i.e. the angle passes
+	through unchanged since the cutout axes coincide with the reference axes."""
 	w = make_wcs(0.0)
 	angle0 = wcs_utils.cutout_direction_to_reference_frame_angle_deg(w, CENTER, CENTER, 0.0)
 	angle90 = wcs_utils.cutout_direction_to_reference_frame_angle_deg(w, CENTER, CENTER, np.pi / 2)
 	assert min(angle0 % 360, 360 - angle0 % 360) < 1e-4
-	assert abs((angle90 % 360) - 270.0) < 1e-4
+	assert abs((angle90 % 360) - 90.0) < 1e-4
 
 
 def test_reference_frame_angle_rotation_sign():
 	"""This is the test that actually catches a sign/parity bug -- real
 	SAPPHIRES data structurally cannot, since every real cutout has zero
-	rotation. A cutout WCS physically rotated by +phi must shift the derived
-	angle by exactly +phi (mod 360), not -phi."""
+	rotation. With a fixed pixel-frame theta, a cutout WCS rotated by
+	CROTA2=+phi turns the sky content clockwise in the reference frame (the
+	same sense as rotate_coords(+phi), see the composition test below), so
+	the derived CCW math angle must shift by exactly -phi (mod 360)."""
 	theta_rad = 0.6
 	phi = 30.0
 	angle0 = wcs_utils.cutout_direction_to_reference_frame_angle_deg(make_wcs(0.0), CENTER, CENTER, theta_rad)
 	angle_phi = wcs_utils.cutout_direction_to_reference_frame_angle_deg(make_wcs(phi), CENTER, CENTER, theta_rad)
-	assert (angle_phi - angle0) % 360 == pytest.approx(phi, abs=1e-6)
-	assert (angle_phi - angle0) % 360 != pytest.approx(-phi % 360, abs=1e-3)
+	assert (angle_phi - angle0) % 360 == pytest.approx(-phi % 360, abs=1e-6)
+	assert (angle_phi - angle0) % 360 != pytest.approx(phi, abs=1e-3)
+
+
+def test_wcs_pa_matches_legacy_and_pysersic_convention():
+	"""For a north-up cutout the WCS path must give the same PA_morph prior as
+	the legacy path, and both must match PySersic's own convention: its major
+	axis lies at theta + 90deg CCW from +x, i.e. geko PA (from +y towards +x)
+	= 180 - theta (mod 180)."""
+	for theta in [0.3, 1.0, 2.2]:
+		gm_wcs, gm_legacy = GalaxyModel(SHAPE, 5), GalaxyModel(SHAPE, 5)
+		table = _make_py_table()
+		table['theta_q50'], table['theta_q16'], table['theta_q84'] = [theta], [theta - 0.05], [theta + 0.05]
+		kw = dict(redshift=6.0, wavelength=4.0, delta_wave=0.01, theta_rot=0.0, shape=SHAPE)
+		gm_wcs.set_parametric_priors(table, [1e-17, 1e-18], cutout_wcs=make_wcs(0.0), ref_ra=RA0, ref_dec=DEC0, **kw)
+		gm_legacy.set_parametric_priors(table, [1e-17, 1e-18], **kw)
+		truth = (180.0 - np.degrees(theta)) % 180.0
+		for gm in (gm_wcs, gm_legacy):
+			dpa = (_get_mu(gm.morph_model, 'PA_morph') - truth + 90.0) % 180.0 - 90.0
+			assert abs(dpa) < 1e-6
 
 
 # ============================================================================

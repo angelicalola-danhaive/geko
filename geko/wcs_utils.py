@@ -85,19 +85,13 @@ def cutout_direction_to_reference_frame_angle_deg(cutout_wcs, x_pix, y_pix, thet
 	Goes through pixel_to_world (not raw CD/PC algebra) so it's robust to
 	whatever WCS representation the cutout uses.
 
-	Note the sign: this is the *negative* of the (x=West,y=North) reference-
-	frame math angle you'd naively expect. The pre-existing, unchanged
-	theta_rot_adj/PA wrap-around formula downstream in set_parametric_priors
-	has an effective -1 slope relative to its `theta` input (calibrated for
-	photutils' own `cat.orientation` sign convention) -- verified via a
-	synthetic end-to-end composition test (set_parametric_priors with a
-	rotated cutout WCS at theta_rot=0 vs. an unrotated cutout WCS +
-	adjust_for_observation) that the *centroid* conversion
-	(sky_to_reference_pixel_offset, which has no such negation) composes
-	correctly with adjust_for_observation(theta_rot_deg=+phi) for a cutout
-	physically rotated by +phi; matching that for PA_morph requires this
-	function's raw West/North angle to be negated first, to counteract that
-	downstream -1 slope.
+	For a north-up/east-left cutout (+x = West, the same axes as the reference
+	frame) this returns theta_rad unchanged, so the result feeds the downstream
+	set_parametric_priors formula (PA = 180 - theta, PySersic's major axis lying
+	at theta + 90deg from +x) exactly as the raw PySersic theta does on the
+	legacy path. An earlier version negated this angle to compensate for
+	adjust_for_observation rotating PA_morph by -theta_rot (opposite to its
+	centroid rotation); both signs have since been fixed together.
 	"""
 	sky0 = cutout_wcs.pixel_to_world(x_pix, y_pix)
 	sky1 = cutout_wcs.pixel_to_world(
@@ -107,4 +101,4 @@ def cutout_direction_to_reference_frame_angle_deg(cutout_wcs, x_pix, y_pix, thet
 	d_lon, d_lat = sky0.spherical_offsets_to(sky1)
 	dx_ref = -d_lon.to(u.arcsec).value  # West component
 	dy_ref = d_lat.to(u.arcsec).value   # North component
-	return -np.degrees(np.arctan2(dy_ref, dx_ref)) % 360.0
+	return np.degrees(np.arctan2(dy_ref, dx_ref)) % 360.0
