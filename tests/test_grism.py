@@ -332,3 +332,74 @@ def test_grism_observation_shape_mismatch(grism_instance):
             theta_rot=45.0,
             dispersion='R'
         )
+
+import jax.numpy as jnp
+
+
+def _gaussian_psf_grism(pupil, sigma_px=1.0, n=45):
+    """Grism with a round Gaussian PSF (sigma in detector px) and model-resolution wave bins."""
+    wave = 4.4
+    wave_space = np.arange(wave - 0.03, wave + 0.03, 0.00098 / 5)
+    yy, xx = np.mgrid[:15, :15] - 7
+    PSF = np.exp(-(xx**2 + yy**2) / (2 * sigma_px**2))
+    return Grism(n, im_scale=0.0629/5, icenter=4, jcenter=4, wavelength=wave, wave_space=wave_space,
+                 index_min=0, index_max=wave_space.shape[0], grism_filter='F444W', grism_module='A',
+                 grism_pupil=pupil, PSF=PSF)
+
+
+def _wavelength_rms(spec):
+    s = np.asarray(spec).sum(axis=0)
+    l = np.arange(s.size)
+    m = (s * l).sum() / s.sum()
+    return np.sqrt((s * (l - m)**2).sum() / s.sum())
+
+
+@pytest.mark.parametrize("pupil", ["R", "C"])
+def test_psf_off_matches_dispersion_offset_model(pupil):
+    """Without the PSF, shifting by disp_shift after building the true-wavelength cube
+    must reproduce the direct model (line centred at wavelength*V/c + wave_array)."""
+    g = _gaussian_psf_grism(pupil)
+    g.use_psf = False
+    n = g.im_shape
+    yy, xx = np.mgrid[:n, :n] - n // 2
+    F = np.exp(-np.hypot(xx, 0.6 * yy) / 6.0)
+    V = 150 * np.tanh(xx / 5.0) + 80 * np.tanh(yy / 5.0)
+    D = 50 * np.ones_like(F)
+    c_kms = 299792.458
+    ws = g.wave_space
+    edges = np.concatenate([ws[:1] - g.wave_scale / 2, 0.5 * (ws[1:] + ws[:-1]), ws[-1:] + g.wave_scale / 2])
+    from geko.grism import _disperse_gaussian_core
+    cube = _disperse_gaussian_core(F, g.wavelength * V / c_kms + g.wave_array, g.wavelength * D / c_kms, jnp.asarray(edges))
+    expected = np.asarray(jnp.sum(cube, axis=1 if pupil == 'R' else 0))
+    result = np.asarray(g.disperse(F, V, D))
+    assert np.allclose(result, expected, atol=1e-8 * expected.max())
+
+
+@pytest.mark.parametrize("pupil", ["R", "C"])
+def test_psf_broadens_line_along_dispersion(pupil):
+    """A point source with a narrow line must come out with the PSF's dispersion-axis
+    width in wavelength: rms_on^2 = rms_off^2 + rms_psf^2 (in model bins)."""
+    g = _gaussian_psf_grism(pupil, sigma_px=1.0)
+    n = g.im_shape
+    F = np.zeros((n, n)); F[n // 2, n // 2] = 1.0
+    V = np.zeros_like(F); D = 5 * np.ones_like(F)
+    g.use_psf = False
+    rms_off = _wavelength_rms(g.disperse(F, V, D))
+    g.use_psf = True
+    rms_on = _wavelength_rms(g.disperse(F, V, D))
+    psf = np.asarray(g.oversampled_PSF)
+    prof = psf.sum(axis=0) if pupil == 'R' else psf.sum(axis=1)
+    l = np.arange(prof.size); m = (prof * l).sum() / prof.sum()
+    rms_psf = np.sqrt((prof * (l - m)**2).sum() / prof.sum())
+    assert rms_on > 3 * rms_off
+    assert np.isclose(rms_on, np.hypot(rms_off, rms_psf), rtol=0.02)
+
+
+def test_spatial_fftconvolve_matches_jax_fftconvolve():
+    from jax.scipy.signal import fftconvolve
+    from geko.grism import _spatial_fftconvolve_same
+    rng = np.random.default_rng(0)
+    for shape, k in [((155, 155, 12), (75, 75)), ((40, 33, 7), (9, 9)), ((30, 32, 5), (10, 12))]:
+        cube = jnp.asarray(rng.random(shape)); K = jnp.asarray(rng.random(k))
+        ref = fftconvolve(cube, K[:, :, None], mode='same')
+        assert np.allclose(_spatial_fftconvolve_same(cube, K), ref, atol=1e-9 * float(jnp.abs(ref).max()))
