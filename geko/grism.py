@@ -194,7 +194,7 @@ class Grism:
 	factor : int
 		Oversampling factor between model and detector
 	"""
-	def __init__(self, im_shape, im_scale = 0.031, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None):
+	def __init__(self, im_shape, im_scale = 0.031, icenter = 5, jcenter = 5, wavelength = 4.2 , wave_space = None, index_min = None, index_max = None, grism_filter = 'F444W', grism_module = 'A', grism_pupil = 'R', PSF = None, psf_oversampled = False):
 
 		# Validate pupil parameter
 		if grism_pupil not in ['R', 'C']:
@@ -205,6 +205,7 @@ class Grism:
 
 		self.im_shape = im_shape #used to be self.im_shape
 		self.im_scale = im_scale #used to be self.direct_scale
+		self.psf_oversampled = psf_oversampled #True if PSF is given at model resolution (see compute_PSF)
 
 		self.set_detector_scale(0.0629) #setting to JWST resolution but made it a function so that it's easy to change as the outside user
 
@@ -734,7 +735,8 @@ class Grism:
 		Parameters
 		----------
 		PSF : numpy.ndarray or jax.numpy.ndarray
-			2D Point Spread Function at detector resolution
+			2D Point Spread Function at detector resolution, or already at model
+			resolution (detector scale / factor) if self.psf_oversampled is True
 
 		Notes
 		-----
@@ -742,15 +744,23 @@ class Grism:
 		- oversampled_PSF: PSF oversampled by self.factor and normalized
 		- PSF: 3D array with shape (spatial_y, spatial_x, 1) for broadcasting
 
-		If factor=1, uses input PSF directly. Otherwise oversamples using bilinear
-		interpolation.
+		If factor=1 or psf_oversampled=True, uses input PSF directly. Otherwise
+		oversamples using bilinear interpolation.
 		"""
 		#sets the grism object's oversampled PSF and the velocity space needed for the cube
 		if self.factor == 1:
 			self.oversampled_PSF = PSF
 		else:
-			# self.oversampled_PSF = utils.oversample_PSF(PSF, self.factor)
-			self.oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method = 'bilinear')
+			if self.psf_oversampled:
+				# Already at model resolution (e.g. STPSF OVERDIST at oversample=factor): this is
+				# the optical PSF before pixel integration, so use it as-is. The detector pixel
+				# response is applied once, when the model is binned to detector pixels.
+				self.oversampled_PSF = jnp.asarray(PSF)
+			else:
+				# Detector-pixel PSF (e.g. empirical mosaic PSF): interpolate to model resolution.
+				# Note such a PSF already contains the pixel response, which the binning to
+				# detector pixels then applies a second time.
+				self.oversampled_PSF = utils.oversample(PSF, self.factor, self.factor, method = 'bilinear')
 			# No crop: the input PSF is already cut to its detector-pixel stamp (e.g. 15x15),
 			# so the oversampled kernel keeps all of it. The previous 9x9 model-pixel crop
 			# (1.8 detector px at factor=5) kept only ~25-30% of the PSF flux.

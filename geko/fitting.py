@@ -441,7 +441,6 @@ class Fit_Numpyro():
             print('WARNING: create_mask found no source at the central pixel; using the full cutout as mask')
             return np.ones(self.obs_map.shape)
 
-
         # construct mask
         mask = segment_map.data
         new_mask = np.zeros_like(mask)
@@ -761,6 +760,9 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
             - 'theta_rot': float, rotation angle in degrees (for morphology alignment)
             - 'dispersion': str, 'R' (row) or 'C' (column) dispersion direction
             - 'name': str, optional name for this observation (default: 'obsN')
+            - 'psf_name': str, optional PSF filename in save_runs_path/psfs/ for this
+              observation (default: manual_psf_name). A PSF whose PIXELSCL equals the
+              model scale (0.0629"/factor) is used as-is; otherwise it is resampled.
         Example:
             [
                 {'grism_file': 'spec_2d_PA0.fits', 'theta_rot': 0.0, 'dispersion': 'R', 'name': 'PA0'},
@@ -840,7 +842,7 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
             factor=factor,
             wave_factor=wave_factor,
             model_name=model_name,
-            manual_psf_name=manual_psf_name,
+            manual_psf_name=observations_config[0].get('psf_name', manual_psf_name),
             manual_grism_file=first_obs_file
         )
 
@@ -970,7 +972,7 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
                 factor=factor,
                 wave_factor=wave_factor,
                 model_name=model_name,
-                manual_psf_name=manual_psf_name,
+                manual_psf_name=obs_config.get('psf_name', manual_psf_name),
                 manual_grism_file=grism_file
             )
 
@@ -1042,7 +1044,7 @@ def run_geko_fit_multi(observations_config, output, master_cat, line, parametric
     summary, kin_model, inf_data = post.process_results_multi(
         observations, results, output, master_cat, line, parametric, source_id, save_runs_path,
         field, grism_filter, delta_wave_cutoff, factor, wave_factor, model_name,
-        manual_psf_name=manual_psf_name, manual_grism_file=observations_config[0]['grism_file'])
+        manual_psf_name=observations_config[0].get('psf_name', manual_psf_name), manual_grism_file=observations_config[0]['grism_file'])
 
     print("\nMulti-observation fitting complete!")
     for name, stats in summary.items():
@@ -1081,7 +1083,7 @@ def postprocess_geko_fit_multi(observations_config, output, master_cat, line, pa
             factor=factor,
             wave_factor=wave_factor,
             model_name=model_name,
-            manual_psf_name=manual_psf_name,
+            manual_psf_name=observations_config[0].get('psf_name', manual_psf_name),
             manual_grism_file=first_obs_file
         )
 
@@ -1192,7 +1194,7 @@ def postprocess_geko_fit_multi(observations_config, output, master_cat, line, pa
                 factor=factor,
                 wave_factor=wave_factor,
                 model_name=model_name,
-                manual_psf_name=manual_psf_name,
+                manual_psf_name=obs_config.get('psf_name', manual_psf_name),
                 manual_grism_file=grism_file
             )
 
@@ -1218,7 +1220,7 @@ def postprocess_geko_fit_multi(observations_config, output, master_cat, line, pa
     summary, kin_model, inf_data = post.process_results_multi(
         observations, results, output, master_cat, line, parametric, source_id, save_runs_path,
         field, grism_filter, delta_wave_cutoff, factor, wave_factor, model_name,
-        manual_psf_name=manual_psf_name, manual_grism_file=observations_config[0]['grism_file'])
+        manual_psf_name=observations_config[0].get('psf_name', manual_psf_name), manual_grism_file=observations_config[0]['grism_file'])
 
     print("\nPost-processing complete!")
     for name, stats in summary.items():

@@ -12,6 +12,7 @@ __all__ = ['run_full_preprocessing', 'prep_grism', 'read_grism_reference_radec']
 from . import  utils
 from . import  grism #just for now since in active dev
 from . import  models
+from . import  wcs_utils
 # import run_pysersic as py
 
 import numpy as np
@@ -403,11 +404,27 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
         psf_path = save_runs_path + 'psfs/mpsf_jw018950.gs.f444w.fits'
 
     # Check if PSF is provided in mock_params (for Roman or other mock tests)
+    psf_oversampled = False
     if mock_params is not None and 'PSF' in mock_params:
         PSF = mock_params['PSF']
+        psf_oversampled = bool(mock_params.get('psf_oversampled', False))
     else:
-        PSF = fits.getdata(psf_path)
-        PSF = utils.downsample_psf_centered(PSF, size = 15)
+        PSF, psf_header = fits.getdata(psf_path, header=True)
+        psf_scale = utils.read_psf_pixel_scale(psf_header, fits.getheader(psf_path, 0))
+        if psf_scale is None:
+            psf_scale = utils.DEFAULT_PSF_PIXEL_SCALE_ARCSEC
+            print(f"WARNING: no PIXELSCL/PIXSCALE keyword in {psf_path}; assuming "
+                  f"{psf_scale} arcsec/px. Add PIXELSCL to the PSF header if this is wrong.")
+        model_scale = wcs_utils.GRISM_PIXEL_SCALE_ARCSEC / factor
+        if abs(psf_scale - model_scale) / model_scale < 0.01:
+            # PSF already at model resolution (e.g. an optical STPSF PSF computed with
+            # oversample=factor): use it directly, without resampling to detector pixels
+            # (which would add the pixel response the model's detector binning applies anyway)
+            PSF = np.asarray(PSF, dtype=float)
+            psf_oversampled = True
+            print(f"Using model-resolution PSF {psf_path} ({psf_scale:.5f} arcsec/px, shape {PSF.shape}) as-is")
+        else:
+            PSF = utils.resample_psf_centered(PSF, psf_scale, wcs_utils.GRISM_PIXEL_SCALE_ARCSEC, out_size = 15)
     #run pysersic fit to get morphological parameters
     if mock_params == None:
         path_output = save_runs_path + output
@@ -430,7 +447,7 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
         #setting by default the dispersion center at the center of the image in its original resolution 
         icenter = jcenter = obs_map.shape[0]//2
         grism_object = grism.Grism(im_shape, im_scale, icenter = icenter, jcenter = jcenter, wavelength = wavelength, wave_space = wave_space_model, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor,
-                       grism_filter = grism_filter, grism_module = module, grism_pupil = pupil, PSF = PSF)
+                       grism_filter = grism_filter, grism_module = module, grism_pupil = pupil, PSF = PSF, psf_oversampled = psf_oversampled)
 
 
 

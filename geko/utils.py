@@ -8,7 +8,7 @@
 __all__ = ['oversample', 'resample', 'scale_distribution', 'find_best_sample', 'compute_gal_props',
            'load_psf', 'compute_inclination', 'compute_axis_ratio', 'add_v_re', 'sersic_profile',
            'compute_adaptive_sersic_profile', 'flux_to_Ie', 'Ie_to_flux', 'rotate_coords',
-           'rotate_and_upsample_scale']
+           'rotate_and_upsample_scale', 'resample_psf_centered', 'read_psf_pixel_scale']
            
 # geko imports
 
@@ -31,7 +31,7 @@ from jax.scipy.special import gamma
 
 from astropy.modeling.models import Sersic2D
 from scipy import stats
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, map_coordinates
 from photutils.segmentation import detect_sources, SourceCatalog, deblend_sources, SegmentationImage
 from photutils.background import Background2D, MedianBackground
 from photutils.aperture import EllipticalAperture
@@ -54,6 +54,7 @@ from scipy import stats as st
 from . import  models
 
 import os
+import warnings
 
 from pathlib import Path
 
@@ -401,39 +402,112 @@ def save_fits_image(image, masked_indices, inference_data, filename):
 
     hdul.writeto(filename, overwrite=True)
     
-def downsample_psf_centered(psf_full, size):
-    """
-    Crop a PSF around its centre and downsample from 0.031 to 0.063 arcsec/px.
+# Pixel scale assumed for PSF files whose header doesn't state one: the
+# mpsf_*.fits empirical PSFs are at 2x the LW detector sampling.
+DEFAULT_PSF_PIXEL_SCALE_ARCSEC = 0.031
 
-    The input PSF is at 2× detector oversampling (0.031 arcsec/px). The output
-    is at detector scale (0.063 arcsec/px), ready for compute_PSF which then
-    upsamples to model resolution.
+
+def read_psf_pixel_scale(*headers):
+    """
+    Pixel scale (arcsec/px) of a PSF from its FITS header(s), or None.
+
+    Looks for PIXELSCL (written by WebbPSF/STPSF) or PIXSCALE in each header
+    in turn and returns the first one found.
+    """
+    for header in headers:
+        if header is None:
+            continue
+        for key in ('PIXELSCL', 'PIXSCALE'):
+            if key in header:
+                return float(header[key])
+    return None
+
+
+def resample_psf_centered(psf, psf_scale_arcsec, out_scale_arcsec, out_size):
+    """
+    Resample a PSF of any (odd) size and pixel scale onto an odd-sized grid at
+    a different pixel scale, keeping the PSF centre fixed on the central pixel.
+
+    The input's central pixel ((n-1)/2, n odd) maps exactly onto the output's
+    central pixel ((out_size-1)/2), and each output pixel takes the bilinearly
+    interpolated input value at its centre, so any scale ratio -- integer or
+    not, up or down -- is handled. No extra pixel integration is applied: an
+    empirical PSF already includes the detector pixel response, and the grism
+    model bins its oversampled cube to detector pixels itself. Regions of the
+    output grid not covered by the input are zero-padded (with a warning).
 
     Parameters
     ----------
-    psf_full : numpy.ndarray
-        Full PSF array at 0.031 arcsec/px (e.g. 669×669).
-    size : int
-        Half-width of the crop in input pixels; crop is (2*size+1, 2*size+1).
-        Output shape is approximately (size, size) after 2× downsampling.
+    psf : array_like
+        Square 2D PSF with an odd number of pixels per side, centred on its
+        central pixel.
+    psf_scale_arcsec : float
+        Pixel scale of the input PSF, in arcsec/px.
+    out_scale_arcsec : float
+        Pixel scale of the output grid, in arcsec/px.
+    out_size : int
+        Number of output pixels per side (must be odd).
 
     Returns
     -------
     numpy.ndarray
-        PSF at detector scale (0.063 arcsec/px), shape ≈ (size, size).
+        (out_size, out_size) PSF at out_scale_arcsec, normalized to sum to 1.
     """
-    cy, cx = psf_full.shape[0] // 2, psf_full.shape[1] // 2
-    psf_crop = np.array(psf_full[cy - size:cy + size + 1,
-                                  cx - size:cx + size + 1])
-    # Target an odd output so there is an exact central pixel.
-    # size/(2*size+1) maps the input centre exactly to the output centre.
+    psf = np.asarray(psf, dtype=float)
+    if psf.ndim != 2 or psf.shape[0] != psf.shape[1]:
+        raise ValueError(f"PSF must be a square 2D array, got shape {psf.shape}.")
+    if psf.shape[0] % 2 == 0:
+        raise ValueError(
+            f"PSF must have an odd number of pixels per side so its centre is a "
+            f"pixel centre, got shape {psf.shape}.")
+    if out_size % 2 == 0:
+        raise ValueError(f"out_size must be odd, got {out_size}.")
+
+    c_in = (psf.shape[0] - 1) / 2
+    peak = np.unravel_index(np.argmax(psf), psf.shape)
+    if max(abs(peak[0] - c_in), abs(peak[1] - c_in)) > 1:
+        warnings.warn(
+            f"PSF peak is at pixel {peak}, more than 1 px from the array centre "
+            f"({c_in:.0f}, {c_in:.0f}); the array centre is used as the PSF centre.")
+
+    ratio = out_scale_arcsec / psf_scale_arcsec  # input px per output px
+    c_out = (out_size - 1) / 2
+    if (c_out + 0.5) * ratio > c_in + 0.5:
+        warnings.warn(
+            f"PSF ({psf.shape[0]} px at {psf_scale_arcsec}\"/px) does not cover the "
+            f"requested output ({out_size} px at {out_scale_arcsec}\"/px); "
+            f"zero-padding the outskirts.")
+
+    offsets = (np.arange(out_size) - c_out) * ratio
+    yy, xx = np.meshgrid(c_in + offsets, c_in + offsets, indexing='ij')
+    out = map_coordinates(psf, [yy, xx], order=1, mode='constant', cval=0.0)
+    return out / out.sum()
+
+
+def downsample_psf_centered(psf_full, size):
+    """
+    Resample a PSF at DEFAULT_PSF_PIXEL_SCALE_ARCSEC (0.031 arcsec/px) to the
+    grism detector scale (0.0629 arcsec/px), keeping its centre fixed.
+
+    Thin wrapper around resample_psf_centered, kept for existing callers.
+
+    Parameters
+    ----------
+    psf_full : numpy.ndarray
+        Full PSF array at 0.031 arcsec/px (e.g. 669×669, odd).
+    size : int
+        Output size in detector pixels (rounded down to odd).
+
+    Returns
+    -------
+    numpy.ndarray
+        PSF at detector scale, shape (size, size) (or size-1 if size is even),
+        normalized to sum to 1.
+    """
+    from .wcs_utils import GRISM_PIXEL_SCALE_ARCSEC
     out_size = size if size % 2 == 1 else size - 1
-    # skimage.transform.resize uses pixel-centre coordinates (same convention as
-    # jax.image.resize used in compute_PSF), so the PSF peak maps exactly to the
-    # central output pixel. scipy.ndimage.zoom uses pixel-boundary coordinates and
-    # shifts the peak by ~0.3 px for this zoom factor.
-    return sk_resize(psf_crop, (out_size, out_size), order=1,
-                     anti_aliasing=False, preserve_range=True)
+    return resample_psf_centered(psf_full, DEFAULT_PSF_PIXEL_SCALE_ARCSEC,
+                                 GRISM_PIXEL_SCALE_ARCSEC, out_size)
 
 def load_psf( filter, y_factor, size = 9, psf_folder = 'mpsf_gds/'):
     """

@@ -403,3 +403,17 @@ def test_spatial_fftconvolve_matches_jax_fftconvolve():
         cube = jnp.asarray(rng.random(shape)); K = jnp.asarray(rng.random(k))
         ref = fftconvolve(cube, K[:, :, None], mode='same')
         assert np.allclose(_spatial_fftconvolve_same(cube, K), ref, atol=1e-9 * float(jnp.abs(ref).max()))
+
+
+def test_model_resolution_psf_used_as_is():
+    """psf_oversampled=True: a PSF given at model resolution is used unchanged (only
+    normalised), not interpolated again by the oversampling factor."""
+    wave = 4.4
+    wave_space = np.arange(wave - 0.03, wave + 0.03, 0.00098 / 5)
+    yy, xx = np.mgrid[:75, :75] - 37
+    psf = np.exp(-(xx**2 + yy**2) / (2 * 6.0**2))
+    g = Grism(45, im_scale=0.0629/5, icenter=4, jcenter=4, wavelength=wave, wave_space=wave_space,
+              index_min=0, index_max=wave_space.shape[0], grism_filter='F444W', grism_module='A',
+              grism_pupil='R', PSF=psf, psf_oversampled=True)
+    assert g.oversampled_PSF.shape == (75, 75)
+    assert np.allclose(np.asarray(g.oversampled_PSF), psf / psf.sum())
