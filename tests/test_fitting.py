@@ -452,3 +452,36 @@ class TestMultiObservationFitting:
         observations = [grism_obs]
         assert len(observations) == 1
         assert observations[0].dispersion == 'R'
+
+def _mask_holder(obs_map, obs_error):
+    from types import SimpleNamespace
+    return SimpleNamespace(obs_map=obs_map, obs_error=obs_error)
+
+
+def _blob(shape, yc, xc, sigma=2.5, amp=20.0):
+    yy, xx = np.mgrid[:shape[0], :shape[1]]
+    return amp * np.exp(-((yy - yc)**2 + (xx - xc)**2) / (2 * sigma**2))
+
+
+def test_create_mask_no_sources_uses_full_cutout():
+    rng = np.random.default_rng(1)
+    obs_map = rng.normal(0, 1, (31, 41)); obs_error = np.ones_like(obs_map)
+    from geko.fitting import Fit_Numpyro
+    mask = Fit_Numpyro.create_mask(_mask_holder(obs_map, obs_error))
+    assert mask.shape == obs_map.shape and np.all(mask == 1)
+
+
+def test_create_mask_offcentre_source_uses_full_cutout():
+    rng = np.random.default_rng(2)
+    obs_map = rng.normal(0, 1, (31, 41)) + _blob((31, 41), 5, 6); obs_error = np.ones_like(obs_map)
+    from geko.fitting import Fit_Numpyro
+    mask = Fit_Numpyro.create_mask(_mask_holder(obs_map, obs_error))
+    assert np.all(mask == 1)
+
+
+def test_create_mask_central_source_selects_source():
+    rng = np.random.default_rng(3)
+    obs_map = rng.normal(0, 1, (31, 41)) + _blob((31, 41), 15, 20); obs_error = np.ones_like(obs_map)
+    from geko.fitting import Fit_Numpyro
+    mask = Fit_Numpyro.create_mask(_mask_holder(obs_map, obs_error))
+    assert mask[15, 20] == 1 and mask[0, 0] == 0 and 0 < mask.sum() < mask.size

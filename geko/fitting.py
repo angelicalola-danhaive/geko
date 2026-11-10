@@ -430,7 +430,17 @@ class Fit_Numpyro():
 
         segment_map = detect_sources(im_conv, sigma_rms*np.abs(bkg.background_median), npixels=10)
 
+        # Fall back to fitting the full cutout when segmentation finds nothing, or when
+        # the central pixel is background (label 0, which would otherwise select every
+        # background pixel instead of the source)
+        if segment_map is None:
+            print('WARNING: create_mask found no sources in the grism spectrum; using the full cutout as mask')
+            return np.ones(self.obs_map.shape)
         main_label = segment_map.data[int(0.5*self.obs_map.shape[0]), int(0.5*self.obs_map.shape[1])]
+        if main_label == 0:
+            print('WARNING: create_mask found no source at the central pixel; using the full cutout as mask')
+            return np.ones(self.obs_map.shape)
+
 
         # construct mask
         mask = segment_map.data
