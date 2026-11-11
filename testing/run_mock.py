@@ -8,7 +8,7 @@ from geko import models
 
 from geko.fitting import Fit_Numpyro
 from geko.config import FitConfiguration, MCMCSettings
-from geko.postprocess import compute_derived_posterior, summarize_posterior, DERIVED_QUANTITIES
+from geko.postprocess import compute_derived_posterior, summarize_posterior, DERIVED_QUANTITIES, compute_information_gain
 from geko.param_spec import _apply_overrides_to_specs, all_param_specs
 from geko.models import GalaxyModel
 from numpyro.infer import Predictive
@@ -577,13 +577,22 @@ def save_results(config_path, inf_data, z_spec, test, j, truth_rot_params, r_eff
 
 	# Truth v_re: model-agnostic via rotation_curve(r_eff, truth_rot_params)
 	v_circ_truth = float(gm.rot_model.rotation_curve(jnp.array([r_eff_truth]), truth_rot_params)[0])
-	v_re_truth = v_circ_truth * np.sin(np.radians(i_true))
+	v_re_truth = v_circ_truth
 	if len(res) > 0:
 		res['v_re_truth'] = v_re_truth
 
 	results_path = 'testing/' + str(save_folder) + '/' + 'results_' + str(j)
 	res.write(results_path, format='ascii', overwrite=True)
 	print(f'Saved per-iteration results table to {results_path}')
+
+	try:
+		info_table = compute_information_gain(inf_data, sampled_names)
+		if len(info_table) > 0:
+			info_path = 'testing/' + str(save_folder) + '/info_gain_' + str(j)
+			info_table.write(info_path, format='ascii', overwrite=True)
+			print(f'Saved information gain table to {info_path}')
+	except Exception as e:
+		print(f'Warning: failed to compute information gain: {e}')
 
 	v_re_med = summary.get('v_re', {}).get('50', np.nan)
 	return summary, v_re_truth, kin_model
@@ -678,7 +687,7 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	    'PA_morph_mu': PA_image[j], 'PA_morph_std': 5.0,
 	    'r_eff_mu': r_eff_true, 'r_eff_std': float(max(3.0, r_eff_true)),
 	    'r_eff_min': 0.0, 'r_eff_max': 15.0,
-	    'n_mu': float(n[j]), 'n_std': 1.0, 'n_min': 0.36, 'n_max': 8.0,
+	    'n_mu': float(n[j]), 'n_std': 1.0, 'n_min': utils.SERSIC_N_MIN, 'n_max': 8.0,
 	    'amplitude_mu': 200.0, 'amplitude_std': 40.0, 'amplitude_min': 0.0,
 	    'xc_morph_mu': 15.0, 'xc_morph_std': 1.0,
 	    'yc_morph_mu': 15.0, 'yc_morph_std': 1.0,
@@ -692,11 +701,18 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 	_morph_defaults.update(fit_config.morph_prior_overrides)
 	_geom_defaults.update(fit_config.geom_prior_overrides)
 
+	# keep everything else from the passed config (fixed_params, rotation-prior
+	# overrides, morphology model, flux scaling); only MCMC settings and the
+	# merged morph/geom priors are replaced
 	fit_config = FitConfiguration(
+	    morphology_model=fit_config.morphology_model,
 	    rotation_components=fit_config.rotation_components,
 	    mcmc=MCMCSettings(num_chains=num_chains, num_warmup=num_warmup, num_samples=num_samples),
 	    morph_prior_overrides=_morph_defaults,
 	    geom_prior_overrides=_geom_defaults,
+	    rot_prior_overrides=fit_config.rot_prior_overrides,
+	    fixed_params=fit_config.fixed_params,
+	    flux_scaling=fit_config.flux_scaling,
 	)
 
 	mock_params['grism_object'].use_lsf = inference_lsf

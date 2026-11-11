@@ -47,6 +47,24 @@ parser.add_argument('--inference_lsf', action='store_true', default=False,
 # parser.add_argument('--psf_path', type=str, default='gdn_mpsf_F356W_small.fits',
 #                     help='psf file path') #psf file path --> add the default here
 
+# -----------------------------------------------------------------------
+# Fit overrides, applied to every test iteration (empty = geko defaults).
+# These only change the INFERENCE; the mock is still generated from the
+# config table, so e.g. fixing a parameter to a wrong value tests the effect
+# of a mis-specified model. Keys and values as in geko.config.FitConfiguration:
+#   fixed_params          {'n': 6.0} pins a parameter, {'x0_vel': 'xc_morph'} links it
+#   morph_prior_overrides {'r_eff_max': 20.0, 'n_mu': 2.0, ...}   ({name}_{mu|std|min|max})
+#   geom_prior_overrides  {'sigma0_max': 300.0, 'i_std': 5.0, ...} (PA, i, sigma0, v0, ...)
+#   rot_prior_overrides   {'Va_max': 400.0, ...}                  (rotation-curve components)
+# Prior tests (--test prior_test*) add their per-row prior centres on top.
+FIT_OVERRIDES = {
+	'fixed_params': {},
+	'morph_prior_overrides': {},
+	'geom_prior_overrides': {},
+	'rot_prior_overrides': {},
+}
+# -----------------------------------------------------------------------
+
 if __name__ == "__main__":
 	
 	args = parser.parse_args()
@@ -164,18 +182,19 @@ if __name__ == "__main__":
 		if n[j] is None or not np.isfinite(float(n[j])) or n[j] <= 0:
 			n[j] = 1
 
+		overrides = {k: dict(v) for k, v in FIT_OVERRIDES.items()}
 		if is_prior_test:
-			# Build per-iteration config with prior centres from the original table values
-			iter_cfg = FitConfiguration(
-			    rotation_components=_default_cfg.rotation_components,
-			    morph_prior_overrides={
-			        'r_eff_mu': float(_prior_r_eff[j]),
-			        'r_eff_std': float(max(3.0, _prior_r_eff[j])),
-			        'n_mu': float(_prior_n[j]),
-			    },
-			)
-		else:
-			iter_cfg = _default_cfg
+			# prior centres for this row from the original table values
+			overrides['morph_prior_overrides'].update({
+			    'r_eff_mu': float(_prior_r_eff[j]),
+			    'r_eff_std': float(max(3.0, _prior_r_eff[j])),
+			    'n_mu': float(_prior_n[j]),
+			})
+		iter_cfg = FitConfiguration(
+		    morphology_model=_default_cfg.morphology_model,
+		    rotation_components=_default_cfg.rotation_components,
+		    **overrides,
+		)
 
 		run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 		         SN_image, SN_grism, n, psf, params_dict, params_single, res,
