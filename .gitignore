@@ -172,9 +172,10 @@ nircam_grism_real/
 
 *.md
 
-# Testing scripts (keep only run_mock.py)
-testing/*.py
+# testing/: scratch area; only the mock-run scripts are tracked
+testing/*
 !testing/run_mock.py
+!testing/run_mock_multi_obs.py
 doc/_build/
 scripts/
 demo/simple_fit_demo_files/my_galaxy/191250_output
