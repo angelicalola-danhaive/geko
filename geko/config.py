@@ -31,7 +31,23 @@ class FluxScalingConfig:
 
 @dataclass
 class MCMCSettings:
-    """MCMC sampling configuration"""
+    """MCMC sampling configuration.
+
+    Parameters
+    ----------
+    chain_method : str
+        How numpyro runs multiple chains: 'parallel' (one chain per device, the
+        numpyro default -- falls back to sequential if there are fewer devices
+        than chains), 'sequential', or 'vectorized' (all chains vmapped on one
+        device; the efficient choice for several chains on a single GPU).
+    init_strategy : str
+        How each chain is initialised: 'median' (prior median, the historical
+        default -- all chains start at essentially the same point), 'uniform'
+        (each chain drawn independently from Uniform(-2, 2) in unconstrained
+        space, i.e. roughly +-2 sigma for Normal priors and 12-88% of the range
+        for bounded priors), or 'sample' (each chain drawn from the prior).
+        Use 'uniform' with >= 4 chains to diagnose multimodality.
+    """
 
     num_chains: int = 4
     num_warmup: int = 500
@@ -39,6 +55,8 @@ class MCMCSettings:
     target_accept_prob: float = 0.8
     max_tree_depth: int = 10
     step_size: float = 0.1
+    chain_method: str = 'parallel'
+    init_strategy: str = 'median'
 
 
 @dataclass
@@ -153,7 +171,8 @@ class FitConfiguration:
                   f"sigma_smooth={self.flux_scaling.sigma_smooth}")
         print(f"\nMCMC Settings:")
         for f_name in ('num_chains', 'num_warmup', 'num_samples',
-                       'target_accept_prob', 'max_tree_depth', 'step_size'):
+                       'target_accept_prob', 'max_tree_depth', 'step_size',
+                       'chain_method', 'init_strategy'):
             print(f"  {f_name}: {getattr(self.mcmc, f_name)}")
 
     def save(self, filename: str, output_dir: str = None):

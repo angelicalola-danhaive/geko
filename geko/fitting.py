@@ -53,6 +53,22 @@ from astropy.cosmology import Planck18 as cosmo
 # setup.configure_plots()
 
 
+_INIT_STRATEGIES = {
+    'median': lambda: init_to_median(num_samples=2000),
+    'uniform': lambda: init_to_uniform(radius=2),
+    'sample': lambda: init_to_sample(),
+}
+
+
+def make_init_strategy(name):
+    """Map an MCMCSettings.init_strategy name to a numpyro init function."""
+    try:
+        return _INIT_STRATEGIES[name]()
+    except KeyError:
+        raise ValueError(f"Unknown init_strategy {name!r}; choose from {sorted(_INIT_STRATEGIES)}") from None
+
+
+
 class Fit_Numpyro():
     def __init__(self, obs_map, obs_error, grism_object, kin_model, inference_data, parametric, config=None):
         """ Class to fit model to data
@@ -157,17 +173,23 @@ class Fit_Numpyro():
             inference_model = self.kin_model.inference_model_parametric
         else:
             inference_model = self.kin_model.inference_model
-        self.nuts_kernel = NUTS(inference_model,  step_size=step_size, adapt_step_size=adapt_step_size, init_strategy=init_to_median(num_samples=2000),
-                                target_accept_prob=target_accept_prob, find_heuristic_step_size=True, max_tree_depth=max_tree_depth, dense_mass=False, adapt_mass_matrix=True) 
+        # init_vals (unscaled_-site values) lets a caller seed the chain at a
+        # specific point instead of the default init_to_median -- e.g. to test
+        # whether an alternate local mode (opposite-sign Va) is real. None
+        # (the default for every existing caller) keeps today's behavior exactly.
+        init_strategy = init_to_value(values=init_vals) if init_vals is not None else make_init_strategy(mcmc_config.init_strategy)
+        self.nuts_kernel = NUTS(inference_model,  step_size=step_size, adapt_step_size=adapt_step_size, init_strategy=init_strategy,
+                                target_accept_prob=target_accept_prob, find_heuristic_step_size=True, max_tree_depth=max_tree_depth, dense_mass=False, adapt_mass_matrix=True)
         
-        print(f'MCMC settings: {num_chains} chains, {num_samples} samples, {num_warmup} warmup, max_tree_depth={max_tree_depth}, target_accept={target_accept_prob}')
+        print(f'MCMC settings: {num_chains} chains ({mcmc_config.chain_method}, init={mcmc_config.init_strategy}), {num_samples} samples, {num_warmup} warmup, max_tree_depth={max_tree_depth}, target_accept={target_accept_prob}')
         print('step size: ', step_size)
         print('warmup: ', num_warmup)
         print('samples: ', num_samples)
 
 
         self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
-                         num_warmup=num_warmup, num_chains=num_chains)
+                         num_warmup=num_warmup, num_chains=num_chains,
+                         chain_method=mcmc_config.chain_method)
         self.rng_key = random.PRNGKey(100)
 
         # Use provided mask if given, otherwise create one using photutils segmentation
@@ -272,7 +294,7 @@ class Fit_Numpyro():
             inference_model,
             step_size=step_size,
             adapt_step_size=adapt_step_size,
-            init_strategy=init_to_median(num_samples=2000),
+            init_strategy=make_init_strategy(mcmc_config.init_strategy),
             target_accept_prob=target_accept_prob,
             find_heuristic_step_size=True,
             max_tree_depth=max_tree_depth,
@@ -286,13 +308,14 @@ class Fit_Numpyro():
         print(f'Number of observations: {len(observations)}')
         for obs in observations:
             print(f'  - {obs}')
-        print(f'MCMC settings: {num_chains} chains, {num_samples} samples, {num_warmup} warmup')
+        print(f'MCMC settings: {num_chains} chains ({mcmc_config.chain_method}, init={mcmc_config.init_strategy}), {num_samples} samples, {num_warmup} warmup')
         print(f'               max_tree_depth={max_tree_depth}, target_accept={target_accept_prob}')
         print(f'{"="*60}\n')
 
         # Setup and run MCMC
         self.mcmc = MCMC(self.nuts_kernel, num_samples=num_samples,
-                        num_warmup=num_warmup, num_chains=num_chains)
+                        num_warmup=num_warmup, num_chains=num_chains,
+                        chain_method=mcmc_config.chain_method)
         self.rng_key = random.PRNGKey(100)
 
         # Run MCMC (observations and masks are captured in the closure)
