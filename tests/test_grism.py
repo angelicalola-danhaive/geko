@@ -356,8 +356,8 @@ def _wavelength_rms(spec):
 
 @pytest.mark.parametrize("pupil", ["R", "C"])
 def test_psf_off_matches_dispersion_offset_model(pupil):
-    """Without the PSF, shifting by disp_shift after building the true-wavelength cube
-    must reproduce the direct model (line centred at wavelength*V/c + wave_array)."""
+    """Without the PSF, disperse() is the collapsed direct model (line centred at
+    wavelength*V/c + wave_array in every pixel)."""
     g = _gaussian_psf_grism(pupil)
     g.use_psf = False
     n = g.im_shape
@@ -393,6 +393,66 @@ def test_psf_broadens_line_along_dispersion(pupil):
     rms_psf = np.sqrt((prof * (l - m)**2).sum() / prof.sum())
     assert rms_on > 3 * rms_off
     assert np.isclose(rms_on, np.hypot(rms_off, rms_psf), rtol=0.02)
+
+
+@pytest.mark.parametrize("pupil", ["R", "C"])
+def test_wave_array_is_continuous(pupil):
+    """wave_array follows the trace smoothly (no snapping to whole wavelength bins):
+    steps along the dispersion axis vary by << 1 bin, and the dispersed PSF kernel
+    uses their mean slope."""
+    g = _gaussian_psf_grism(pupil)
+    w = np.asarray(g.wave_array) / float(g.wave_scale)
+    trace = w[w.shape[0] // 2, :] if pupil == 'R' else w[:, w.shape[1] // 2]
+    steps = np.diff(trace)
+    assert np.ptp(steps) < 0.02
+    assert np.isclose(g.dispersion_slope, steps.mean(), rtol=1e-3)
+
+
+def _exact_dispersion_reference(g, F, V, D):
+    """Brute force: apply the 2D PSF to every wavelength slice (3D), and give light
+    landing in each dispersion-axis column/row its own continuous trace offset,
+    integrated exactly over the detector bins. No collapse-first, no kernel stretch."""
+    from jax.scipy.special import erf
+    from geko.grism import _spatial_fftconvolve_same
+    c_kms = 299792.458
+    w = np.asarray(g.wave_array)
+    ax = 1 if g.pupil == 'R' else 0
+    off = (w[w.shape[0] // 2, :] if ax == 1 else w[:, w.shape[1] // 2]) - g.wavelength
+    ws = np.asarray(g.wave_space[g.index_min:g.index_max]); d = np.diff(ws)
+    edges = np.concatenate([[ws[0] - d[0] / 2], ws[1:] - d / 2, [ws[-1] + d[-1] / 2]])
+    mu = g.wavelength * (1 + V / c_kms); sig = g.wavelength * D / c_kms
+    out = 0
+    for i in range(F.shape[ax]):
+        e = edges - off[i]
+        cdf = 0.5 * (1 + erf((e[None, None, :] - mu[..., None]) / (sig[..., None] * np.sqrt(2))))
+        cube = F[..., None] * jnp.diff(cdf, axis=2)
+        conv = _spatial_fftconvolve_same(cube, g.oversampled_PSF)
+        out = out + (conv[:, i, :] if ax == 1 else conv[i, :, :])
+    return np.asarray(out)
+
+
+@pytest.mark.parametrize("pupil", ["R", "C"])
+def test_disperse_matches_exact_3d_reference(pupil):
+    """Collapse-first disperse() with the stretched PSF reproduces the brute-force 3D
+    PSF + exact sub-bin trace model, for a narrow, rotating, off-centre line.
+    The galaxy is kept compact: the brute-force model drops light the PSF pushes
+    off the (small) model cutout along the dispersion axis, which disperse() keeps
+    (that light still lands inside the spectrum)."""
+    g = _gaussian_psf_grism(pupil, sigma_px=1.0)
+    n = g.im_shape
+    yy, xx = np.mgrid[:n, :n] - n // 2
+    xx = xx - 1.3; yy = yy + 0.7
+    F = np.exp(-np.hypot(xx, yy) / 1.5)
+    V = 150 * np.tanh((xx + yy) / 3.0)
+    D = 15 * np.ones_like(F)
+    ref = _exact_dispersion_reference(g, F, V, D)
+    out = np.asarray(g.disperse(F, V, D))
+    assert np.abs(out - ref).max() < 2e-3 * ref.max()
+    # with a delta PSF the two are identical (nothing to stretch)
+    psf = np.zeros(np.shape(g.oversampled_PSF)); psf[psf.shape[0] // 2, psf.shape[1] // 2] = 1
+    g.oversampled_PSF = jnp.asarray(psf); g._set_dispersed_psf()
+    ref = _exact_dispersion_reference(g, F, V, D)
+    assert np.allclose(np.asarray(g.disperse(F, V, D)), ref, atol=1e-10 * ref.max())
 
 
 def test_spatial_fftconvolve_matches_jax_fftconvolve():
