@@ -821,6 +821,18 @@ class Grism:
 		# self.full_kernel = jnp.array(self.PSF) * self.lsf_kernel
 
 	
+	def set_model_psf(self, psf):
+		"""
+		Replace the PSF with one already at model resolution (normalised here) and
+		rebuild everything derived from it (dispersed_PSF, sigma_inst_kms). Use this
+		instead of assigning oversampled_PSF / PSF directly, which disperse() would
+		not see.
+		"""
+		psf = jnp.asarray(psf, dtype=float)
+		self.oversampled_PSF = psf / jnp.sum(psf)
+		self.PSF = self.oversampled_PSF[:, :, jnp.newaxis]
+		self._set_dispersed_psf()
+
 	def disperse(self, F, V, D, use_lsf=True):
 		"""
 		Disperse a 3D data cube (flux, velocity, dispersion) through the grism.

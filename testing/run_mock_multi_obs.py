@@ -1,690 +1,311 @@
 """
-Multi-observation mock fitting tests
+Multi-observation mock recovery tests: run_mock.py for several grism observations.
 
-Tests how additional grism observations constrain:
-1. Velocity field parameters (PA, i, Va, r_t, sigma0)
-2. Flux model (parametric vs non-parametric)
-3. Model degeneracies and parameter correlations
+Tests how additional grism observations constrain the galaxy parameters, with the
+same mock and fitting conventions as the single-observation run_mock.py:
 
-Scenarios to test:
-- single_R: Single R observation (baseline)
-- R+C: R and C at same angle (orthogonal dispersions - maximal constraint)
-- R+R_90: Two R observations at 90° (tests PA-inclination degeneracy breaking)
+- each observation is generated with the inference model's own per-observation
+  transform (inference_model_parametric_multi): morphology rotated by theta_rot
+  (adjust_for_observation), velocity centre rotated with rotate_coords, PA turned
+  by +theta_rot, rendered with GalaxyModel.generate_flux_map / velocity_field on the
+  subpixel-centred model grid, dispersed with Grism.disperse and binned;
+- noise, the grism set-up (run_mock.initialize_grism) and preprocessing
+  (pre.run_full_preprocessing with mock_params: error scaling, S/N cap) are those
+  of run_mock.py;
+- priors are run_mock.run_test's truth-centred defaults, plus FitConfiguration
+  overrides; the joint fit is Fit_Numpyro.run_inference_multi, as in
+  run_geko_fit_multi;
+- derived quantities (v_re = rotation_curve(r_eff), v/sigma with the instrumental
+  sigma0 floor, ...) come from geko.postprocess, and the v_re truth is the
+  intrinsic rotation_curve(r_eff), as in run_mock.save_results.
+
+Scenarios:
+- single_R : one R observation (baseline)
+- single_C : one C observation (baseline)
+- R+C      : R and C at the same angle (orthogonal dispersions)
+- R+R_90   : two R observations 90 deg apart (PA-inclination degeneracy)
+
+Run from the geko repository root:
+    python testing/run_mock_multi_obs.py --scenario R+C --PA 30
+Outputs go to testing/multi_obs/<scenario>_PA<PA>/.
 """
-
-from geko import grism
-from geko import preprocess as pre
-from geko import postprocess as post
-from geko import utils
-from geko import plotting
-from geko import models
-from geko import config as geko_config
-
-from geko.fitting import Fit_Numpyro
-from geko.grism import GrismObservation
-from numpyro.infer import Predictive
-from jax import random
-
 import os
-import time
+import sys
+import argparse
 
 import jax
-from jax import image
 import jax.numpy as jnp
 import numpy as np
 import arviz as az
-
-import argparse
-import matplotlib.pyplot as plt
-
-from astropy.table import Table
-from astropy.io import fits
-from astropy.modeling.models import Gaussian2D, Sersic2D
-
-from photutils.segmentation import detect_sources, make_2dgaussian_kernel, SourceCatalog
-from photutils.background import Background2D
-from astropy.convolution import convolve as convolve_astropy
-from photutils.datasets import make_noise_image
-
-from jax.scipy.signal import convolve
 import numpyro
-from astropy.cosmology import Planck18 as cosmo
+import matplotlib.pyplot as plt
+from astropy.table import Table
+from photutils.datasets import make_noise_image
+from numpyro.infer import Predictive
+from jax import random
+
+from geko import preprocess as pre
+from geko import utils
+from geko import plotting
+from geko.fitting import Fit_Numpyro
+from geko.grism import GrismObservation
+from geko.models import GalaxyModel
+from geko.config import FitConfiguration, MCMCSettings
+from geko.postprocess import (compute_derived_posterior, summarize_posterior,
+                              DERIVED_QUANTITIES, compute_information_gain)
+from geko.param_spec import all_param_specs
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from run_mock import make_image, initialize_grism   # same mock conventions as run_mock
 
 if 'gpu' in jax.devices()[0].device_kind.lower():
     print('Using GPU')
     numpyro.set_platform('gpu')
-numpyro.set_host_device_count(2)
 numpyro.enable_validation()
 jax.config.update('jax_enable_x64', True)
 
-XLA_FLAGS='--xla_gpu_deterministic_ops=true'
+IMAGE_SHAPE = 31
+FACTOR = 5
+CENTER = 15.0           # morphological and kinematic centre (as in run_mock.run_test)
+LINE = 'H_alpha'
+
+# scenario -> list of (dispersion, theta_rot [deg], observation name)
+SCENARIOS = {
+    'single_R': [('R', 0.0, 'R_0deg')],
+    'single_C': [('C', 0.0, 'C_0deg')],
+    'R+C':      [('R', 0.0, 'R_0deg'), ('C', 0.0, 'C_0deg')],
+    'R+R_90':   [('R', 0.0, 'R_0deg'), ('R', 90.0, 'R_90deg')],
+}
 
 
-def make_grism_observation(morphology_params, PA_image, PA_grism, i, Va, r_t, sigma0,
-                           SN_grism, psf, image_shape, pupil='R', theta_rot=0.0, name=None):
-    """
-    Create a single mock grism observation (R or C dispersion).
-
-    Regenerates morphology for each observation to match the inference model,
-    which applies theta_rot rotation to both morphology and kinematics.
-
-    Parameters
-    ----------
-    morphology_params : dict
-        Morphology parameters: 'amplitude', 'r_eff', 'n', 'ellip', 'xc', 'yc'
-    PA_image : float
-        Position angle of image morphology (degrees)
-    PA_grism : float
-        Position angle for velocity field (degrees)
-    i, Va, r_t, sigma0 : float
-        Kinematic parameters
-    SN_grism : float
-        Signal-to-noise ratio for grism
-    psf : array
-        Point spread function
-    image_shape : int
-        Size of image
-    pupil : str
-        'R' for row or 'C' for column dispersion
-    theta_rot : float
-        Rotation angle for this observation (degrees)
-    name : str
-        Name for this observation
-
-    Returns
-    -------
-    grism_obs : GrismObservation
-        Observation object containing grism, data, and metadata
-    grism_spectrum : array
-        Mock grism spectrum (for visualization)
-    """
-    # Create wave space
-    wave_factor = 9
-    delta_wave = 0.001
-    wavelength = 4.5
-    delta_wave_cutoff = 0.02
-    wave_first = 4.0
-    wave_space = jnp.linspace(wave_first, 5.0, int(1/delta_wave)+1)
-
-    wave_min = wavelength - delta_wave_cutoff
-    wave_max = wavelength + delta_wave_cutoff
-    index_min = round((wave_min - wave_first)/delta_wave)
-    index_max = round((wave_max - wave_first)/delta_wave)
-
-    # Create oversampled wave space
-    half_step = (delta_wave / wave_factor)*(wave_factor//2)
-    wave_space_oversampled = np.arange(wave_space[0]- half_step, wave_space[-1] + delta_wave + half_step,
-                                       delta_wave / wave_factor)
-
-    # Initialize grism object
-    factor = 5
-    x0_grism = y0_grism = image_shape//2
-
-    grism_object = grism.Grism(
-        image_shape*factor, 0.0629/factor,
-        icenter=y0_grism, jcenter=x0_grism,
-        wavelength=wavelength, wave_space=wave_space_oversampled,
-        index_min=(index_min)*wave_factor, index_max=(index_max+1)*wave_factor,
-        grism_filter='F444W', grism_module='A', grism_pupil=pupil, PSF=psf
-    )
-
-    # Generate morphology for this observation
-    # Extract morphology parameters
-    amplitude = morphology_params['amplitude']
-    r_eff = morphology_params['r_eff']
-    n = morphology_params['n']
-    ellip = morphology_params['ellip']
-    xc = morphology_params.get('xc', image_shape // 2)
-    yc = morphology_params.get('yc', image_shape // 2)
-
-    # Build coordinate grids
-    x = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
-    y = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape)
-    x_mesh, y_mesh = jnp.meshgrid(x, y)
-    x_grid = image.resize(x_mesh, (image_shape*factor, image_shape*factor), method='linear')
-    y_grid = image.resize(y_mesh, (image_shape*factor, image_shape*factor), method='linear')
-
-    # Generate flux map (morphology) using utils.compute_adaptive_sersic_profile
-    # Convert PA to the convention used by sersic (90 - PA)
-    Ie = utils.flux_to_Ie(amplitude, n, r_eff, ellip)
-    mock_image_highres = utils.compute_adaptive_sersic_profile(
-        x_grid, y_grid, Ie/(factor)**2, r_eff, n,
-        xc - image_shape//2, yc - image_shape//2, ellip,
-        (90 - PA_image) * np.pi / 180
-    )
-
-    # Make velocity field
-    kin_model = models.GrismFitter()
-    V = kin_model.v(x_grid, y_grid, PA_grism, i, Va, r_t)
-    D = sigma0*jnp.ones_like(V)
-
-    # Make grism spectrum
-    grism_spectrum = grism_object.disperse(mock_image_highres, V, D)
-
-    # Resample to grism resolution
-    grism_spectrum = utils.resample(grism_spectrum, factor, wave_factor)
-
-    # Add noise
-    max_grism = jnp.max(grism_spectrum)
-    grism_noise = make_noise_image((grism_spectrum.shape[0], grism_spectrum.shape[1]),
-                                   distribution='gaussian', mean=0, stddev=max_grism/SN_grism)
-    grism_spectrum_noise = grism_spectrum + grism_noise
-    grism_error = (max_grism/SN_grism)*jnp.ones((grism_spectrum.shape[0], grism_spectrum.shape[1]))
-
-    # Create GrismObservation object
-    if name is None:
-        name = f"{pupil}_{theta_rot:.0f}deg"
-
-    grism_obs = GrismObservation(
-        grism=grism_object,
-        obs_map=grism_spectrum_noise,
-        obs_error=grism_error,
-        theta_rot=theta_rot,
-        dispersion=pupil,
-        name=name
-    )
-
-    return grism_obs, grism_spectrum_noise, grism_error, wave_space, index_min, index_max
-
-
-def make_multi_observation_data(PA_image, PA_grism, i, Va, r_t, sigma0,
-                                SN_image, SN_grism, n, psf,
-                                image_shape=31, scenario='R+C'):
-    """
-    Create multiple mock observations for testing.
-
-    Parameters
-    ----------
-    scenario : str
-        'single_R' : Single R observation (baseline)
-        'single_C' : Single C observation (baseline)
-        'R+C' : R and C at same angle (orthogonal dispersions)
-        'R+R_90' : Two R observations 90° apart
-
-    Returns
-    -------
-    observations : list of GrismObservation
-        List of observation objects
-    mock_image : array
-        True underlying image
-    """
-    # Make the underlying image (for visualization reference only)
-    from run_mock import make_image
-
-    image, image_highres, convolved_image, noise_image, convolved_noise_image = \
-        make_image(PA_image, i, r_t, SN_image, n, psf, image_shape)
-
-    # Create morphology parameters dict (will regenerate morphology for each observation)
-    axis_ratio = utils.compute_axis_ratio(i, q0=0.2)
-    ellip = 1 - axis_ratio
-    r_eff = (1.676/0.4) * 1  # Same as in run_mock.py
-    amplitude = 200.0  # Same as in run_mock.py
-
-    morphology_params = {
-        'amplitude': amplitude,
-        'r_eff': r_eff,
-        'n': n,
-        'ellip': ellip,
-        'xc': image_shape // 2,
-        'yc': image_shape // 2
+def default_truth(PA=0.0):
+    """Truth parameters in the sky (reference) frame; 'rot' holds the rotation-curve parameters."""
+    return {
+        'PA_image': PA, 'PA_grism': PA, 'i': 60.0, 'sigma0': 50.0,
+        'r_eff': (1.676 / 0.4) * 1.0, 'n': 1.0, 'amplitude': 200.0,
+        'xc_morph': CENTER, 'yc_morph': CENTER, 'x0_vel': CENTER, 'y0_vel': CENTER,
+        'v0': 0.0,
+        'rot': {'Va': 200.0, 'r_t': 2.0},
+        'SN_image': 50.0, 'SN_grism': 30.0,
     }
 
-    observations = []
-    spectra = []
 
-    if scenario == 'single_R':
-        # Baseline: single R observation
-        obs, spec, err, wave_space, idx_min, idx_max = make_grism_observation(
-            morphology_params, PA_image, PA_grism, i, Va, r_t, sigma0,
-            SN_grism, psf, image_shape, pupil='R', theta_rot=0.0, name='R_0deg'
-        )
-        observations.append(obs)
-        spectra.append(spec)
-
-    elif scenario == 'single_C':
-        # Baseline: single C observation
-        obs, spec, err, wave_space, idx_min, idx_max = make_grism_observation(
-            morphology_params, PA_image, PA_grism, i, Va, r_t, sigma0,
-            SN_grism, psf, image_shape, pupil='C', theta_rot=0.0, name='C_0deg'
-        )
-        observations.append(obs)
-        spectra.append(spec)
-
-    elif scenario == 'R+C':
-        # R and C at same angle - orthogonal dispersions (maximal constraint)
-        obs_R, spec_R, err_R, wave_space, idx_min, idx_max = make_grism_observation(
-            morphology_params, PA_image, PA_grism, i, Va, r_t, sigma0,
-            SN_grism, psf, image_shape, pupil='R', theta_rot=0.0, name='R_0deg'
-        )
-        obs_C, spec_C, err_C, wave_space, idx_min, idx_max = make_grism_observation(
-            morphology_params, PA_image, PA_grism, i, Va, r_t, sigma0,
-            SN_grism, psf, image_shape, pupil='C', theta_rot=0.0, name='C_0deg'
-        )
-        observations.extend([obs_R, obs_C])
-        spectra.extend([spec_R, spec_C])
-
-    elif scenario == 'R+R_90':
-        # Two R observations 90° apart - tests PA-inclination degeneracy
-        obs_R1, spec_R1, err_R1, wave_space, idx_min, idx_max = make_grism_observation(
-            morphology_params, PA_image, PA_grism, i, Va, r_t, sigma0,
-            SN_grism, psf, image_shape, pupil='R', theta_rot=0.0, name='R_0deg'
-        )
-        obs_R2, spec_R2, err_R2, wave_space, idx_min, idx_max = make_grism_observation(
-            morphology_params, PA_image-90, PA_grism-90, i, Va, r_t, sigma0,
-            SN_grism, psf, image_shape, pupil='R', theta_rot=90.0, name='R_90deg'
-        )
-        observations.extend([obs_R1, obs_R2])
-        spectra.extend([spec_R1, spec_R2])
-
-    return observations, spectra, convolved_image, wave_space, idx_min, idx_max
-
-
-def run_multi_obs_fit(observations, parametric=False, num_samples=1000, num_warmup=500, PA_prior_mean=45.0):
+def make_observation(truth, gm, psf, pupil, theta_rot, name, j, test, ideal=False):
     """
-    Run multi-observation fitting.
+    One mock grism observation at theta_rot, rendered with the inference model's
+    per-observation transform and preprocessed exactly like run_mock.
 
-    Parameters
-    ----------
-    observations : list of GrismObservation
-        Observations to fit jointly
-    parametric : bool
-        Use parametric flux model
-    num_samples, num_warmup : int
-        MCMC parameters
-    PA_prior_mean : float
-        Mean of PA prior in degrees (default: 45.0)
-
-    Returns
-    -------
-    inf_data : arviz.InferenceData
-        Posterior samples
-    kin_model : KinModels
-        Kinematic model
+    gm : GalaxyModel whose morph_model / rot_model render the mock (same model
+         classes and rotation curve as the fit).
+    Returns the GrismObservation (preprocessed obs_map, obs_error, grism) and the
+    run_full_preprocessing outputs of this observation.
     """
-    # Initialize kinematic model (GrismFitter has multi-obs inference methods)
-    kin_model = models.GrismFitter()
+    image, image_highres, convolved_image, noise_image, convolved_noise_image = make_image(
+        truth['PA_image'], truth['i'], truth['r_eff'], truth['SN_image'], truth['n'], psf,
+        IMAGE_SHAPE, xc_morph=truth['xc_morph'], yc_morph=truth['yc_morph'])
+    image_error = (jnp.max(image) / truth['SN_image']) * jnp.ones((IMAGE_SHAPE, IMAGE_SHAPE))
 
-    # Use first observation to initialize Fit_Numpyro
-    obs_first = observations[0]
+    grism_object, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min = \
+        initialize_grism(convolved_image, psf, IMAGE_SHAPE, factor=FACTOR, pupil=pupil)
+    grism_object.use_psf = True
+    grism_object.use_lsf = False      # mock is always LSF-free (as in run_mock)
 
-    # Initialize the disk model with bounds and priors
-    grism = obs_first.grism
-    im_shape_val = grism.im_shape // grism.factor
-    im_shape = (im_shape_val, im_shape_val)  # Needs to be a tuple
-    factor = grism.factor
-    wave_factor = 9  # From the test setup
-    x0 = y0 = im_shape_val // 2
-    x0_vel = y0_vel = im_shape_val // 2
+    # --- the per-observation transform of inference_model_parametric_multi ---
+    center = (IMAGE_SHAPE - 1) / 2
+    theta_rad = np.radians(theta_rot)
+    morph_sky = {'r_eff': truth['r_eff'], 'n': truth['n'], 'PA_morph': truth['PA_image'],
+                 'xc_morph': truth['xc_morph'], 'yc_morph': truth['yc_morph']}
+    morph_obs = gm.morph_model.adjust_for_observation(morph_sky, theta_rot, center)
+    morph_obs['amplitude'] = truth['amplitude']
+    flux_high = gm.generate_flux_map(morph_obs, {'i': truth['i']})
 
-    kin_model.set_bounds(im_shape, factor, wave_factor, x0, x0_vel, y0, y0_vel)
+    x0_obs, y0_obs = utils.rotate_coords(truth['x0_vel'], truth['y0_vel'], center, center, theta_rad)
+    X, Y = jnp.meshgrid(utils.subpixel_grid(IMAGE_SHAPE, FACTOR, x0_obs),
+                        utils.subpixel_grid(IMAGE_SHAPE, FACTOR, y0_obs))
+    V = jnp.asarray(gm.velocity_field(X, Y, truth['PA_grism'] + theta_rot, truth['i'],
+                                      {**morph_obs, **truth['rot']})) + truth['v0']
+    D = truth['sigma0'] * jnp.ones_like(V)
 
-    # Set parametric priors using new FitConfiguration
-    test_config = geko_config.FitConfiguration(
-        morph_prior_overrides={
-            'PA_morph_mu': PA_prior_mean, 'PA_morph_std': 5.0,
-            'r_eff_mu': 2.0, 'r_eff_std': 2.0, 'r_eff_min': 0.0, 'r_eff_max': 15.0,
-            'n_mu': 1.0, 'n_std': 1.0, 'n_min': 0.5, 'n_max': 8.0,
-            'amplitude_mu': 200.0, 'amplitude_std': 40.0, 'amplitude_min': 10.0, 'amplitude_max': 1000.0,
-            'xc_morph_mu': 15.0, 'xc_morph_std': 1.0,
-            'yc_morph_mu': 15.0, 'yc_morph_std': 1.0,
-        },
-        geom_prior_overrides={
-            'PA_mu': PA_prior_mean, 'PA_std': 10.0,
-            'i_mu': 60.0, 'i_std': 12.0,
-            'sigma0_min': 0.0, 'sigma0_max': 600.0,
-        },
-        rot_prior_overrides={
-            'Va_min': -1000.0, 'Va_max': 1000.0,
-        },
+    spectrum = utils.resample(grism_object.disperse(flux_high, V, D), FACTOR, wave_factor)
+
+    # --- noise as in run_mock.make_mock_data ---
+    max_grism = jnp.max(spectrum)
+    grism_error = (max_grism / truth['SN_grism']) * jnp.ones(spectrum.shape)
+    if ideal:
+        spectrum_noise = spectrum
+    else:
+        spectrum_noise = spectrum + make_noise_image(spectrum.shape, distribution='gaussian', mean=0,
+                                                     stddev=max_grism / truth['SN_grism'])
+
+    # --- preprocessing as in run_mock.run_fit ---
+    mock_params = {'test': test, 'j': j, 'convolved_noise_image': convolved_noise_image,
+                   'image_error': image_error, 'grism_spectrum_noise': spectrum_noise,
+                   'grism_error': grism_error, 'wave_space': wave_space, 'wavelength': wavelength,
+                   'delta_wave_cutoff': delta_wave_cutoff, 'y_factor': y_factor,
+                   'wave_factor': wave_factor, 'index_max': index_max, 'index_min': index_min,
+                   'grism_object': grism_object, 'PSF': psf}
+    pre_out = pre.run_full_preprocessing(None, None, LINE, mock_params=mock_params)
+    z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = pre_out
+
+    obs = GrismObservation(grism=grism_object, obs_map=obs_map, obs_error=obs_error,
+                           theta_rot=theta_rot, dispersion=pupil, name=name)
+    return obs, pre_out
+
+
+def build_fit_config(truth, fit_overrides=None, num_chains=2, num_warmup=500, num_samples=500):
+    """run_mock.run_test's truth-centred default priors, with FitConfiguration overrides on top."""
+    fit_overrides = fit_overrides or {}
+    morph = {
+        'PA_morph_mu': truth['PA_image'], 'PA_morph_std': 5.0,
+        'r_eff_mu': truth['r_eff'], 'r_eff_std': float(max(3.0, truth['r_eff'])),
+        'r_eff_min': 0.0, 'r_eff_max': 15.0,
+        'n_mu': float(truth['n']), 'n_std': 1.0, 'n_min': utils.SERSIC_N_MIN, 'n_max': 8.0,
+        'amplitude_mu': 200.0, 'amplitude_std': 40.0, 'amplitude_min': 0.0,
+        'xc_morph_mu': CENTER, 'xc_morph_std': 1.0,
+        'yc_morph_mu': CENTER, 'yc_morph_std': 1.0,
+    }
+    geom = {
+        'PA_mu': truth['PA_grism'], 'PA_std': 10.0,
+        'i_mu': float(truth['i']), 'i_std': 5.0,
+        'sigma0_min': 0.0, 'sigma0_max': 600.0,
+        'v0_mu': 0.0, 'v0_std': 200.0,
+    }
+    morph.update(fit_overrides.get('morph_prior_overrides', {}))
+    geom.update(fit_overrides.get('geom_prior_overrides', {}))
+    return FitConfiguration(
+        mcmc=MCMCSettings(num_chains=num_chains, num_warmup=num_warmup, num_samples=num_samples),
+        morph_prior_overrides=morph, geom_prior_overrides=geom,
+        rot_prior_overrides=fit_overrides.get('rot_prior_overrides', {}),
+        fixed_params=fit_overrides.get('fixed_params', {}),
     )
-    kin_model.galaxy_model.apply_config_overrides(test_config)
 
-    # Create fitting object
-    fit = Fit_Numpyro(
-        obs_map=obs_first.obs_map,
-        obs_error=obs_first.obs_error,
-        grism_object=obs_first.grism,
-        kin_model=kin_model,
-        inference_data=None,
-        parametric=parametric
-    )
 
-    # Generate prior predictive samples
-    print("\nGenerating prior predictive samples...")
-    rng_key = random.PRNGKey(4)
-    inference_model = kin_model.inference_model_parametric_multi
-    num_samples_prior = np.max([1000, num_samples])
-    prior_predictive = Predictive(inference_model, num_samples=num_samples_prior)
+def run_scenario(scenario, truth, psf, fit_overrides=None, num_chains=2, num_warmup=500,
+                 num_samples=500, ideal=False, out_dir='testing/multi_obs'):
+    """Make the mock observations of one scenario, fit them jointly and save the results."""
+    tag = f"{scenario}_PA{int(round(truth['PA_grism']))}"
+    folder = os.path.join(out_dir, tag)
+    os.makedirs(folder, exist_ok=True)
+    cfg = build_fit_config(truth, fit_overrides, num_chains, num_warmup, num_samples)
 
-    prior = prior_predictive(rng_key, observations=observations, masks=None)
+    # mocks are rendered by a GalaxyModel with the configured rotation curve (priors
+    # don't matter for rendering); the fitted model is the first observation's
+    # preprocessing model, as in run_geko_fit_multi
+    render_gm = GalaxyModel((IMAGE_SHAPE, IMAGE_SHAPE), FACTOR, rot_model=cfg.build_rot_model())
+    observations, kin_model, z_spec, wave_space = [], None, None, None
+    for k, (pupil, theta_rot, name) in enumerate(SCENARIOS[scenario]):
+        obs, pre_out = make_observation(truth, render_gm, psf, pupil, theta_rot, name, k, tag, ideal)
+        observations.append(obs)
+        if kin_model is None:
+            z_spec, wave_space, kin_model = pre_out[0], pre_out[2], pre_out[5]
+    kin_model.galaxy_model.rot_model = cfg.build_rot_model(z_spec)
+    kin_model.galaxy_model.apply_config_overrides(cfg)
 
-    # Run multi-observation inference
-    print(f"\nRunning multi-observation fit with {len(observations)} observations:")
-    for obs in observations:
-        print(f"  - {obs.name} ({obs.dispersion} dispersion, theta_rot={obs.theta_rot:.1f}°)")
-
-    fit.run_inference_multi(
-        observations=observations,
-        masks=None,  # Auto-generate masks
-        num_samples=num_samples,
-        num_warmup=num_warmup,
-        num_chains=2,
-        step_size=1,
-        adapt_step_size=True,
-        target_accept_prob=0.8,
-        max_tree_depth=10
-    )
-
-    # Convert to arviz with prior samples
+    fit = Fit_Numpyro(obs_map=observations[0].obs_map, obs_error=observations[0].obs_error,
+                      grism_object=observations[0].grism, kin_model=kin_model,
+                      inference_data=None, parametric=True, config=cfg)
+    masks = [jnp.ones_like(o.obs_map, dtype=bool) for o in observations]   # no mask, as run_mock
+    model = kin_model.inference_model_parametric_multi
+    prior = Predictive(model, num_samples=max(1000, num_samples))(random.PRNGKey(4),
+                                                                  observations=observations, masks=masks)
+    fit.run_inference_multi(observations=observations, masks=masks, num_samples=num_samples,
+                            num_warmup=num_warmup, num_chains=num_chains, step_size=1.0,
+                            adapt_step_size=True, target_accept_prob=cfg.mcmc.target_accept_prob)
     inf_data = az.from_numpyro(fit.mcmc, prior=prior)
+    inf_data.to_netcdf(os.path.join(folder, f'{tag}_output'))
 
-    return inf_data, kin_model, fit
+    inf_data, model_results = kin_model.compute_model_parametric_multi(inf_data, observations)
+    summary = save_results(inf_data, kin_model, z_spec, truth, observations, folder, tag)
 
-
-def compare_scenarios(PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf,
-                     scenarios=['single_R', 'single_C', 'R+C', 'R+R_90'], parametric=False,
-                     num_samples=500, num_warmup=250):
-    """
-    Compare different multi-observation scenarios.
-
-    Tests how additional observations constrain the model:
-    1. Posterior widths (parameter uncertainties)
-    2. Correlations between parameters
-    3. Flux model freedom (if non-parametric)
-
-    Returns
-    -------
-    results : dict
-        Dictionary with results for each scenario
-    """
-    results = {}
-
-    for scenario in scenarios:
-        print(f"\n{'='*70}")
-        print(f"Testing scenario: {scenario}")
-        print(f"{'='*70}")
-
-        # Generate mock data
-        observations, spectra, true_image, wave_space, idx_min, idx_max = \
-            make_multi_observation_data(
-                PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf,
-                scenario=scenario
-            )
-
-        # Run fitting
-        inf_data, kin_model, fit = run_multi_obs_fit(
-            observations, parametric=parametric,
-            num_samples=num_samples, num_warmup=num_warmup,
-            PA_prior_mean=PA_grism
-        )
-
-        # Compute statistics
-        params = ['PA', 'i', 'Va', 'r_t', 'sigma0']
-        stats = {}
-
-        for param in params:
-            posterior = np.concatenate(inf_data.posterior[param].values)
-            stats[param] = {
-                'mean': np.mean(posterior),
-                'std': np.std(posterior),
-                'q16': np.percentile(posterior, 16),
-                'q50': np.percentile(posterior, 50),
-                'q84': np.percentile(posterior, 84),
-            }
-
-        # Compute model predictions using fit's method
-        print(f"\nGenerating model predictions for {scenario}...")
-        inf_data_with_models, model_results = kin_model.compute_model_parametric_multi(inf_data, observations)
-
-        # Add v_re and v_sigma to inference data (needed for plotting)
-        import xarray as xr
-
-        # Compute v_re for posterior
-        num_chains = len(inf_data_with_models.posterior.chain)
-        num_samples_post = len(inf_data_with_models.posterior.draw)
-
-        v_re_samples = []
-        for chain in range(num_chains):
-            for sample in range(num_samples_post):
-                Va_val = float(inf_data_with_models.posterior['Va'][chain, sample])
-                r_t_val = float(inf_data_with_models.posterior['r_t'][chain, sample])
-                v_re_val = Va_val * (2/np.pi) * np.arctan(2/r_t_val)
-                v_re_samples.append(v_re_val)
-
-        v_re_array = np.array(v_re_samples).reshape(num_chains, num_samples_post)
-        inf_data_with_models.posterior['v_re'] = xr.DataArray(v_re_array, dims=('chain', 'draw'))
-
-        # Compute v_sigma for posterior
-        v_sigma_array = v_re_array / inf_data_with_models.posterior['sigma0'].values
-        inf_data_with_models.posterior['v_sigma'] = xr.DataArray(v_sigma_array, dims=('chain', 'draw'))
-
-        # Compute v_re for prior (if it exists)
-        if hasattr(inf_data_with_models, 'prior') and inf_data_with_models.prior is not None:
-            num_prior_samples = len(inf_data_with_models.prior.draw)
-            v_re_prior = []
-            for sample in range(num_prior_samples):
-                Va_val = float(inf_data_with_models.prior['Va'][0, sample])
-                r_t_val = float(inf_data_with_models.prior['r_t'][0, sample])
-                v_re_val = Va_val * (2/np.pi) * np.arctan(2/r_t_val)
-                v_re_prior.append(v_re_val)
-
-            v_re_prior_array = np.array(v_re_prior).reshape(1, num_prior_samples)
-            inf_data_with_models.prior['v_re'] = xr.DataArray(v_re_prior_array, dims=('chain', 'draw'))
-
-        # Store results
-        results[scenario] = {
-            'inf_data': inf_data_with_models,
-            'kin_model': kin_model,
-            'observations': observations,
-            'spectra': spectra,
-            'stats': stats,
-            'true_image': true_image,
-            'model_results': model_results,  # Model predictions for plotting
-        }
-
-        # Generate detailed diagnostic plots
-        print(f"\nGenerating diagnostic plots for {scenario}...")
-        # Create filename suffix with PA
-        pa_suffix = f"_PA{int(PA_grism)}"
-        os.makedirs(f'geko/testing/{scenario}', exist_ok=True)
-
-        # Plot multi-observation summary
-        try:
-            # Create unique ID with PA
-            scenario_id = f"{scenario}{pa_suffix}"
-
-            plotting.plot_disk_summary_multi(
-                observations=observations,
-                results=model_results,
-                inf_data=inf_data_with_models,
-                wave_space=wave_space,
-                x0=kin_model.x0_vel_mean,
-                y0=kin_model.y0_vel_mean,
-                factor=1,
-                direct_image_size=kin_model.im_shape[0],
-                save_to_folder=scenario,
-                name='summary',  # Use 'summary' so it respects save_runs_path
-                obs_radius=kin_model.r_eff_mean,
-                ellip=kin_model.ellip_mean,
-                theta_Ha=kin_model.PA_morph_mean/(180/np.pi) + np.pi/2,
-                n=kin_model.n_mean,
-                save_runs_path='geko/testing/',
-                ID=scenario_id  # Use scenario_id with PA suffix
-            )
-            print(f"  ✓ Saved summary plot: geko/testing/{scenario}/{scenario_id}_summary_multi.png")
-        except Exception as e:
-            print(f"  ✗ Error creating summary plot: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # Plot corner plot with truth values
-        try:
-            import corner
-            # Define corner args with correct var_names for our case
-            CORNER_KWARGS = plotting.define_corner_args(
-                divergences=False,
-                var_names=['PA', 'Va', 'i', 'r_t', 'sigma0', 'v_re'],
-                labels=[r'$PA$', r'$V_a$', r'$i$', r'$r_t$', r'$\sigma_0$', r'$V_{re}$']
-            )
-
-            v_re_true = Va * (2/np.pi) * np.arctan(2/r_t)
-            truths = {'PA': PA_grism, 'Va': Va, 'i': i, 'r_t': r_t, 'sigma0': sigma0, 'v_re': v_re_true}
-
-            fig = corner.corner(inf_data_with_models, group='posterior',
-                              truths=truths, truth_color='crimson',
-                              color='blue', **CORNER_KWARGS)
-
-            # Add prior for comparison if available
-            if hasattr(inf_data_with_models, 'prior') and inf_data_with_models.prior is not None:
-                CORNER_KWARGS_prior = plotting.define_corner_args(
-                    divergences=False, fill_contours=False,
-                    plot_contours=False, show_titles=False,
-                    var_names=['PA', 'Va', 'i', 'r_t', 'sigma0', 'v_re'],
-                    labels=[r'$PA$', r'$V_a$', r'$i$', r'$r_t$', r'$\sigma_0$', r'$V_{re}$']
-                )
-                fig = corner.corner(inf_data_with_models, group='prior',
-                                  fig=fig, color='lightgray', **CORNER_KWARGS_prior)
-
-            plt.savefig(f'geko/testing/{scenario}/{scenario_id}_corner.png', dpi=300)
-            plt.close()
-            print(f"  ✓ Saved corner plot: geko/testing/{scenario}/{scenario_id}_corner.png")
-        except Exception as e:
-            print(f"  ✗ Error creating corner plot: {e}")
-            import traceback
-            traceback.print_exc()
-
-        # Print summary
-        print(f"\nParameter uncertainties for {scenario}:")
-        print(f"{'Parameter':<10} {'Truth':<10} {'Median':<10} {'Std':<10} {'68% CI width':<15}")
-        print("-"*60)
-        true_vals = {'PA': PA_grism, 'i': i, 'Va': Va, 'r_t': r_t, 'sigma0': sigma0}
-        for param in params:
-            truth = true_vals[param]
-            median = stats[param]['q50']
-            std = stats[param]['std']
-            ci_width = stats[param]['q84'] - stats[param]['q16']
-            print(f"{param:<10} {truth:<10.2f} {median:<10.2f} {std:<10.3f} {ci_width:<15.3f}")
-
-    return results
+    try:
+        plotting.plot_disk_summary_multi(
+            observations=observations, results=model_results, inf_data=inf_data,
+            wave_space=wave_space, x0=kin_model.x0_vel_mean, y0=kin_model.y0_vel_mean, factor=1,
+            direct_image_size=kin_model.im_shape[0], save_to_folder=tag, name='summary',
+            obs_radius=kin_model.r_eff_mean, ellip=kin_model.ellip_mean,
+            theta_Ha=kin_model.PA_morph_mean / (180 / np.pi) + np.pi / 2, n=kin_model.n_mean,
+            save_runs_path=out_dir + '/', ID=tag)
+    except Exception as e:
+        print(f'Warning: summary plot failed: {e}')
+    return {'inf_data': inf_data, 'summary': summary, 'observations': observations}
 
 
-def plot_scenario_comparison(results, save_path=None):
-    """
-    Create comparison plots showing how constraints improve with more observations.
+def save_results(inf_data, kin_model, z_spec, truth, observations, folder, tag):
+    """Results table (q16/q50/q84 of every sampled + derived quantity, plus truth columns)
+    and information gain, as run_mock.save_results; sigma0 floor from the fitted grisms."""
+    inf_data = compute_derived_posterior(inf_data, kin_model, z_spec,
+                                         grism_objects=[o.grism for o in observations])
+    gm = kin_model.galaxy_model
+    specs = all_param_specs(gm.morph_model, gm.shared_kin_specs, gm.rot_model)
+    sampled = [s.name for s in specs if not s.fixed]
+    names = sampled + [dq.name for dq in DERIVED_QUANTITIES]
+    summary = summarize_posterior(inf_data, names)
+    row = {}
+    for name in names:
+        if name in summary:
+            for q in ('16', '50', '84'):
+                row[f'{name}_q{q}'] = summary[name][q]
+    truth_cols = {'PA': truth['PA_grism'], 'i': truth['i'], 'sigma0': truth['sigma0'],
+                  'r_eff': truth['r_eff'], 'n': truth['n'], **truth['rot'],
+                  'v_re': float(gm.rot_model.rotation_curve(jnp.array([truth['r_eff']]), truth['rot'])[0])}
+    for k, v in truth_cols.items():
+        row[f'{k}_truth'] = v
+    Table([row]).write(os.path.join(folder, f'{tag}_results'), format='ascii', overwrite=True)
+    try:
+        compute_information_gain(inf_data, sampled).write(os.path.join(folder, f'{tag}_info_gain'),
+                                                          format='ascii', overwrite=True)
+    except Exception as e:
+        print(f'Warning: failed to compute information gain: {e}')
+    print(f'\n{tag}: parameter, truth, median [16th, 84th]')
+    for k, v in truth_cols.items():
+        if k in summary:
+            s = summary[k]
+            print(f"  {k:8s} {v:9.2f}  {s['50']:9.2f}  [{s['16']:.2f}, {s['84']:.2f}]")
+    return summary
 
-    Plots:
-    1. Parameter uncertainty comparison (bar chart)
-    2. Corner plots for each scenario
-    3. Correlation matrices
-    """
-    scenarios = list(results.keys())
-    params = ['PA', 'i', 'Va', 'r_t', 'sigma0']
 
-    # Plot 1: Uncertainty comparison
-    fig, axes = plt.subplots(1, len(params), figsize=(15, 4))
-
-    for i, param in enumerate(params):
-        uncertainties = [results[s]['stats'][param]['std'] for s in scenarios]
-        axes[i].bar(range(len(scenarios)), uncertainties)
-        axes[i].set_xticks(range(len(scenarios)))
-        axes[i].set_xticklabels(scenarios, rotation=45, ha='right')
-        axes[i].set_ylabel('Posterior Std')
-        axes[i].set_title(param)
-        axes[i].grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    if save_path:
-        plt.savefig(f"{save_path}_uncertainty_comparison.png", dpi=300, bbox_inches='tight')
-    plt.show()
-
-    # Plot 2: CI width comparison
-    fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-
+def plot_scenario_comparison(results, save_path):
+    """68% credible-interval width per parameter for each scenario."""
+    params = ['PA', 'i', 'Va', 'r_t', 'sigma0', 'v_re']
+    scenarios = list(results)
     x = np.arange(len(params))
     width = 0.8 / len(scenarios)
-
-    for i, scenario in enumerate(scenarios):
-        ci_widths = [results[scenario]['stats'][p]['q84'] - results[scenario]['stats'][p]['q16']
-                     for p in params]
-        ax.bar(x + i*width, ci_widths, width, label=scenario)
-
-    ax.set_xlabel('Parameter')
-    ax.set_ylabel('68% Credible Interval Width')
-    ax.set_title('Parameter Constraint Comparison Across Scenarios')
-    ax.set_xticks(x + width * (len(scenarios)-1) / 2)
+    fig, ax = plt.subplots(figsize=(10, 5))
+    for k, sc in enumerate(scenarios):
+        s = results[sc]['summary']
+        ax.bar(x + k * width, [s[p]['84'] - s[p]['16'] if p in s else np.nan for p in params],
+               width, label=sc)
+    ax.set_xticks(x + width * (len(scenarios) - 1) / 2)
     ax.set_xticklabels(params)
+    ax.set_ylabel('68% credible interval width')
     ax.legend()
-    ax.grid(True, alpha=0.3)
-
     plt.tight_layout()
-    if save_path:
-        plt.savefig(f"{save_path}_CI_comparison.png", dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig(save_path, dpi=200)
+    plt.close()
 
 
-if __name__ == "__main__":
-    # Example usage
-    parser = argparse.ArgumentParser(description='Test multi-observation fitting')
-    parser.add_argument('--scenario', type=str, default='all',
-                       choices=['single_R', 'single_C', 'R+C', 'R+R_90', 'all'],
-                       help='Which scenario to test')
-    parser.add_argument('--parametric', action='store_true',
-                       help='Use parametric flux model')
-    parser.add_argument('--num_samples', type=int, default=1000,
-                       help='Number of MCMC samples')
-    parser.add_argument('--num_warmup', type=int, default=500,
-                       help='Number of warmup iterations')
-    parser.add_argument('--PA', type=float, default=0.0,
-                       help='Position angle in degrees (default: 0)')
-
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Multi-observation mock recovery tests')
+    parser.add_argument('--scenario', default='all', choices=list(SCENARIOS) + ['all'])
+    parser.add_argument('--PA', type=float, default=0.0, help='PA of morphology and kinematics (deg)')
+    parser.add_argument('--num_chains', type=int, default=2)
+    parser.add_argument('--num_warmup', type=int, default=500)
+    parser.add_argument('--num_samples', type=int, default=500)
+    parser.add_argument('--ideal', action='store_true', help='no noise in the mock grism spectra')
     args = parser.parse_args()
 
-    # Load PSF (create simple Gaussian for now)
-    psf_size = 15
-    center = psf_size // 2
-    y, x = np.meshgrid(np.arange(psf_size), np.arange(psf_size), indexing='ij')
-    psf = np.exp(-((x - center)**2 + (y - center)**2) / (2 * 2**2))
-    psf = psf / np.sum(psf)
+    # Gaussian PSF at detector resolution (as before); replace with an STPSF/mpsf as needed
+    yy, xx = np.mgrid[:15, :15] - 7
+    psf = np.exp(-(xx**2 + yy**2) / (2 * 2.0**2))
+    psf /= psf.sum()
 
-    # Set true parameters
-    PA_image = args.PA
-    PA_grism = args.PA  # Same as PA_image
-    i = 60.0
-    Va = 200.0
-    r_t = 2.0
-    sigma0 = 50.0
-    SN_image = 50.0
-    SN_grism = 30.0
-    n = 1.0
+    truth = default_truth(args.PA)
+    # Fit overrides, same keys as FIT_OVERRIDES in examples/RunGekoTests.py
+    fit_overrides = {'fixed_params': {}, 'morph_prior_overrides': {},
+                     'geom_prior_overrides': {}, 'rot_prior_overrides': {}}
 
-    print("\n" + "="*70)
-    print("Multi-observation Mock Testing")
-    print("="*70)
-    print(f"Position Angle (PA): {PA_grism:.1f}°")
-    print(f"Inclination: {i:.1f}°")
-    print(f"Va: {Va:.1f} km/s")
-    print(f"r_t: {r_t:.1f} pixels")
-    print(f"sigma0: {sigma0:.1f} km/s")
-    print("="*70)
-
-    # Determine scenarios to run
-    if args.scenario == 'all':
-        scenarios = ['single_R', 'single_C', 'R+C', 'R+R_90']
-    else:
-        scenarios = [args.scenario]
-
-    # Run comparison
-    results = compare_scenarios(
-        PA_image, PA_grism, i, Va, r_t, sigma0, SN_image, SN_grism, n, psf,
-        scenarios=scenarios,
-        parametric=args.parametric,
-        num_samples=args.num_samples,
-        num_warmup=args.num_warmup
-    )
-
-    # Plot comparison with PA in filename
-    plot_scenario_comparison(results, save_path=f'geko/testing/multi_obs_comparison_PA{int(PA_grism)}')
-
-    print("\n" + "="*70)
-    print("Multi-observation testing complete!")
-    print("="*70)
+    scenarios = list(SCENARIOS) if args.scenario == 'all' else [args.scenario]
+    results = {sc: run_scenario(sc, truth, psf, fit_overrides, args.num_chains, args.num_warmup,
+                                args.num_samples, ideal=args.ideal) for sc in scenarios}
+    if len(results) > 1:
+        plot_scenario_comparison(results, f'testing/multi_obs/comparison_PA{int(round(args.PA))}.png')

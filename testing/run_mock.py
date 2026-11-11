@@ -126,13 +126,11 @@ def make_image(PA_image, i, r_eff, SN_image, n, psf, image_shape, xc_morph=None,
 	# image = utils.resample(galaxy_model, 81, 81)
 	# Generate flux using direct high-res grid (Gemini's suggestion)
 	# Avoids interpolation artifacts from image.resize
-	x_grid = jnp.linspace(0 - xc_morph, image_shape - xc_morph - 1, image_shape*5)
-	y_grid = jnp.linspace(0 - yc_morph, image_shape - yc_morph - 1, image_shape*5)
-	x_grid, y_grid = jnp.meshgrid(x_grid, y_grid)
-
-	Ie = utils.flux_to_Ie(200, n, r_eff, ellip)
-	# Convert PA for Sersic profile (restoring 90-PA conversion)
-	mock_image_highres = utils.sersic_profile(x_grid, y_grid, Ie/5**2, r_eff, n, 0, 0, ellip, (90 - PA_image)*np.pi/180)
+	# Same renderer and grid as the inference model (SersicMorphology.generate_flux_map):
+	# pixel-integrated Gaussian-mixture Sersic on subpixel-centred model pixels,
+	# total flux 200, binned to native pixels
+	mock_image_highres = utils.sersic_image(image_shape, 5, 200.0, r_eff, n, xc_morph, yc_morph,
+	                                        ellip, (90 - PA_image)*np.pi/180)
 	mock_image = utils.resample(mock_image_highres, 5, 5)
 
 	# image = image.at[15,15].set(4)
@@ -188,7 +186,7 @@ def make_image(PA_image, i, r_eff, SN_image, n, psf, image_shape, xc_morph=None,
 
 	return mock_image, mock_image_highres, convolved_image, noise_image, convolved_noise_image
 
-def initialize_grism(mock_image, psf, image_shape, factor=5):
+def initialize_grism(mock_image, psf, image_shape, factor=5, pupil='R'):
 	#create wave space
 	wave_factor = 9
 	delta_wave = 0.001
@@ -226,7 +224,7 @@ def initialize_grism(mock_image, psf, image_shape, factor=5):
 	#initialize grism object
 
 	grism_object = grism.Grism(image_shape*factor, 0.0629/factor, icenter = y0_grism, jcenter = x0_grism, wavelength = wavelength, wave_space = wave_space_oversampled, index_min = (index_min)*wave_factor, index_max = (index_max+1)*wave_factor, 
-					   grism_filter = grism_filter, grism_module = 'A', grism_pupil = 'R', PSF = PSF)
+					   grism_filter = grism_filter, grism_module = 'A', grism_pupil = pupil, PSF = PSF)
 
 	return grism_object, wave_space, wavelength, delta_wave_cutoff, y_factor, wave_factor, index_max, index_min 
 
@@ -249,9 +247,9 @@ def make_vel_fields(PA_grism, i, truth_rot_params, sigma0, image_shape, x0_vel=N
 	if y0_vel is None:
 		y0_vel = image_shape // 2
 
-	x_grid = jnp.linspace(0 - x0_vel, image_shape - x0_vel - 1, image_shape*factor)
-	y_grid = jnp.linspace(0 - y0_vel, image_shape - y0_vel - 1, image_shape*factor)
-	x_grid, y_grid = jnp.meshgrid(x_grid, y_grid)
+	# subpixel-centred model grid, as in the inference model
+	x_grid, y_grid = jnp.meshgrid(utils.subpixel_grid(image_shape, factor, x0_vel),
+	                              utils.subpixel_grid(image_shape, factor, y0_vel))
 
 	gm = GalaxyModel((image_shape, image_shape), factor)
 	V = gm.velocity_field(x_grid, y_grid, PA_grism, i, truth_rot_params)
@@ -322,7 +320,7 @@ def make_mock_data(PA_image, PA_grism, i, truth_rot_params, sigma0, SN_image, SN
 		center_x = psf_size_x // 2
 		psf_1d = psf_1d.at[:, center_x].set(psf_1d_profile)
 
-		grism_object.PSF = psf_1d[:, :, jnp.newaxis]
+		grism_object.set_model_psf(psf_1d)
 		print(f'PSF mode: 1D (spatial y-axis only) — used for both mock and inference')
 		print(f'  Original 2D PSF shape: {psf_2d.shape}, 1D PSF shape: {psf_1d.shape}')
 	else:
@@ -555,8 +553,9 @@ def save_results(config_path, inf_data, z_spec, test, j, truth_rot_params, r_eff
 		print(f'ERROR: Failed to save netcdf output: {e}')
 		raise
 
-	# Add derived quantities (v_re, v_sigma, v_circ, M_dyn) to posterior
-	inf_data = compute_derived_posterior(inf_data, kin_model, z_spec)
+	# Add derived quantities (v_re, v_sigma, v_circ, M_dyn) to posterior; the sigma0
+	# floor is the instrumental one of the fitted grism(s)
+	inf_data = compute_derived_posterior(inf_data, kin_model, z_spec, grism_objects=grism_object)
 
 	# Derive param names from model specs — no hardcoded list
 	gm = kin_model.galaxy_model
@@ -665,7 +664,7 @@ def run_test(test, j, config_path, parametric, PA_image, PA_grism, i, sigma0,
 		U, s, Vt = np.linalg.svd(psf_2d)
 		psf_r1 = s[0] * np.outer(U[:, 0], Vt[0, :])
 		psf_r1 = psf_r1 / psf_r1.sum()
-		grism_object.PSF = jnp.array(psf_r1)[:, :, jnp.newaxis]
+		grism_object.set_model_psf(psf_r1)
 		rank1_var = float(s[0]**2 / np.sum(s**2)) * 100
 		print(f'Inference PSF: rank-1 SVD approximation  '
 		      f'(variance fraction {rank1_var:.2f}%, PSF shape {psf_r1.shape})')
