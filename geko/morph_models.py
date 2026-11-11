@@ -57,12 +57,33 @@ class MorphologyModel(BaseModel):
         e.g. 'r_eff_mu', 'r_eff_std', 'n_mu', 'PA_morph_mu', etc.
         Unknown keys are silently ignored.
         """
-        from .param_spec import _apply_overrides_to_specs
-        _apply_overrides_to_specs(self.parameters, catalog_row)
+        self.apply_prior_overrides(catalog_row)
 
 
 class SersicMorphology(MorphologyModel):
-    """Parametric Sersic morphology model."""
+    """Parametric Sersic morphology model.
+
+    Rendered as a pixel-integrated mixture of Gaussians (utils.sersic_image), which
+    is accurate for n >= utils.SERSIC_N_MIN (0.65, as in PySersic); the n prior is
+    never allowed below that.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._enforce_n_min()
+
+    def apply_prior_overrides(self, overrides: dict):
+        super().apply_prior_overrides(overrides)
+        self._enforce_n_min()
+
+    def _enforce_n_min(self):
+        for spec in self.parameters:
+            if spec.name == 'n' and (spec.prior_min is None or spec.prior_min < utils.SERSIC_N_MIN):
+                if spec.prior_min is not None:
+                    import warnings
+                    warnings.warn(f"Sersic n prior minimum {spec.prior_min} is below {utils.SERSIC_N_MIN}, "
+                                  f"where the Gaussian-mixture renderer is accurate; raising it to {utils.SERSIC_N_MIN}.")
+                spec.prior_min = utils.SERSIC_N_MIN
 
     _DEFAULT_PARAMETERS = [
         ParameterSpec('amplitude', r'$A$',                    r'$A$',
@@ -116,23 +137,10 @@ class SersicMorphology(MorphologyModel):
         i         = shared_params['i']
 
         ellip = 1.0 - utils.compute_axis_ratio(inc=i, q0=0.2)
-        amplitude_re = utils.flux_to_Ie(amplitude, n, r_eff, ellip)
-
-        x_grid = jnp.linspace(0 - xc_morph, image_shape - xc_morph - 1,
-                               image_shape * factor)
-        y_grid = jnp.linspace(0 - yc_morph, image_shape - yc_morph - 1,
-                               image_shape * factor)
-        x_grid, y_grid = jnp.meshgrid(x_grid, y_grid)
-
-        model_image = utils.sersic_profile(
-            x_grid, y_grid,
-            amplitude_re / factor ** 2,
-            r_eff, n,
-            0.0, 0.0,
-            ellip,
-            (90.0 - PA_morph) * jnp.pi / 180.0,
-        )
-        return model_image
+        # pixel-integrated Gaussian-mixture Sersic on the subpixel-centred model grid
+        return utils.sersic_image(image_shape, factor, amplitude, r_eff, n,
+                                  xc_morph, yc_morph, ellip,
+                                  (90.0 - PA_morph) * jnp.pi / 180.0)
 
 
 MORPH_REGISTRY = {

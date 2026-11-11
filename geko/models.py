@@ -313,7 +313,7 @@ class GalaxyModel:
 			'PA_morph_mu': PA, 'PA_morph_std': PA_std,
 			'r_eff_mu': r_eff_Ha, 'r_eff_std': r_eff_std,
 			'r_eff_min': r_eff_min, 'r_eff_max': r_eff_max,
-			'n_mu': n, 'n_std': n_std, 'n_min': 0.36, 'n_max': 8.0,
+			'n_mu': n, 'n_std': n_std, 'n_min': utils.SERSIC_N_MIN, 'n_max': 8.0,
 			'amplitude_mu': amplitude, 'amplitude_std': amplitude_std, 'amplitude_min': 0.0,
 			'xc_morph_mu': xc_morph_rot, 'xc_morph_std': xc_std,
 			'yc_morph_mu': yc_morph_rot, 'yc_morph_std': yc_std,
@@ -341,7 +341,7 @@ class GalaxyModel:
 			'PA_morph_mu': priors['PA'], 'PA_morph_std': 5,
 			'r_eff_mu': r_eff_Ha, 'r_eff_std': np.maximum(3, r_eff_Ha),
 			'r_eff_min': 0, 'r_eff_max': 15,
-			'n_mu': priors['n'], 'n_std': 1, 'n_min': 0.36, 'n_max': 8.0,
+			'n_mu': priors['n'], 'n_std': 1, 'n_min': utils.SERSIC_N_MIN, 'n_max': 8.0,
 			'amplitude_mu': 200, 'amplitude_std': 40, 'amplitude_min': 0.0,
 			'xc_morph_mu': 15, 'xc_morph_std': 1,
 			'yc_morph_mu': 15, 'yc_morph_std': 1,
@@ -574,11 +574,8 @@ class GalaxyModel:
 		image_shape = self.direct_shape[0]
 
 		if self.morph_means.get('amplitude') is not None:
-			amplitude_re_mean = utils.flux_to_Ie(self.amplitude_mean, self.n_mean, self.r_eff_mean, self.ellip_mean)
-			x = jnp.linspace(0 - self.xc_morph_mean, image_shape - self.xc_morph_mean - 1, image_shape*factor)
-			y = jnp.linspace(0 - self.yc_morph_mean, image_shape - self.yc_morph_mean - 1, image_shape*factor)
-			x_grid, y_grid = jnp.meshgrid(x, y)
-			self.fluxes_mean_high = utils.sersic_profile(x_grid, y_grid, amplitude_re_mean/factor**2, self.r_eff_mean, self.n_mean, 0.0, 0.0, self.ellip_mean, (90 - self.PA_morph_mean)*jnp.pi/180)
+			self.fluxes_mean_high = utils.sersic_image(image_shape, factor, self.amplitude_mean, self.r_eff_mean, self.n_mean,
+			                                           self.xc_morph_mean, self.yc_morph_mean, self.ellip_mean, (90 - self.PA_morph_mean)*jnp.pi/180)
 			self.fluxes_mean = utils.resample(self.fluxes_mean_high, factor, factor)
 		else:
 			self.fluxes_mean_high = None
@@ -798,8 +795,8 @@ class GrismFitter(KinModels):
 				fluxes_high = fluxes_high * jnp.exp(log_s_high)
 
 			# Build velocity coordinate grids using direct high-res method (Gemini's suggestion)
-			X_grid = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape * obs.grism.factor)
-			Y_grid = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape * obs.grism.factor)
+			X_grid = utils.subpixel_grid(image_shape, obs.grism.factor, x0_vel_obs)
+			Y_grid = utils.subpixel_grid(image_shape, obs.grism.factor, y0_vel_obs)
 			X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
 			# Compute velocity field with adjusted PA using the composable rotation model
@@ -910,8 +907,8 @@ class GrismFitter(KinModels):
 
 		image_shape =  self.im_shape[0]
 		# Create velocity coordinate grids using direct high-res method (Gemini's suggestion)
-		X_grid = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape * grism_object.factor)
-		Y_grid = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape * grism_object.factor)
+		X_grid = utils.subpixel_grid(image_shape, grism_object.factor, self.x0_vel_mean)
+		Y_grid = utils.subpixel_grid(image_shape, grism_object.factor, self.y0_vel_mean)
 		X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
 		_all_params_mean = {**{k: v for k, v in self.morph_means.items() if v is not None}, **self.rot_means}
@@ -1101,8 +1098,8 @@ class GrismFitter(KinModels):
 					fluxes_mean = utils.resample(model_flux, obs.grism.factor, obs.grism.factor)
 
 			# Build velocity coordinate grids using direct high-res method (Gemini's suggestion)
-			X_grid = jnp.linspace(0 - x0_vel_obs, image_shape - x0_vel_obs - 1, image_shape * obs.grism.factor)
-			Y_grid = jnp.linspace(0 - y0_vel_obs, image_shape - y0_vel_obs - 1, image_shape * obs.grism.factor)
+			X_grid = utils.subpixel_grid(image_shape, obs.grism.factor, x0_vel_obs)
+			Y_grid = utils.subpixel_grid(image_shape, obs.grism.factor, y0_vel_obs)
 			X_grid, Y_grid = jnp.meshgrid(X_grid, Y_grid)
 
 			# Compute velocity and dispersion fields using per-obs v0
@@ -1196,8 +1193,8 @@ class GrismFitter(KinModels):
 		fluxes_mean_intrinsic = utils.resample(model_flux_intrinsic, self.galaxy_model.factor, self.galaxy_model.factor)
 
 		intrinsic_factor = observations[0].grism.factor
-		X_grid_intrinsic = jnp.linspace(0 - self.x0_vel_mean, image_shape - self.x0_vel_mean - 1, image_shape * intrinsic_factor)
-		Y_grid_intrinsic = jnp.linspace(0 - self.y0_vel_mean, image_shape - self.y0_vel_mean - 1, image_shape * intrinsic_factor)
+		X_grid_intrinsic = utils.subpixel_grid(image_shape, intrinsic_factor, self.x0_vel_mean)
+		Y_grid_intrinsic = utils.subpixel_grid(image_shape, intrinsic_factor, self.y0_vel_mean)
 		X_grid_intrinsic, Y_grid_intrinsic = jnp.meshgrid(X_grid_intrinsic, Y_grid_intrinsic)
 		_all_params_mean_intrinsic = {**morph_params_intrinsic, **self.rot_means}
 		# No v0 added -- v0 is a per-observation wavelength-calibration offset, not
@@ -1266,8 +1263,8 @@ class GrismFitter(KinModels):
 
 		image_shape = fluxes.shape[0]
 		# print(image_shape//2)
-		x_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*grism_object.factor)
-		y_10 = jnp.linspace(0 - image_shape//2, image_shape - image_shape//2 - 1, image_shape*grism_object.factor)
+		x_10 = utils.subpixel_grid(image_shape, grism_object.factor, image_shape//2)
+		y_10 = utils.subpixel_grid(image_shape, grism_object.factor, image_shape//2)
 		X_10, Y_10 = jnp.meshgrid(x_10,y_10)
 
 		

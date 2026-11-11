@@ -29,15 +29,31 @@ def _sky_models_at(x, y):
 	return np.asarray(flux), np.asarray(vel)
 
 
+def _sky_flux_pixel_integrated(theta_rot, k=20):
+	"""Sky-frame light integrated over each (rotated) observation pixel, k x k subsamples."""
+	yy, xx = np.mgrid[0:N, 0:N].astype(float)
+	sub = (np.arange(k) + 0.5) / k - 0.5
+	acc = 0.0
+	for dy in sub:
+		for dx in sub:
+			xs, ys = utils.rotate_coords(xx + dx, yy + dy, CENTER, CENTER, -np.radians(theta_rot))
+			acc = acc + _sky_models_at(xs, ys)[0]
+	return acc / k**2
+
+
 @pytest.mark.parametrize('theta_rot', [20.0, 90.0, 324.42])
 def test_observation_transform_is_rigid_rotation(theta_rot):
 	yy, xx = np.mgrid[0:N, 0:N].astype(float)
 	xs, ys = utils.rotate_coords(xx, yy, CENTER, CENTER, -np.radians(theta_rot))
-	flux_true, vel_true = _sky_models_at(xs, ys)
+	_, vel_true = _sky_models_at(xs, ys)
 
+	# The renderer integrates the light over pixels, so compare native pixels
+	# (model at factor 5, binned) with the pixel-integrated sky model. Agreement
+	# is ~0.1% of the peak; a wrong rotation (e.g. -theta_rot) is off by 60-100%.
+	flux_true = _sky_flux_pixel_integrated(theta_rot)
 	obs = SersicMorphology().adjust_for_observation(SKY, theta_rot, CENTER)
-	flux = np.asarray(SersicMorphology().generate_flux_map(obs, {'i': INC}, N, 1))
-	assert np.abs(flux - flux_true).max() < 1e-10 * flux_true.max()
+	flux = np.asarray(SersicMorphology().generate_flux_map(obs, {'i': INC}, N, 5)).reshape(N, 5, N, 5).sum((1, 3))
+	assert np.abs(flux - flux_true).max() < 5e-3 * flux_true.max()
 
 	# Kinematics as in inference_model_parametric_multi: velocity centroid
 	# rotated with rotate_coords, PA turned by +theta_rot
