@@ -490,7 +490,8 @@ class Grism:
 		<<1 bin for NIRCam). The slope is measured around the reference pixel.
 
 		Sets attributes dispersed_PSF (rows along the cross-dispersion axis, columns
-		in wavelength bins) and dispersion_slope (a).
+		in wavelength bins), dispersion_slope (a) and sigma_inst_kms (instrumental
+		line width, see _instrumental_sigma_kms).
 		"""
 		if not hasattr(self, 'wave_array') or not hasattr(self, 'oversampled_PSF'):
 			return
@@ -521,6 +522,29 @@ class Grism:
 			if f > 0:
 				G[:, lo + 1] += psf_o[:, j]*f
 		self.dispersed_PSF = jnp.asarray(G)
+		self.sigma_inst_kms = self._instrumental_sigma_kms(G.sum(axis=0), abs(a) * self.factor)
+
+	def _instrumental_sigma_kms(self, line_profile, pixel_bins):
+		"""
+		Instrumental line width (km/s) of this observation: the point-source line
+		profile (dispersed PSF summed over the cross-dispersion axis) convolved with
+		one detector pixel (pixel_bins wavelength bins wide), expressed as a Gaussian
+		sigma, FWHM/2.355. The FWHM measures the core; the PSF wings would dominate
+		an rms width. It depends on the line's wavelength (PSF size, dispersion),
+		filter, module and the PSF's profile along the dispersion axis.
+		"""
+		half_w = 0.5 * pixel_bins
+		n = int(np.ceil(half_w)) + 1
+		x = np.arange(-n, n + 1)
+		box = np.clip(np.minimum(x + 0.5, half_w) - np.maximum(x - 0.5, -half_w), 0, None)
+		prof = np.convolve(np.asarray(line_profile, dtype=float), box / box.sum())
+		half = prof.max() / 2
+		above = np.where(prof >= half)[0]
+		lo, hi = above[0], above[-1]
+		left = lo - (prof[lo] - half) / (prof[lo] - prof[lo - 1]) if lo > 0 else float(lo)
+		right = hi + (prof[hi] - half) / (prof[hi] - prof[hi + 1]) if hi < prof.size - 1 else float(hi)
+		kms_per_bin = float(self.wave_scale) / self.wavelength * (c / 1000)
+		return float((right - left) * kms_per_bin / (2 * np.sqrt(2 * np.log(2))))
 
 	def load_poly_factors(self,a01, a02, a03, a04, a05, a06, b01, b02, b03, b04, b05, b06, c01, c02, c03, d01):
 		"""

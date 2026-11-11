@@ -6,6 +6,7 @@ Post-processing functions for geko grism fits.
 
 __all__ = ['process_results', 'process_results_multi',
            'compute_derived_posterior', 'DERIVED_QUANTITIES',
+           'instrumental_sigma0_floor', 'sigma0_limits',
            'compute_information_gain']
 
 from dataclasses import dataclass
@@ -107,19 +108,48 @@ DERIVED_QUANTITIES = [
 # Pipeline helpers
 # ============================================================================
 
+_FALLBACK_SIGMA0_FLOOR = 20.0   # km/s, only when no grism object is available
+
+
+def instrumental_sigma0_floor(grism_objects, fraction=0.5):
+	"""
+	sigma0 below which the intrinsic dispersion is treated as unresolved:
+	`fraction` times the instrumental line width, averaged over the observations
+	(Grism.sigma_inst_kms, measured from each observation's dispersed PSF and
+	detector pixel, so it follows the line wavelength, filter and module).
+	At fraction = 0.5 the intrinsic sigma0 broadens the observed line core by ~12%.
+	"""
+	if not isinstance(grism_objects, (list, tuple)):
+		grism_objects = [grism_objects]
+	return fraction * float(np.mean([g.sigma_inst_kms for g in grism_objects]))
+
+
 def compute_derived_posterior(inf_data, kin_model, z_spec,
-                              sigma0_floor=20.0, pixel_scale=_PIXEL_SCALE):
+                              sigma0_floor=None, pixel_scale=_PIXEL_SCALE,
+                              grism_objects=None):
 	"""Add all derived quantities to inf_data.posterior.
 
 	Parameters
 	----------
-	sigma0_floor : float
-		Samples with sigma0 <= this value (km/s) are excluded from the
-		v_sigma computation to avoid ratio divergence. Does not affect
-		the sigma0 posterior itself.
+	sigma0_floor : float, optional
+		sigma0 (km/s) below which it is treated as unresolved. Samples below it
+		are excluded from the v_sigma posterior (so the ratio doesn't diverge),
+		and sigma0 is reported as an upper limit when its 16th percentile is
+		below it (see sigma0_limits). Default: instrumental_sigma0_floor of
+		grism_objects; 20 km/s if none are given.
 	pixel_scale : float
 		Detector pixel scale in arcsec (default NIRCam 0.063 arcsec/px).
+	grism_objects : Grism or list of Grism, optional
+		The fitted observation(s), used for the default sigma0_floor.
+
+	The floor used is stored in inf_data.posterior.attrs['sigma0_floor'].
 	"""
+	if sigma0_floor is None:
+		if grism_objects is not None:
+			sigma0_floor = instrumental_sigma0_floor(grism_objects)
+		else:
+			sigma0_floor = _FALLBACK_SIGMA0_FLOOR
+			print(f'compute_derived_posterior: no grism object given, using sigma0_floor = {sigma0_floor} km/s')
 	utils.add_v_re(inf_data, kin_model, grism_object=None,
 	               num_samples=inf_data.posterior['sigma0'].shape[1])
 
@@ -127,8 +157,36 @@ def compute_derived_posterior(inf_data, kin_model, z_spec,
 	           'sigma0_floor': sigma0_floor}
 	for dq in DERIVED_QUANTITIES:
 		inf_data.posterior[dq.name] = dq.compute(inf_data.posterior, context)
+	inf_data.posterior.attrs['sigma0_floor'] = float(sigma0_floor)
 
 	return inf_data
+
+
+def sigma0_limits(inf_data, sigma0_floor):
+	"""
+	Decide whether sigma0 is resolved, and the limits to quote if it is not.
+
+	sigma0 is an upper limit when its 16th percentile is below sigma0_floor. Then
+	sigma0 < its 84th percentile, and v/sigma > the 16th percentile of |v_re|/sigma0
+	over all samples (|v_re|: the sign of Va only encodes the rotation direction;
+	all samples: the v_sigma posterior drops samples below the floor, which would
+	bias the limit low exactly when sigma0 is unresolved).
+
+	Returns a dict: sigma0_floor, sigma0_is_upper_limit, sigma0_limit and
+	v_sigma_limit (the last two NaN when sigma0 is resolved).
+	"""
+	s0 = inf_data.posterior['sigma0'].values.ravel()
+	q16, q84 = np.percentile(s0, [16, 84])
+	is_ul = bool(q16 < sigma0_floor)
+	out = {'sigma0_floor': float(sigma0_floor), 'sigma0_is_upper_limit': is_ul,
+	       'sigma0_limit': np.nan, 'v_sigma_limit': np.nan}
+	if is_ul:
+		vre = np.abs(inf_data.posterior['v_re'].values.ravel())
+		with np.errstate(divide='ignore', invalid='ignore'):
+			ratio = np.where(s0 > 0, vre / s0, np.inf)
+		out['sigma0_limit'] = float(q84)
+		out['v_sigma_limit'] = float(np.percentile(ratio, 16))
+	return out
 
 
 def summarize_posterior(inf_data, names):
@@ -146,6 +204,10 @@ def summarize_posterior(inf_data, names):
 	return summary
 
 
+# np.trapz was removed in numpy 2 (np.trapezoid since numpy 2.0)
+_trapezoid = getattr(np, 'trapezoid', None) or np.trapz
+
+
 def _kl_kde(post, prior, n_grid=1000):
 	"""KL(posterior || prior) via KDE — works for any prior shape."""
 	from scipy.stats import gaussian_kde
@@ -153,10 +215,10 @@ def _kl_kde(post, prior, n_grid=1000):
 	hi = max(post.max(), prior.max())
 	margin = 0.05 * (hi - lo) if hi > lo else 1.0
 	x = np.linspace(lo - margin, hi + margin, n_grid)
-	q = gaussian_kde(post)(x);  q /= np.trapz(q, x)
-	p = gaussian_kde(prior)(x); p /= np.trapz(p, x)
+	q = gaussian_kde(post)(x);  q /= _trapezoid(q, x)
+	p = gaussian_kde(prior)(x); p /= _trapezoid(p, x)
 	mask = q > 1e-10 * q.max()
-	return float(np.trapz(
+	return float(_trapezoid(
 		np.where(mask, q * np.log(np.clip(q, 1e-300, None) / np.clip(p, 1e-300, None)), 0.0), x))
 
 
@@ -225,11 +287,13 @@ def compute_information_gain(inf_data, param_names=None):
 	return Table(rows) if rows else Table(names=_empty_cols)
 
 
-def build_results_table(ID, kin_model, summary):
+def build_results_table(ID, kin_model, summary, limits=None):
 	"""Build an astropy Table from a posterior summary dict.
 
 	Columns are driven by the model's actual parameter specs plus the
-	derived-quantity registry — no hardcoded parameter names.
+	derived-quantity registry — no hardcoded parameter names. `limits` (from
+	sigma0_limits) adds sigma0_floor, sigma0_is_upper_limit, sigma0_limit and
+	v_sigma_limit columns.
 	"""
 	from .param_spec import all_param_specs
 
@@ -260,6 +324,10 @@ def build_results_table(ID, kin_model, summary):
 			row[f'amplitude_{obs_name}_50'] = float(stats['mean'])
 			row[f'amplitude_{obs_name}_84'] = float(stats['84'])
 
+	if limits is not None:
+		# booleans as 1/0 so the ascii table reads back as numbers
+		row.update({k: (int(v) if isinstance(v, bool) else v) for k, v in limits.items()})
+
 	return Table([row])
 
 
@@ -268,10 +336,20 @@ def build_results_table(ID, kin_model, summary):
 # ============================================================================
 
 def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
-                     sigma0_floor=20.0):
-	"""Compute derived posteriors, write results table, and save corner plot."""
+                     sigma0_floor=None, grism_objects=None):
+	"""Compute derived posteriors, write results table, and save corner plot.
+
+	sigma0_floor defaults to the instrumental floor of grism_objects (see
+	compute_derived_posterior). When sigma0 is unresolved (sigma0_limits), the
+	results table flags it and the corner plot quotes sigma0 < X and v/sigma > Y.
+	"""
 	inf_data = compute_derived_posterior(inf_data, kin_model, z_spec,
-	                                     sigma0_floor=sigma0_floor)
+	                                     sigma0_floor=sigma0_floor,
+	                                     grism_objects=grism_objects)
+	limits = sigma0_limits(inf_data, inf_data.posterior.attrs['sigma0_floor'])
+	if limits['sigma0_is_upper_limit']:
+		print(f"sigma0 unresolved (16th percentile < floor {limits['sigma0_floor']:.1f} km/s): "
+		      f"sigma0 < {limits['sigma0_limit']:.1f} km/s, v/sigma > {limits['v_sigma_limit']:.2f}")
 
 	gm = kin_model.galaxy_model
 	from .param_spec import all_param_specs
@@ -281,7 +359,7 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 	all_names = sampled_names + ['ellip'] + derived_names
 
 	summary = summarize_posterior(inf_data, all_names)
-	res = build_results_table(ID, kin_model, summary)
+	res = build_results_table(ID, kin_model, summary, limits=limits)
 	res.write(save_runs_path + output + '/' + str(ID) + '_results',
 	          format='ascii', overwrite=True)
 
@@ -301,26 +379,38 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 
 	# Filter out variables whose finite samples don't span a valid range (e.g. v_sigma
 	# when sigma0 is always below the floor → all NaN → matplotlib rejects NaN limits).
-	corner_vars, corner_labels, corner_ranges = [], [], []
+	# When sigma0 is unresolved, the v/sigma panel shows |v_re|/sigma0 over all
+	# samples (the distribution its lower limit is taken from), cut at its 90th
+	# percentile since it extends to infinity as sigma0 -> 0.
+	is_ul = limits['sigma0_is_upper_limit']
+	def _corner_column(var):
+		if var == 'v_sigma' and is_ul:
+			s0 = inf_data.posterior['sigma0'].values.ravel()
+			vre = np.abs(inf_data.posterior['v_re'].values.ravel())
+			with np.errstate(divide='ignore', invalid='ignore'):
+				return np.where(s0 > 0, vre / s0, np.nan)
+		return inf_data.posterior[var].values.ravel()
+
+	corner_vars, corner_labels, corner_ranges, columns = [], [], [], []
 	for var in candidate_vars:
 		if var not in inf_data.posterior:
 			continue
-		flat = inf_data.posterior[var].values.ravel()
+		flat = _corner_column(var)
 		finite = flat[np.isfinite(flat)]
 		if len(finite) < 10:
 			print(f'  Corner plot: skipping {var!r} (fewer than 10 finite samples)')
 			continue
 		lo = np.percentile(finite, 0.5)
-		hi = np.percentile(finite, 99.5)
+		hi = np.percentile(finite, 90 if (var == 'v_sigma' and is_ul) else 99.5)
 		if not (np.isfinite(lo) and np.isfinite(hi) and lo < hi):
 			print(f'  Corner plot: skipping {var!r} (degenerate range [{lo}, {hi}])')
 			continue
 		corner_vars.append(var)
-		corner_labels.append(all_labels.get(var, var))
+		corner_labels.append(r'$|v_{re}|/\sigma_0$' if (var == 'v_sigma' and is_ul) else all_labels.get(var, var))
 		corner_ranges.append((lo, hi))
+		columns.append(np.where(np.isfinite(flat), flat, np.nan))
 
-	data_matrix = np.column_stack(
-	    [inf_data.posterior[v].values.ravel() for v in corner_vars])
+	data_matrix = np.column_stack(columns)
 
 	# Pass the full data matrix (NaN rows kept so sigma0 is uncut).
 	# Quantile lines and titles are drawn manually with nanpercentile so columns
@@ -354,10 +444,21 @@ def save_fit_results(output, inf_data, kin_model, z_spec, ID, save_runs_path,
 		col = data_matrix[:, i]
 		q16, q50, q84 = np.nanpercentile(col, [16, 50, 84])
 		ax = axes[i, i]
-		for qval in (q16, q50, q84):
+		if is_ul and var == 'sigma0':
+			lines = (limits['sigma0_limit'],)          # upper limit only
+		elif is_ul and var == 'v_sigma':
+			lines = (limits['v_sigma_limit'],)         # lower limit only
+		else:
+			lines = (q16, q50, q84)
+		for qval in lines:
 			ax.axvline(qval, color='royalblue', linestyle='dashed', lw=1.5)
-		title = (f'{label}\n'
-		         f'${_fmt(q50)}' + r'^{+' + _fmt(q84 - q50) + r'}_{-' + _fmt(q50 - q16) + r'}$')
+		if var == 'sigma0' and limits['sigma0_is_upper_limit']:
+			title = f'{label}\n$<{_fmt(limits["sigma0_limit"])}$'
+		elif var == 'v_sigma' and limits['sigma0_is_upper_limit']:
+			title = f'{label}\n$>{_fmt(limits["v_sigma_limit"])}$'
+		else:
+			title = (f'{label}\n'
+			         f'${_fmt(q50)}' + r'^{+' + _fmt(q84 - q50) + r'}_{-' + _fmt(q50 - q16) + r'}$')
 		ax.set_title(title, fontsize=12)
 
 	plt.savefig(save_runs_path + output + '/' + str(ID) + '_derived_corner.png',
@@ -374,7 +475,7 @@ def process_results(output, master_cat, line, mock_params=None, test=None,
                     field=None, grism_filter='F444W', delta_wave_cutoff=0.02,
                     factor=5, wave_factor=10, model_name='Disk',
                     manual_psf_name=None, manual_grism_file=None,
-                    sigma0_floor=20.0, flux_scaling=None):
+                    sigma0_floor=None, flux_scaling=None):
 	"""Post-process single-observation inference data and save all outputs."""
 	z_spec, wavelength, wave_space, obs_map, obs_error, kin_model, grism_object, delta_wave = \
 		pre.run_full_preprocessing(
@@ -442,7 +543,8 @@ def process_results(output, master_cat, line, mock_params=None, test=None,
 	wave_space = wave_space[index_min:index_max]
 
 	save_fit_results(output, inf_data, kin_model, z_spec, ID,
-	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor)
+	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor,
+	                 grism_objects=grism_object)
 
 	summary = summarize_posterior(inf_data, [dq.name for dq in DERIVED_QUANTITIES])
 	kin_model.plot_summary(obs_map, obs_error, inf_data, wave_space,
@@ -458,7 +560,7 @@ def process_results_multi(observations, results, output, master_cat, line,
                           grism_filter='F444W', delta_wave_cutoff=0.02,
                           factor=5, wave_factor=10, model_name='Disk',
                           manual_psf_name=None, manual_grism_file=None,
-                          sigma0_floor=20.0):
+                          sigma0_floor=None):
 	"""Post-process multi-observation inference data and save all outputs."""
 	from . import plotting
 
@@ -482,7 +584,8 @@ def process_results_multi(observations, results, output, master_cat, line,
 	wave_space = wave_space[index_min:index_max]
 
 	save_fit_results(output, inf_data, kin_model, z_spec, ID,
-	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor)
+	                 save_runs_path=save_runs_path, sigma0_floor=sigma0_floor,
+	                 grism_objects=[obs.grism for obs in observations])
 
 	summary = summarize_posterior(inf_data, [dq.name for dq in DERIVED_QUANTITIES])
 
