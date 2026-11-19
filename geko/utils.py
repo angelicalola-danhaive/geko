@@ -402,8 +402,9 @@ def save_fits_image(image, masked_indices, inference_data, filename):
 
     hdul.writeto(filename, overwrite=True)
     
-# Pixel scale assumed for PSF files whose header doesn't state one: the
-# mpsf_*.fits empirical PSFs are at 2x the LW detector sampling.
+# Pixel scale of the legacy mpsf_*.fits empirical PSFs (2x the LW detector
+# sampling), used only by load_psf/downsample_psf_centered. The fitting path
+# reads the scale from the PSF header and raises an error if it is missing.
 DEFAULT_PSF_PIXEL_SCALE_ARCSEC = 0.031
 
 

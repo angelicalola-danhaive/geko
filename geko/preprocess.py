@@ -412,9 +412,9 @@ def run_full_preprocessing(output, master_cat, line, mock_params=None, priors=No
         PSF, psf_header = fits.getdata(psf_path, header=True)
         psf_scale = utils.read_psf_pixel_scale(psf_header, fits.getheader(psf_path, 0))
         if psf_scale is None:
-            psf_scale = utils.DEFAULT_PSF_PIXEL_SCALE_ARCSEC
-            print(f"WARNING: no PIXELSCL/PIXSCALE keyword in {psf_path}; assuming "
-                  f"{psf_scale} arcsec/px. Add PIXELSCL to the PSF header if this is wrong.")
+            raise ValueError(
+                f"No PIXELSCL/PIXSCALE keyword in the header of {psf_path}: the PSF pixel "
+                f"scale is unknown. Add PIXELSCL (arcsec/px) to the PSF header.")
         model_scale = wcs_utils.GRISM_PIXEL_SCALE_ARCSEC / factor
         if abs(psf_scale - model_scale) / model_scale < 0.01:
             # PSF already at model resolution (e.g. an optical STPSF PSF computed with
