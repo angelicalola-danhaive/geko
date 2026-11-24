@@ -55,7 +55,7 @@ class MorphologyModel(BaseModel):
 
         Keys should follow the pattern {param_name}_{mu|std|min|max},
         e.g. 'r_eff_mu', 'r_eff_std', 'n_mu', 'PA_morph_mu', etc.
-        Unknown keys are silently ignored.
+        Keys that have no effect are printed (see param_spec._apply_overrides_to_specs).
         """
         self.apply_prior_overrides(catalog_row)
 
@@ -72,9 +72,10 @@ class SersicMorphology(MorphologyModel):
         super().__init__(*args, **kwargs)
         self._enforce_n_min()
 
-    def apply_prior_overrides(self, overrides: dict):
-        super().apply_prior_overrides(overrides)
+    def apply_prior_overrides(self, overrides: dict, report_unknown: bool = True):
+        matched = super().apply_prior_overrides(overrides, report_unknown)
         self._enforce_n_min()
+        return matched
 
     def _enforce_n_min(self):
         for spec in self.parameters:

@@ -74,7 +74,10 @@ class FitConfiguration:
         (default: ['Arctan']).
     morph_prior_overrides : dict
         Override morphology ParameterSpec priors. Keys follow the pattern
-        {param_name}_{mu|std|min|max}, e.g. 'r_eff_mu', 'n_std'.
+        {param_name}_{mu|std|min|max}, e.g. 'r_eff_mu', 'n_std', and
+        {param_name}_type ('Uniform', 'Normal' or 'TruncatedNormal') changes the
+        prior shape. Uniform priors use only min/max, Normal only mu/std; keys
+        that have no effect are printed as warnings.
     rot_prior_overrides : dict
         Override rotation component ParameterSpec priors (same key convention).
     geom_prior_overrides : dict

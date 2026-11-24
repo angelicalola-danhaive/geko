@@ -363,15 +363,18 @@ class GalaxyModel:
 
 	def apply_config_overrides(self, config):
 		"""Apply config override dicts to morph, shared kinematics, and rotation components."""
-		from .param_spec import _apply_overrides_to_specs
+		from .param_spec import _apply_overrides_to_specs, _report_unknown_overrides
 
 		if config.morph_prior_overrides:
 			self.morph_model.apply_prior_overrides(config.morph_prior_overrides)
 		if config.geom_prior_overrides:
 			_apply_overrides_to_specs(self.shared_kin_specs, config.geom_prior_overrides)
 		if config.rot_prior_overrides:
+			# one dict for all rotation components: report unknown keys once, across all of them
+			matched = set()
 			for comp in self.rot_model.components:
-				comp.apply_prior_overrides(config.rot_prior_overrides)
+				matched |= comp.apply_prior_overrides(config.rot_prior_overrides, report_unknown=False)
+			_report_unknown_overrides(config.rot_prior_overrides, matched)
 		if config.fixed_params:
 			self.apply_fixed_params(config.fixed_params)
 

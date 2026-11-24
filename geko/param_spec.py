@@ -44,14 +44,56 @@ def _apply_fixed_to_specs(specs: list, fixed_params: dict):
                 spec.fixed_value = value
 
 
-def _apply_overrides_to_specs(specs: list, overrides: dict):
-    """Override prior bounds/mu/std from a flat dict of {param_name_suffix: value}.
-    E.g. {'r_eff_max': 5.0, 'PA_mu': 45.0}. Unknown keys are silently ignored."""
+# Which override suffixes each prior shape actually uses
+_PRIOR_TYPE_SUFFIXES = {
+    'Uniform':         ('min', 'max'),
+    'Normal':          ('mu', 'std'),
+    'TruncatedNormal': ('min', 'max', 'mu', 'std'),
+}
+
+
+def _apply_overrides_to_specs(specs: list, overrides: dict, report_unknown: bool = True):
+    """Override priors from a flat dict of {param_name}_{suffix}: value.
+
+    Suffixes: 'min', 'max', 'mu', 'std', and 'type' to change the prior shape
+    ('Uniform', 'Normal' or 'TruncatedNormal'), e.g.
+    {'r_eff_max': 5.0, 'PA_mu': 45.0, 'Va_type': 'TruncatedNormal', 'Va_mu': 0.0, 'Va_std': 200.0}.
+    A '_type' key is applied before the other keys of the same parameter.
+
+    Keys that have no effect are printed: a suffix the parameter's prior shape does
+    not use (e.g. 'Va_mu' on a Uniform Va), and, if report_unknown, keys that match
+    no parameter in `specs`. Returns the set of keys that matched a parameter.
+    """
+    matched = set()
     for spec in specs:
+        type_key = f'{spec.name}_type'
+        if type_key in overrides:
+            new_type = overrides[type_key]
+            if new_type not in _PRIOR_TYPE_SUFFIXES:
+                raise ValueError(f"{type_key} = {new_type!r}: must be one of {list(_PRIOR_TYPE_SUFFIXES)}")
+            spec.prior_type = new_type
+            matched.add(type_key)
         for suffix in ('min', 'max', 'mu', 'std'):
             key = f'{spec.name}_{suffix}'
             if key in overrides:
                 setattr(spec, f'prior_{suffix}', overrides[key])
+                matched.add(key)
+                used = _PRIOR_TYPE_SUFFIXES.get(spec.prior_type, ())
+                if suffix not in used:
+                    print(f"WARNING: prior override {key} is ignored: {spec.name} has a "
+                          f"{spec.prior_type} prior, which only uses "
+                          f"{', '.join(spec.name + '_' + s for s in used)}. "
+                          f"Set {type_key} to change the prior shape.")
+    if report_unknown:
+        _report_unknown_overrides(overrides, matched)
+    return matched
+
+
+def _report_unknown_overrides(overrides: dict, matched: set):
+    """Print override keys that matched no parameter (typo, or the wrong override dict)."""
+    unknown = sorted(set(overrides) - set(matched))
+    if unknown:
+        print(f"WARNING: prior overrides ignored, no such parameter here: {unknown}")
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +188,8 @@ class BaseModel(ABC):
     def __init__(self):
         self.parameters = deepcopy(self._DEFAULT_PARAMETERS)
 
-    def apply_prior_overrides(self, overrides: dict):
-        _apply_overrides_to_specs(self.parameters, overrides)
+    def apply_prior_overrides(self, overrides: dict, report_unknown: bool = True):
+        return _apply_overrides_to_specs(self.parameters, overrides, report_unknown)
 
     def _sample(self, context: dict = None) -> dict:
         return sample_specs(self.parameters, context)
